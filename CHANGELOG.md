@@ -8,3 +8,7 @@ Entries are added in the PR that makes the change (plan §1.3, item 9) — 1–3
 under "Unreleased", only for changes a user would notice.
 
 ## [Unreleased]
+
+### Added
+- API service (`apps/api`) with `GET /healthz`, reporting application version and
+  the commit its image was built from.

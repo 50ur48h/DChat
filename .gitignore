@@ -37,7 +37,6 @@ MANIFEST
 .venv/
 venv/
 ENV/
-.python-version
 .uv/
 .ruff_cache/
 .mypy_cache/

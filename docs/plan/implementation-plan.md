@@ -527,7 +527,7 @@ Format per WP: **Branch → Build → Tests → Accept** (accept = commands/chec
 - **Accept:** repo exists; protection active (`gh api repos/$R/branches/main/protection` returns rules); STATUS shows WP0.1 `[x]` via a follow-up PR — from here on, everything is a PR.
 
 ### WP0.2 — API skeleton — `p0.2-api-skeleton`
-- `apps/api`: `uv init`; `pyproject.toml` pinning python 3.12; deps: fastapi, uvicorn[standard], pydantic-settings, orjson; dev: ruff, pyright, pytest, pytest-asyncio, httpx, pytest-cov.
+- `apps/api`: `uv init`; `pyproject.toml` pinning python 3.12; deps: fastapi, uvicorn[standard], pydantic-settings (~~orjson~~ — dropped, see DECISIONS D-005); dev: ruff, pyright, pytest, pytest-asyncio, httpx, pytest-cov.
 - `src/dataagent/main.py` (app factory), `config.py` (pydantic-settings, `.env` support), `GET /healthz` → `{status, version, git_sha}`.
 - Multi-stage `Dockerfile` (uv sync → slim runtime, non-root user); targets `dev` and `prod`.
 - Root `Makefile` first cut: `lint.api typecheck.api test.api fmt.api api.dev`.

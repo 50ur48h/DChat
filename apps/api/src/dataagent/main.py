@@ -1,0 +1,49 @@
+"""FastAPI application factory.
+
+Kept deliberately thin: it wires configuration, middleware and routers, and
+nothing else. Everything with behaviour lives in a package that can be tested
+without an HTTP server.
+"""
+
+from __future__ import annotations
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from dataagent import health
+from dataagent.config import Settings, get_settings
+
+
+def create_app(settings: Settings | None = None) -> FastAPI:
+    """Build the application.
+
+    Accepting settings makes the factory testable without touching the process
+    environment; production callers pass nothing and get the cached settings.
+    """
+    resolved = settings if settings is not None else get_settings()
+
+    app = FastAPI(
+        title="data-agent API",
+        version=health.resolve_version(),
+    )
+
+    if settings is not None:
+        # Routes read settings through the dependency, so overriding it here is
+        # what makes an injected Settings object reach them.
+        app.dependency_overrides[get_settings] = lambda: resolved
+
+    # The web app is the only first-party client (arch 7.2 — no APIM in V1).
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(resolved.cors_origins),
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    app.include_router(health.router)
+
+    return app
+
+
+app = create_app()
