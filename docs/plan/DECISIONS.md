@@ -43,6 +43,21 @@ does not exist yet; the protection that matters in that window (no direct pushes
 no force-push, no branch deletion) is live from commit one. Plan §4.5 updated to
 say the same thing so the document does not lie.
 
+## D-005 — `orjson` dropped from the API dependencies
+Date: 2026-08-10 · Phase: 0 · PR: WP0.2
+Context: Plan §6 WP0.2 lists `orjson` as a runtime dependency. Its only purpose
+there is FastAPI's `ORJSONResponse`, which the installed FastAPI marks
+**deprecated**: the framework now serialises directly to JSON bytes through
+pydantic when a route declares a return type, which is faster than the custom
+response class. pyright in strict mode fails the build on the deprecation.
+Options: (a) keep `ORJSONResponse` and suppress the deprecation; (b) keep the
+dependency unused "for later"; (c) drop it until something actually needs it.
+Decision: (c). Routes declare return types, so serialisation is already the fast
+path. `orjson` returns as a direct dependency in the phase that genuinely needs
+it — result-artifact serialisation (P5) or event payloads (P7) — not before.
+Consequences: one fewer unused dependency in the image and in the audit surface
+of a public repo. Plan §6 WP0.2's dependency list updated to match.
+
 ## D-004 — Decision records live in `docs/plan/DECISIONS.md`, not `docs/adr/`
 Date: 2026-08-10 · Phase: 0 · PR: — (WP0.1, direct push to main)
 Context: Architecture Part 13.6 puts decision records in a `docs/adr/` directory;

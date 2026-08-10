@@ -1,13 +1,13 @@
 # STATUS — data-agent build
 
-Current position: Phase 0 / WP0.1 (in progress — pushed to main, checkbox flips in the first PR)
+Current position: Phase 0 / WP0.2 (PR open, awaiting review)
 Merge policy: ASK
-Blocked on user: —
+Blocked on user: review + merge of this PR
 Last updated: 2026-08-10 by Claude Code
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
-- [ ] WP0.1 Repo, docs, tracking files, branch protection
-- [ ] WP0.2 API skeleton (FastAPI, /healthz, tooling, Dockerfile)
+- [x] WP0.1 Repo, docs, tracking files, branch protection
+- [x] WP0.2 API skeleton (FastAPI, /healthz, tooling, Dockerfile)
 - [ ] WP0.3 Web skeleton (Next.js, health page, tooling, Dockerfile)
 - [ ] WP0.4 Compose stack + Makefile + pizza seed v0
 - [ ] WP0.5 CI v1 (lint/type/test/build, gitleaks, TODO check)   ← gate PR
