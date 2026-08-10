@@ -1,15 +1,15 @@
 # STATUS — data-agent build
 
-Current position: Phase 0 / WP0.3 (PR open, awaiting review)
+Current position: Phase 0 / WP0.4 (PR open, awaiting review)
 Merge policy: ASK
-Blocked on user: review + merge of the WP0.3 PR — WP0.4 needs it
+Blocked on user: review + merge of the WP0.4 PR — WP0.5 is the Phase 0 gate
 Last updated: 2026-08-10 by Claude Code
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
 - [x] WP0.1 Repo, docs, tracking files, branch protection
 - [x] WP0.2 API skeleton (FastAPI, /healthz, tooling, Dockerfile)
 - [x] WP0.3 Web skeleton (Next.js, health page, tooling, Dockerfile)
-- [ ] WP0.4 Compose stack + Makefile + pizza seed v0
+- [x] WP0.4 Compose stack + Makefile + pizza seed v0
 - [ ] WP0.5 CI v1 (lint/type/test/build, gitleaks, TODO check)   ← gate PR
 - [ ] GATE: compose up → page calls API; CI green on main; user sign-off
 
@@ -89,8 +89,10 @@ Last updated: 2026-08-10 by Claude Code
 - **WP0.1** shipped as the single allowed direct push to `main` (plan §6, Phase 0).
   Its checkbox was flipped to `[x]` in the first follow-up PR (WP0.2), because a WP
   is only marked done through a PR (plan §1.3).
-- **WP0.2 and WP0.3 were built in parallel** off `main`. WP0.2 merged first (#1);
-  this branch was rebased onto it, unioning the root `Makefile` and the tracking
-  files. **WP0.4 starts once WP0.3 is merged.**
+- **WP0.2 and WP0.3 were built in parallel** off `main` and merged as #1 and #2;
+  the second was rebased onto the first, unioning the root `Makefile`.
+- **WP0.4** ships the local stack. The Phase 0 gate demo (`make up` → the page
+  shows the API healthy) is ready to run; WP0.5 adds CI and then the gate is
+  yours to sign off.
 - Branch protection required status checks are added in **WP0.5**, when the CI job
   names first exist. See DECISIONS D-003.

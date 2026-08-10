@@ -1,0 +1,124 @@
+# Local development stack (plan WP0.4, architecture Part 9.2).
+#
+# Always drive this through the Makefile — `make up`, `make down`, `make logs`.
+# The targets pass `--env-file .env` from the repository root; relative paths
+# below resolve against this file's directory, which is the compose project dir.
+#
+# No credentials live in this file. Every password comes from the root `.env`,
+# which is gitignored; `.env.example` documents each one (plan §1.4).
+
+name: dataagent
+
+services:
+  # The platform's own database: tenants, catalog, runs, events, pgvector.
+  platform-pg:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: ${PLATFORM_DB_NAME:-dataagent}
+      POSTGRES_USER: ${PLATFORM_DB_USER:-dataagent}
+      POSTGRES_PASSWORD: ${PLATFORM_DB_PASSWORD:?set PLATFORM_DB_PASSWORD in .env}
+    ports:
+      - "${PLATFORM_DB_PORT:-5432}:5432"
+    volumes:
+      - platform-pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U ${PLATFORM_DB_USER:-dataagent} -d ${PLATFORM_DB_NAME:-dataagent}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  # A stand-in for a *customer's* database. The platform reaches it read-only,
+  # exactly as it will reach a real one. Deliberately has no order_items table.
+  seed-pizza-pg:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${SEED_PIZZA_DB:-pizza}
+      POSTGRES_USER: ${SEED_PIZZA_USER:-pizza}
+      POSTGRES_PASSWORD: ${SEED_PIZZA_PASSWORD:?set SEED_PIZZA_PASSWORD in .env}
+    ports:
+      - "${SEED_PIZZA_PORT:-6543}:5432"
+    volumes:
+      - seed-pizza-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SEED_PIZZA_USER:-pizza} -d ${SEED_PIZZA_DB:-pizza}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  api:
+    build:
+      context: ../apps/api
+      target: dev
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
+    environment:
+      ENV: local
+      GIT_SHA: ${GIT_SHA:-dev}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      # Source only: never mount over /app/.venv, which is built into the image.
+      - ../apps/api/src:/app/src
+    depends_on:
+      platform-pg:
+        condition: service_healthy
+      seed-pizza-pg:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2).status == 200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  web:
+    build:
+      context: ../apps/web
+      target: dev
+    environment:
+      # The browser resolves this, not the container, so it is a host URL.
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      # Bind mounts on Windows and macOS do not deliver inotify events.
+      WATCHPACK_POLLING: "true"
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    volumes:
+      - ../apps/web/src:/app/src
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      # `next dev` compiles on first request, so this probe is also what warms
+      # the page — without it `make up` returns before anything is servable.
+      test:
+        ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+
+  # Started on demand from Phase 3 (`make up.mssql`): the image is ~1.5 GB and
+  # idles on ~2 GB of RAM, so it stays out of the default `make up`.
+  # WP3.3 adds its healthcheck and seed script.
+  mssql:
+    profiles: ["mssql"]
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?set MSSQL_SA_PASSWORD in .env}
+    ports:
+      - "${MSSQL_PORT:-1433}:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+
+volumes:
+  platform-pg-data:
+  seed-pizza-data:
+  mssql-data:
