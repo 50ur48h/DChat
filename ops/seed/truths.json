@@ -1,0 +1,445 @@
+{
+  "$comment": "Ground truth for the pizza demo dataset, written by ops/seed/seed_pizza.py. Regenerate with `make seed` or `make truths`; `make check.truths` fails if this file and the generator disagree. Phase 9 evals must read expected answers from here, never hardcode them.",
+  "customers": {
+    "repeat_customers": 7861,
+    "repeat_rate": 0.984471,
+    "total": 8000,
+    "with_at_least_one_order": 7985
+  },
+  "date_range_example": {
+    "$comment": "Golden eval #18 asks for a bounded range; this is the answer.",
+    "completed_orders": 1917,
+    "from": "2026-03-01",
+    "revenue": 67644.85,
+    "to": "2026-03-15"
+  },
+  "decline": {
+    "affected_pct": -0.525469,
+    "channel": "delivery",
+    "overall_pct": -0.121141,
+    "previous_window": [
+      "2026-04-11",
+      "2026-06-05"
+    ],
+    "recent_window": [
+      "2026-06-06",
+      "2026-07-31"
+    ],
+    "store_id": 3,
+    "store_name": "Northgate",
+    "unaffected_pct": -0.011296,
+    "weeks": 8
+  },
+  "definitions": {
+    "average_order_value": "revenue / completed order count",
+    "revenue": "SUM(orders.total_amount) WHERE status = 'completed'"
+  },
+  "generator": {
+    "rng_seed": 20260810,
+    "script": "ops/seed/seed_pizza.py",
+    "window_end": "2026-07-31",
+    "window_start": "2025-02-01"
+  },
+  "orders": {
+    "busiest_weekday": "saturday",
+    "by_status": {
+      "cancelled": 3190,
+      "completed": 66829,
+      "refunded": 1779
+    },
+    "cancelled_rate": 0.04443,
+    "completed": 66829,
+    "in_july_2026": 3718,
+    "total": 71798
+  },
+  "revenue": {
+    "by_channel": [
+      {
+        "average_order_value": 36.12,
+        "channel": "delivery",
+        "orders": 32235,
+        "revenue": 1164308.12
+      },
+      {
+        "average_order_value": 43.59,
+        "channel": "dine_in",
+        "orders": 14579,
+        "revenue": 635448.33
+      },
+      {
+        "average_order_value": 29.39,
+        "channel": "pickup",
+        "orders": 20015,
+        "revenue": 588145.27
+      }
+    ],
+    "by_month": [
+      {
+        "average_order_value": 35.38,
+        "month": "2025-02",
+        "orders": 3379,
+        "revenue": 119558.51
+      },
+      {
+        "average_order_value": 36.29,
+        "month": "2025-03",
+        "orders": 3849,
+        "revenue": 139661.27
+      },
+      {
+        "average_order_value": 35.82,
+        "month": "2025-04",
+        "orders": 3583,
+        "revenue": 128351.33
+      },
+      {
+        "average_order_value": 35.65,
+        "month": "2025-05",
+        "orders": 3827,
+        "revenue": 136427.11
+      },
+      {
+        "average_order_value": 35.75,
+        "month": "2025-06",
+        "orders": 3685,
+        "revenue": 131734.57
+      },
+      {
+        "average_order_value": 35.64,
+        "month": "2025-07",
+        "orders": 3632,
+        "revenue": 129458.65
+      },
+      {
+        "average_order_value": 35.54,
+        "month": "2025-08",
+        "orders": 3806,
+        "revenue": 135251.95
+      },
+      {
+        "average_order_value": 35.94,
+        "month": "2025-09",
+        "orders": 3572,
+        "revenue": 128370.86
+      },
+      {
+        "average_order_value": 36.06,
+        "month": "2025-10",
+        "orders": 3703,
+        "revenue": 133543.92
+      },
+      {
+        "average_order_value": 35.61,
+        "month": "2025-11",
+        "orders": 3746,
+        "revenue": 133380.54
+      },
+      {
+        "average_order_value": 35.91,
+        "month": "2025-12",
+        "orders": 3792,
+        "revenue": 136159.76
+      },
+      {
+        "average_order_value": 36.04,
+        "month": "2026-01",
+        "orders": 3952,
+        "revenue": 142449.42
+      },
+      {
+        "average_order_value": 35.33,
+        "month": "2026-02",
+        "orders": 3590,
+        "revenue": 126829.82
+      },
+      {
+        "average_order_value": 35.7,
+        "month": "2026-03",
+        "orders": 3895,
+        "revenue": 139069.36
+      },
+      {
+        "average_order_value": 35.62,
+        "month": "2026-04",
+        "orders": 3817,
+        "revenue": 135950.59
+      },
+      {
+        "average_order_value": 35.81,
+        "month": "2026-05",
+        "orders": 4059,
+        "revenue": 145341.12
+      },
+      {
+        "average_order_value": 35.23,
+        "month": "2026-06",
+        "orders": 3510,
+        "revenue": 123650.61
+      },
+      {
+        "average_order_value": 35.76,
+        "month": "2026-07",
+        "orders": 3432,
+        "revenue": 122712.33
+      }
+    ],
+    "by_store": [
+      {
+        "average_order_value": 35.77,
+        "orders": 8810,
+        "revenue": 315108.87,
+        "store_id": 1,
+        "store_name": "Harbourview"
+      },
+      {
+        "average_order_value": 35.88,
+        "orders": 7569,
+        "revenue": 271584.17,
+        "store_id": 2,
+        "store_name": "Cuba Street"
+      },
+      {
+        "average_order_value": 35.56,
+        "orders": 22046,
+        "revenue": 783916.69,
+        "store_id": 3,
+        "store_name": "Northgate"
+      },
+      {
+        "average_order_value": 35.67,
+        "orders": 11493,
+        "revenue": 409916.12,
+        "store_id": 4,
+        "store_name": "Ponsonby Road"
+      },
+      {
+        "average_order_value": 35.96,
+        "orders": 9364,
+        "revenue": 336756.52,
+        "store_id": 5,
+        "store_name": "Riccarton"
+      },
+      {
+        "average_order_value": 35.86,
+        "orders": 7547,
+        "revenue": 270619.35,
+        "store_id": 6,
+        "store_name": "Papanui"
+      }
+    ],
+    "by_store_channel": [
+      {
+        "average_order_value": 36.38,
+        "orders": 3763,
+        "revenue": 136883.22,
+        "store_channel": [
+          1,
+          "delivery"
+        ]
+      },
+      {
+        "average_order_value": 43.58,
+        "orders": 2195,
+        "revenue": 95667.1,
+        "store_channel": [
+          1,
+          "dine_in"
+        ]
+      },
+      {
+        "average_order_value": 28.95,
+        "orders": 2852,
+        "revenue": 82558.55,
+        "store_channel": [
+          1,
+          "pickup"
+        ]
+      },
+      {
+        "average_order_value": 36.44,
+        "orders": 3127,
+        "revenue": 113939.96,
+        "store_channel": [
+          2,
+          "delivery"
+        ]
+      },
+      {
+        "average_order_value": 43.56,
+        "orders": 1901,
+        "revenue": 82810.36,
+        "store_channel": [
+          2,
+          "dine_in"
+        ]
+      },
+      {
+        "average_order_value": 29.45,
+        "orders": 2541,
+        "revenue": 74833.85,
+        "store_channel": [
+          2,
+          "pickup"
+        ]
+      },
+      {
+        "average_order_value": 35.93,
+        "orders": 13350,
+        "revenue": 479726.61,
+        "store_channel": [
+          3,
+          "delivery"
+        ]
+      },
+      {
+        "average_order_value": 43.58,
+        "orders": 3422,
+        "revenue": 149121.07,
+        "store_channel": [
+          3,
+          "dine_in"
+        ]
+      },
+      {
+        "average_order_value": 29.4,
+        "orders": 5274,
+        "revenue": 155069.01,
+        "store_channel": [
+          3,
+          "pickup"
+        ]
+      },
+      {
+        "average_order_value": 35.85,
+        "orders": 4878,
+        "revenue": 174867.69,
+        "store_channel": [
+          4,
+          "delivery"
+        ]
+      },
+      {
+        "average_order_value": 43.44,
+        "orders": 2863,
+        "revenue": 124362.25,
+        "store_channel": [
+          4,
+          "dine_in"
+        ]
+      },
+      {
+        "average_order_value": 29.5,
+        "orders": 3752,
+        "revenue": 110686.18,
+        "store_channel": [
+          4,
+          "pickup"
+        ]
+      },
+      {
+        "average_order_value": 36.34,
+        "orders": 3939,
+        "revenue": 143137.47,
+        "store_channel": [
+          5,
+          "delivery"
+        ]
+      },
+      {
+        "average_order_value": 43.6,
+        "orders": 2329,
+        "revenue": 101550.25,
+        "store_channel": [
+          5,
+          "dine_in"
+        ]
+      },
+      {
+        "average_order_value": 29.74,
+        "orders": 3096,
+        "revenue": 92068.8,
+        "store_channel": [
+          5,
+          "pickup"
+        ]
+      },
+      {
+        "average_order_value": 36.42,
+        "orders": 3178,
+        "revenue": 115753.17,
+        "store_channel": [
+          6,
+          "delivery"
+        ]
+      },
+      {
+        "average_order_value": 43.84,
+        "orders": 1869,
+        "revenue": 81937.3,
+        "store_channel": [
+          6,
+          "dine_in"
+        ]
+      },
+      {
+        "average_order_value": 29.17,
+        "orders": 2500,
+        "revenue": 72928.88,
+        "store_channel": [
+          6,
+          "pickup"
+        ]
+      }
+    ],
+    "slowest_week_starting": "2025-01-27",
+    "top_store_by_revenue": 3,
+    "total": 2387901.72
+  },
+  "row_counts": {
+    "customers": 8000,
+    "menu_items": 42,
+    "orders": 71798,
+    "payments": 68608,
+    "staff": 72,
+    "stores": 6
+  },
+  "staff_by_store": [
+    {
+      "staff": 12,
+      "store_id": 1,
+      "store_name": "Harbourview"
+    },
+    {
+      "staff": 12,
+      "store_id": 2,
+      "store_name": "Cuba Street"
+    },
+    {
+      "staff": 12,
+      "store_id": 3,
+      "store_name": "Northgate"
+    },
+    {
+      "staff": 12,
+      "store_id": 4,
+      "store_name": "Ponsonby Road"
+    },
+    {
+      "staff": 12,
+      "store_id": 5,
+      "store_name": "Riccarton"
+    },
+    {
+      "staff": 12,
+      "store_id": 6,
+      "store_name": "Papanui"
+    }
+  ],
+  "unanswerable": {
+    "$comment": "There is no order_items table and no join path from orders to menu_items, so these must produce an honest refusal, not a number.",
+    "examples": [
+      "Which menu items sell best?",
+      "What is the revenue per pizza type?"
+    ]
+  }
+}
