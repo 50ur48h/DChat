@@ -10,13 +10,32 @@ not microservices (arch Part 2.2).
 src/dataagent/
   main.py      app factory + GET /healthz
   config.py    pydantic-settings; the only sanctioned way to read configuration
-tests/         pytest, ASGI in-process (no ports, no network)
+  health.py    the liveness probe
+  db/          models, engine, alembic migrations
+tests/         pytest; ASGI in-process, plus db/ against a real Postgres
 ```
 
-Packages arrive with their phase: `auth/` and `tenancy/` (P1–P2), `connectors/`
+Packages arrive with their phase: `tenancy/` (P1), `auth/` (P2), `connectors/`
 and `datasources/` (P3), `catalog/` (P4), `dal/` (P5), `llm/` (P6), `agent/` and
 `runs/` (P7+). The full target tree is in [architecture.md](../../docs/architecture.md)
 Part 13.6.
+
+## Migrations
+
+```bash
+make migrate                      # alembic upgrade head
+make migration m="add widgets"    # autogenerate a revision, then read it
+make migrate.down                 # roll back one revision
+```
+
+Revisions live in `src/dataagent/db/alembic/versions/`. Always read a generated
+revision before committing it — autogenerate is a first draft, not an author.
+A test asserts that models and migrations do not drift, so a model edit without a
+migration fails the build.
+
+Tests under `tests/db/` need a PostgreSQL server. They skip when none is
+reachable so `make test.api` still works without Docker; CI sets `REQUIRE_DB=1`,
+which turns that skip into a failure.
 
 ## Local development
 
