@@ -1,0 +1,49 @@
+/*
+ * Minimal foundation. No font downloads at build time — `next/font/google`
+ * would make `docker build` and CI depend on network access to Google's CDN.
+ */
+
+:root {
+  --background: #ffffff;
+  --surface: #fafafa;
+  --foreground: #171717;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --ok: #16a34a;
+  --bad: #dc2626;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --surface: #141414;
+    --foreground: #ededed;
+    --muted: #9ca3af;
+    --border: #262626;
+    --ok: #22c55e;
+    --bad: #f87171;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}

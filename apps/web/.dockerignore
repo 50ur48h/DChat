@@ -1,0 +1,15 @@
+# Keep the build context small and secret-free.
+node_modules
+.next
+out
+build
+coverage
+.env
+.env.*
+!.env.example
+*.log
+.git
+.gitignore
+Dockerfile
+.dockerignore
+README.md

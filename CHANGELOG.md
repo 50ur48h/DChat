@@ -12,3 +12,5 @@ under "Unreleased", only for changes a user would notice.
 ### Added
 - API service (`apps/api`) with `GET /healthz`, reporting application version and
   the commit its image was built from.
+- Web app (`apps/web`) with a landing page that reports whether the API is
+  reachable, along with its version and build commit.
