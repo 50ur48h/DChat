@@ -39,16 +39,32 @@ the phases deliver them.
 
 ## Quickstart
 
-Not yet available — the local stack arrives in **WP0.4**. Once it does:
-
 ```bash
-cp .env.example .env     # no real secrets required for the local stack
-make up                  # platform Postgres + seed databases + api + web
-make seed                # build the pizza demo dataset
-# open http://localhost:3000
+make up      # .env from .env.example, then platform Postgres + demo DB + api + web
+make seed    # build the pizza demo dataset (~72k orders, about 5 seconds)
 ```
 
-Prerequisites: Docker + Compose, Python 3.12 via [uv](https://docs.astral.sh/uv/)
+Then open <http://localhost:3000>: the page reports the API's health, version and
+build commit. `make down` stops everything and keeps the data; `make down.hard`
+throws the volumes away. `make logs` follows all services, `make ps` shows status.
+
+| Service | Where | What it is |
+|---|---|---|
+| web | http://localhost:3000 | Next.js app |
+| api | http://localhost:8000/healthz | FastAPI service |
+| platform-pg | localhost:5432 | the platform's own database (pgvector) |
+| seed-pizza-pg | localhost:6543 | stands in for a *customer's* database |
+
+`seed-pizza-pg` holds a generated 18-month pizza-chain dataset. It is a fixture
+with deliberate properties — no `order_items` table, so item-level questions are
+genuinely unanswerable, and a ~12% revenue decline in the final eight weeks that
+comes entirely from one store's delivery orders. Both exist to exercise the
+agent's honesty and its research loop later on; `ops/seed/seed_pizza.py`
+documents them and checks them on every run.
+
+### Prerequisites
+
+Docker + Compose, Python 3.12 via [uv](https://docs.astral.sh/uv/)
 (`uv python install 3.12` provisions it — no system Python needed), Node 22 via
 [pnpm](https://pnpm.io/), and GNU **make**, which is how every command in this
 repo is invoked. macOS and Linux have it; on Windows:
