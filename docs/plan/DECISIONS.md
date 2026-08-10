@@ -1,0 +1,58 @@
+# DECISIONS — deviations & choices made during the build
+
+Format (plan §1.6): context → options → decision → consequences, 5–15 lines.
+Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
+architecture doc, both in the same PR as the code.
+
+## D-001 — Local secrets backend before Key Vault (pre-approved)
+Date: 2026-08-10 · Phase: 3 · PR: #NN
+Context: Arch M3 lists Key Vault as a dependency, but Azure arrives in Phase 12.
+Decision: Implement SecretsProvider with an encrypted local-file backend
+(Fernet, key from .env) for dev; KeyVaultSecretsProvider lands in WP12.2
+behind the same interface. Prod images refuse to start with the local backend.
+Consequences: zero Azure cost until Phase 12; interface proven early.
+
+## D-002 — GitHub repository is named `DChat`; the project stays `data-agent`
+Date: 2026-08-10 · Phase: 0 · PR: — (WP0.1, direct push to main)
+Context: Architecture Part 2.3 and 13.6 name the monorepo `data-agent/`. The
+GitHub repository that already exists for this build is `50ur48h/DChat`.
+Options: (a) rename the GitHub repo to `data-agent`; (b) rename every internal
+identifier to `dchat`; (c) let the remote name and the project name differ.
+Decision: (c). The repository *name* on GitHub is `DChat`. Everything inside it
+keeps the names the plan and architecture use: `apps/api`, `apps/web`, the Python
+package `dataagent`, compose services, Azure resource naming (`rg-dataagent-*`).
+Consequences: one cosmetic mismatch between the clone directory and the project
+name, recorded here so no future session "fixes" it by renaming packages. Any
+Azure/ACR/Key Vault naming in Phase 12 follows `dataagent`, not `dchat`.
+Architecture doc updated: Part 2.3 carries a one-line note.
+
+## D-003 — Branch-protection status checks are attached in WP0.5, not WP0.1
+Date: 2026-08-10 · Phase: 0 · PR: — (WP0.1, direct push to main)
+Context: Plan §4.5 sets `required_status_checks.contexts = [hygiene, api, web]` in
+WP0.1, but those CI jobs are not created until WP0.5. GitHub treats a required
+check that has never reported as permanently "Expected — waiting for status",
+so every Phase 0 PR before WP0.5 would be unmergeable without an admin bypass.
+Options: (a) set the contexts now and bypass protection on each early PR;
+(b) protect main now without status contexts, and attach the real job names in
+WP0.5 — which the plan already schedules ("update branch protection required
+checks to the real job names").
+Decision: (b). WP0.1 applies: PRs required, linear history, no force-push, no
+deletion, squash-only merges. WP0.5 adds the three required contexts.
+Consequences: between WP0.2 and WP0.5 a PR can be merged without CI, because CI
+does not exist yet; the protection that matters in that window (no direct pushes,
+no force-push, no branch deletion) is live from commit one. Plan §4.5 updated to
+say the same thing so the document does not lie.
+
+## D-004 — Decision records live in `docs/plan/DECISIONS.md`, not `docs/adr/`
+Date: 2026-08-10 · Phase: 0 · PR: — (WP0.1, direct push to main)
+Context: Architecture Part 13.6 puts decision records in a `docs/adr/` directory;
+the implementation plan (§1.6, §2.4) defines a single append-only
+`docs/plan/DECISIONS.md`. Both cannot be the home, and a reader of the
+architecture doc would look for a directory that will never exist.
+Options: (a) create `docs/adr/` and one file per decision; (b) keep the plan's
+single-file DECISIONS.md and correct the architecture doc's tree.
+Decision: (b). One file, `D-###` entries, append-only, alongside STATUS and
+BACKLOG in `docs/plan/`.
+Consequences: decisions are diffable in one place and are trivially reviewed as
+part of the PR that causes them, which is the actual requirement (§1.6 step 4).
+Architecture Part 13.6 tree updated to point at `docs/`.

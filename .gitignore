@@ -1,0 +1,103 @@
+# ---------------------------------------------------------------------------
+# Secrets — never commit these. Only .env.example is tracked (plan §1.4).
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+ops/.secrets/
+.secrets/
+.azure/
+
+# ---------------------------------------------------------------------------
+# Python (apps/api)
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+sdist/
+wheels/
+*.egg-info/
+*.egg
+.installed.cfg
+MANIFEST
+
+# Virtualenvs / tooling caches
+.venv/
+venv/
+ENV/
+.python-version
+.uv/
+.ruff_cache/
+.mypy_cache/
+.pyright/
+.pytest_cache/
+.tox/
+.nox/
+.hypothesis/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.cover
+
+# ---------------------------------------------------------------------------
+# Node / Next.js (apps/web)
+# ---------------------------------------------------------------------------
+node_modules/
+.pnpm-store/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+.eslintcache
+coverage/
+playwright-report/
+test-results/
+blob-report/
+.playwright/
+
+# ---------------------------------------------------------------------------
+# Local runtime data — never customer data in git
+# ---------------------------------------------------------------------------
+ops/data/
+ops/artifacts/
+*.sqlite
+*.sqlite3
+*.db
+*.parquet
+*.dump
+
+# ---------------------------------------------------------------------------
+# Editors / OS
+# ---------------------------------------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.example.json
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------------------------------------------------------------------------
+# Logs & scratch
+# ---------------------------------------------------------------------------
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+tmp/
+.scratch/

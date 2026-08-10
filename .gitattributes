@@ -1,0 +1,33 @@
+# Normalize to LF in the repository, and check out LF for anything that is read
+# by a Linux container or a POSIX shell. The build happens on Windows hosts
+# (core.autocrlf=true), so without this a CRLF `scripts/*.sh` fails inside the
+# api image with "bad interpreter: /usr/bin/env bash^M".
+* text=auto eol=lf
+
+*.sh            text eol=lf
+Makefile        text eol=lf
+*.mk            text eol=lf
+Dockerfile      text eol=lf
+*.dockerfile    text eol=lf
+.env.example    text eol=lf
+
+# Windows-only helpers keep CRLF.
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+*.ps1           text eol=crlf
+
+# Binary — never diff or newline-mangle.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.parquet binary
+*.woff binary
+*.woff2 binary
+
+# Generated: keep out of PR diffs by default, still versioned.
+pnpm-lock.yaml  linguist-generated=true -diff
+uv.lock         linguist-generated=true -diff
