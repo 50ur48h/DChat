@@ -32,6 +32,9 @@ make evals              # eval harness with FakeLLM (Phase 9+)
 - Python via uv (apps/api); Node via pnpm (apps/web).
 - pip inside containers only; local host uses `uv sync`.
 - SQL Server test container is heavy: `make up.mssql` starts it on demand.
+- Windows dev host: GNU make comes from `winget install ezwinports.make` and
+  lands on the **user** PATH, so a shell started before the install will not see
+  it. Run make from Git Bash — its recipes use `sh`, `grep` and `awk`.
 
 ## Repo facts (this clone)
 - GitHub remote: https://github.com/50ur48h/DChat — **public**. Secret hygiene is

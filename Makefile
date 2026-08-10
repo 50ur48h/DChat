@@ -8,6 +8,9 @@
 API_DIR := apps/api
 UV_API  := uv run --directory $(API_DIR)
 
+WEB_DIR := apps/web
+PNPM_WEB := pnpm --dir $(WEB_DIR)
+
 # ---------------------------------------------------------------------------
 # Meta
 # ---------------------------------------------------------------------------
@@ -18,19 +21,19 @@ help: ## Show available targets
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
 
 # ---------------------------------------------------------------------------
-# Umbrella targets — these gain a `.web` half in WP0.3
+# Umbrella targets
 # ---------------------------------------------------------------------------
 .PHONY: install lint fmt typecheck test
-install: install.api      ## Install all dependencies
-lint: lint.api            ## Lint everything
-fmt: fmt.api              ## Format everything in place
-typecheck: typecheck.api  ## Type-check everything
-test: test.api            ## Run all tests
+install: install.api install.web        ## Install all dependencies
+lint: lint.api lint.web                 ## Lint everything
+fmt: fmt.api                            ## Format everything in place
+typecheck: typecheck.api typecheck.web  ## Type-check everything
+test: test.api test.web                 ## Run all tests
 
 # ---------------------------------------------------------------------------
 # apps/api
 # ---------------------------------------------------------------------------
-.PHONY: install.api lint.api fmt.api typecheck.api test.api api.dev
+.PHONY: install.api lint.api fmt.api typecheck.api test.api api.dev build.api
 install.api: ## Sync the API virtualenv from uv.lock
 	uv sync --directory $(API_DIR)
 
@@ -51,8 +54,29 @@ test.api: ## pytest with coverage
 api.dev: ## uvicorn with reload on :8000
 	$(UV_API) uvicorn dataagent.main:app --host 0.0.0.0 --port 8000 --reload
 
-.PHONY: build.api
 build.api: ## Build the production API image
 	docker build --target prod \
 		--build-arg GIT_SHA=$$(git rev-parse HEAD) \
 		-t dataagent-api:local $(API_DIR)
+
+# ---------------------------------------------------------------------------
+# apps/web
+# ---------------------------------------------------------------------------
+.PHONY: install.web lint.web typecheck.web test.web web.dev build.web
+install.web: ## Install web dependencies from the lockfile
+	$(PNPM_WEB) install --frozen-lockfile
+
+lint.web: ## eslint
+	$(PNPM_WEB) lint
+
+typecheck.web: ## next typegen + tsc --noEmit
+	$(PNPM_WEB) typecheck
+
+test.web: ## vitest
+	$(PNPM_WEB) test
+
+web.dev: ## next dev on :3000
+	$(PNPM_WEB) dev
+
+build.web: ## Build the production web image
+	docker build --target prod -t dataagent-web:local $(WEB_DIR)
