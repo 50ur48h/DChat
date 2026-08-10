@@ -48,8 +48,16 @@ make seed                # build the pizza demo dataset
 # open http://localhost:3000
 ```
 
-Prerequisites for that quickstart: Docker + Compose, Python 3.12 via
-[uv](https://docs.astral.sh/uv/), Node 22 via [pnpm](https://pnpm.io/).
+Prerequisites: Docker + Compose, Python 3.12 via [uv](https://docs.astral.sh/uv/)
+(`uv python install 3.12` provisions it — no system Python needed), Node 22 via
+[pnpm](https://pnpm.io/), and GNU **make**, which is how every command in this
+repo is invoked. macOS and Linux have it; on Windows:
+
+```powershell
+winget install ezwinports.make    # then restart the shell
+```
+
+`make help` lists the current targets.
 
 ## Contributing
 
