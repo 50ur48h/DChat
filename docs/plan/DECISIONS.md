@@ -43,6 +43,35 @@ does not exist yet; the protection that matters in that window (no direct pushes
 no force-push, no branch deletion) is live from commit one. Plan §4.5 updated to
 say the same thing so the document does not lie.
 
+## D-007 — CI path filters gate steps, not jobs
+Date: 2026-08-11 · Phase: 0 · PR: WP0.5
+Context: Plan §4.1 puts `if: needs.changes.outputs.api == 'true'` on the `api`
+and `web` **jobs**. Plan §4.5 also makes `hygiene`, `api` and `web` required
+status checks. Those two are incompatible: GitHub never reports a context for a
+skipped job, so a required check that skips leaves the PR permanently
+"Expected — waiting for status". Every PR here touches `docs/plan/STATUS.md`, and
+a docs-only PR matches neither filter, so this would fire immediately and often.
+Options: (a) drop path filtering and always run everything; (b) require only
+`hygiene` plus an aggregate gate job; (c) keep the jobs unconditional and move
+the filter onto the steps inside them.
+Decision: (c). `changes` still computes the filters and the expensive steps still
+skip, so a docs-only PR finishes in seconds — but all three contexts always
+report, so branch protection works as §4.5 intends.
+Consequences: two extra `if:` lines per job and a no-op "Nothing to do" step that
+makes the skip visible in the log. Plan §4.1's YAML is superseded on this point.
+
+## D-006 — CI's Postgres service arrives with the migrations that need it
+Date: 2026-08-11 · Phase: 0 · PR: WP0.5
+Context: Plan §4.1 gives the WP0.5 `api` job a `pgvector/pgvector:pg16` service
+and a `DATABASE_URL`, but the API has no database code until WP1.1 — the same
+section also says "never build pipeline for components that don't exist yet".
+Options: (a) add the service now and leave it unused for a phase; (b) add it in
+WP1.1 alongside the first migration and the migration up/down test that needs it.
+Decision: (b). Dead configuration in a security-sensitive pipeline is a liability:
+it is never exercised, so nobody notices when it breaks or drifts.
+Consequences: WP1.1 must add the service, `DATABASE_URL`, and the migration
+up/down step in the same PR as revision 0001 — recorded in STATUS under Phase 1.
+
 ## D-005 — `orjson` dropped from the API dependencies
 Date: 2026-08-10 · Phase: 0 · PR: WP0.2
 Context: Plan §6 WP0.2 lists `orjson` as a runtime dependency. Its only purpose

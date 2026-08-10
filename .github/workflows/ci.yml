@@ -1,0 +1,126 @@
+# CI v1 (plan §4.1, WP0.5). It grows with the phases — Phase 1 adds a Postgres
+# service for the migration tests, Phase 5 a `test.dal` step with its own
+# coverage gate, Phase 9 the eval harness.
+#
+# `hygiene`, `api` and `web` are the required status checks on `main`, so they
+# must ALWAYS report. Path filtering therefore gates the *steps* inside a job,
+# never the job itself: a skipped job never reports its context and would leave
+# every docs-only PR permanently "Expected — waiting for status" (DECISIONS D-007).
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            api:
+              - 'apps/api/**'
+              - 'ops/**'
+              - 'Makefile'
+              - '.github/workflows/ci.yml'
+            web:
+              - 'apps/web/**'
+              - 'Makefile'
+              - '.github/workflows/ci.yml'
+
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan for secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Every TODO has a backlog ID
+        run: bash scripts/check_todos.sh
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Seed truths match the generator
+        run: make check.truths
+
+  api:
+    needs: changes
+    runs-on: ubuntu-latest
+    env:
+      RUN: ${{ needs.changes.outputs.api }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        if: env.RUN == 'true'
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+      - name: Install
+        if: env.RUN == 'true'
+        run: uv sync --locked --directory apps/api
+      - name: Lint, typecheck, test
+        if: env.RUN == 'true'
+        run: make lint.api lint.seed typecheck.api test.api
+      - name: Nothing to do
+        if: env.RUN != 'true'
+        run: echo "No changes under apps/api or ops — skipping."
+
+  web:
+    needs: changes
+    runs-on: ubuntu-latest
+    env:
+      RUN: ${{ needs.changes.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        if: env.RUN == 'true'
+        with:
+          package_json_file: apps/web/package.json
+      - uses: actions/setup-node@v4
+        if: env.RUN == 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - name: Install
+        if: env.RUN == 'true'
+        run: pnpm --dir apps/web install --frozen-lockfile
+      - name: Lint, typecheck, test
+        if: env.RUN == 'true'
+        run: make lint.web typecheck.web test.web
+      - name: Build
+        if: env.RUN == 'true'
+        run: pnpm --dir apps/web build
+      - name: Nothing to do
+        if: env.RUN != 'true'
+        run: echo "No changes under apps/web — skipping."
+
+  # Proves both images still build. Pushing them arrives with Phase 12.
+  docker:
+    needs: [api, web]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the API image
+        run: docker build --target prod --build-arg GIT_SHA=${{ github.sha }} -t api:ci apps/api
+      - name: Build the web image
+        run: docker build --target prod -t web:ci apps/web

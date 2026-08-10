@@ -69,6 +69,13 @@ ps: ## Show stack status
 seed: .env ## (Re)build the pizza demo dataset in seed-pizza-pg
 	uv run ops/seed/seed_pizza.py
 
+.PHONY: truths check.truths
+truths: ## Regenerate ops/seed/truths.json without touching the database
+	uv run ops/seed/seed_pizza.py --truths-only
+
+check.truths: ## Fail if truths.json and the seed generator disagree
+	uv run ops/seed/seed_pizza.py --check
+
 # ---------------------------------------------------------------------------
 # apps/api
 # ---------------------------------------------------------------------------

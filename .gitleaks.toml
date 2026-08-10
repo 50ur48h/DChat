@@ -1,0 +1,24 @@
+# gitleaks configuration (plan §1.4 — this repository is public).
+#
+# The default ruleset does the work; this file only records the one deliberate
+# exception, so the exception itself is reviewable.
+
+title = "data-agent"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = """
+.env.example files document configuration keys with deliberately fake,
+local-only values. They are the mechanism that keeps real secrets out of git
+(every key has a documented placeholder, so nobody needs to invent one), and
+gitleaks' generic rules cannot tell a documented placeholder from a credential.
+
+This allowlist is scoped to those two files by path and nothing else. If a real
+secret is ever pasted into one of them, this config will not catch it — reviewers
+must. Any *other* file with a credential in it still fails the build.
+"""
+paths = [
+  '''(^|/)\.env\.example$''',
+]

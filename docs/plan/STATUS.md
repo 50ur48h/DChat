@@ -1,20 +1,22 @@
 # STATUS — data-agent build
 
-Current position: Phase 0 / WP0.4 (PR open, awaiting review)
+Current position: Phase 0 / WP0.5 (gate PR open, awaiting review + sign-off)
 Merge policy: ASK
-Blocked on user: review + merge of the WP0.4 PR — WP0.5 is the Phase 0 gate
-Last updated: 2026-08-10 by Claude Code
+Blocked on user: review of the WP0.5 gate PR, and the Phase 0 gate demo
+Last updated: 2026-08-11 by Claude Code
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
 - [x] WP0.1 Repo, docs, tracking files, branch protection
 - [x] WP0.2 API skeleton (FastAPI, /healthz, tooling, Dockerfile)
 - [x] WP0.3 Web skeleton (Next.js, health page, tooling, Dockerfile)
 - [x] WP0.4 Compose stack + Makefile + pizza seed v0
-- [ ] WP0.5 CI v1 (lint/type/test/build, gitleaks, TODO check)   ← gate PR
+- [x] WP0.5 CI v1 (lint/type/test/build, gitleaks, TODO check)   ← gate PR
 - [ ] GATE: compose up → page calls API; CI green on main; user sign-off
 
 ## Phase 1 — Platform DB + tenancy (M1)
 - [ ] WP1.1 SQLAlchemy models + alembic + core tables
+      — also adds CI's Postgres service + `DATABASE_URL` + the migration
+      up/down step, deferred from WP0.5 (DECISIONS D-006)
 - [ ] WP1.2 RLS migration + tenancy session + base repository
 - [ ] WP1.3 RLS proof tests + migration up/down in CI            ← gate PR
 - [ ] GATE: cross-org read provably blocked; user sign-off
@@ -61,6 +63,8 @@ Last updated: 2026-08-10 by Claude Code
 - [ ] GATE: pizza scenario ≤8 iters; menu-items → honest refusal; sign-off
 
 ## Phase 9 — Critic + composer + evals (M9)
+- [ ] **B-005 (P1) must be closed before this phase starts** — the seed window
+      must stop drifting before evals are written against it
 - [ ] WP9.1 Deterministic critic + LLM checklist + bounded re-entry
 - [ ] WP9.2 Composer (citations/limitations) + eval harness v1      ← gate PR
 - [ ] GATE: seeded-wrong-draft caught; 20 golden evals pass; sign-off
@@ -91,8 +95,9 @@ Last updated: 2026-08-10 by Claude Code
   is only marked done through a PR (plan §1.3).
 - **WP0.2 and WP0.3 were built in parallel** off `main` and merged as #1 and #2;
   the second was rebased onto the first, unioning the root `Makefile`.
-- **WP0.4** ships the local stack. The Phase 0 gate demo (`make up` → the page
-  shows the API healthy) is ready to run; WP0.5 adds CI and then the gate is
-  yours to sign off.
-- Branch protection required status checks are added in **WP0.5**, when the CI job
-  names first exist. See DECISIONS D-003.
+- **WP0.4** ships the local stack; **WP0.5** ships CI. The Phase 0 GATE is the
+  only thing left in this phase and it is yours: run `make up && make seed`,
+  open http://localhost:3000, confirm the page reports the API healthy, then
+  sign off and the gate checkbox flips in the first Phase 1 PR.
+- Branch protection now requires `hygiene`, `api` and `web` — the D-003
+  follow-through, applied once those jobs existed.

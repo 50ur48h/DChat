@@ -18,14 +18,23 @@ of every run, so drift fails here rather than in a Phase 8 demo:
 * **A real decline to find.** Revenue in the last eight weeks is ~12% below the
   eight before it, caused entirely by delivery orders at one store. Phase 8's
   research loop has to locate that, and Phase 9's evals depend on the number.
+
+Every run also writes ``ops/seed/truths.json``: the dataset's ground truth, which
+the Phase 9 eval harness reads instead of hardcoding expected answers. That file
+is committed, and ``--check`` regenerates it and fails if the two disagree, so
+the fixture and the numbers the evals trust can never drift apart silently.
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 import math
 import os
 import random
 import sys
+from collections import defaultdict
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -37,6 +46,7 @@ from psycopg import sql
 
 REPO_ROOT: Final = Path(__file__).resolve().parents[2]
 SCHEMA_FILE: Final = Path(__file__).with_name("pizza_schema.sql")
+TRUTHS_FILE: Final = Path(__file__).with_name("truths.json")
 
 # --------------------------------------------------------------------------
 # Fixed generation parameters. Changing any of these changes the dataset, and
@@ -380,6 +390,195 @@ def pct_change(recent: Decimal, previous: Decimal) -> float:
     return float(recent / previous) - 1.0 if previous else 0.0
 
 
+def cash(value: Decimal) -> float:
+    """A money amount as a JSON number, rounded once so it cannot drift."""
+    return float(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def ratio(value: float) -> float:
+    return round(value, 6)
+
+
+class Bucket:
+    """Running order count and revenue for one slice of the dataset."""
+
+    __slots__ = ("orders", "revenue")
+
+    def __init__(self) -> None:
+        self.orders = 0
+        self.revenue = Decimal("0")
+
+    def add(self, amount: Decimal) -> None:
+        self.orders += 1
+        self.revenue += amount
+
+    def render(self, label: str, key: object) -> dict[str, object]:
+        return {
+            label: key,
+            "orders": self.orders,
+            "revenue": cash(self.revenue),
+            "average_order_value": cash(self.revenue / self.orders) if self.orders else 0.0,
+        }
+
+
+def build_truths(
+    orders: list[Order],
+    customers: list[tuple[int, str, str, str, str, date]],
+    staff: list[tuple[int, int, str, str, date]],
+    menu_size: int,
+) -> dict[str, object]:
+    """The ground truth of this dataset, for the Phase 9 eval harness to read.
+
+    Evals must load their expected answers from ``truths.json`` rather than
+    hardcoding numbers: the fixture and the expectations then cannot drift apart,
+    because both come from the same generator run. Everything here uses the same
+    definition of revenue the semantic layer will use - completed orders only.
+    """
+    completed = [order for order in orders if order.status == "completed"]
+    store_names = {store_id: name for store_id, name, *_ in STORES}
+    weekday_names = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+    decline_start = END_DATE - timedelta(days=DECLINE_WEEKS * 7 - 1)
+    previous_start = decline_start - timedelta(days=DECLINE_WEEKS * 7)
+    previous_end = decline_start - timedelta(days=1)
+
+    by_store: defaultdict[int, Bucket] = defaultdict(Bucket)
+    by_channel: defaultdict[str, Bucket] = defaultdict(Bucket)
+    by_store_channel: defaultdict[tuple[int, str], Bucket] = defaultdict(Bucket)
+    by_month: defaultdict[str, Bucket] = defaultdict(Bucket)
+    by_weekday: defaultdict[int, Bucket] = defaultdict(Bucket)
+    by_week: defaultdict[date, Bucket] = defaultdict(Bucket)
+
+    for order in completed:
+        week_start = order.order_date - timedelta(days=order.order_date.weekday())
+        by_store[order.store_id].add(order.total_amount)
+        by_channel[order.channel].add(order.total_amount)
+        by_store_channel[order.store_id, order.channel].add(order.total_amount)
+        by_month[order.order_date.strftime("%Y-%m")].add(order.total_amount)
+        by_weekday[order.order_date.weekday()].add(order.total_amount)
+        by_week[week_start].add(order.total_amount)
+
+    status_counts = dict.fromkeys((status for status, _ in STATUS_WEIGHTS), 0)
+    orders_per_customer: defaultdict[int, int] = defaultdict(int)
+    for order in orders:
+        status_counts[order.status] += 1
+        orders_per_customer[order.customer_id] += 1
+
+    repeat_customers = sum(1 for count in orders_per_customer.values() if count > 1)
+
+    staff_per_store: defaultdict[int, int] = defaultdict(int)
+    for _, store_id, *_ in staff:
+        staff_per_store[store_id] += 1
+
+    july_2026 = [o for o in orders if o.order_date.strftime("%Y-%m") == "2026-07"]
+    march_window = [o for o in completed if date(2026, 3, 1) <= o.order_date <= date(2026, 3, 15)]
+
+    def segment_change(segment: str) -> float:
+        return ratio(
+            pct_change(
+                revenue_between(orders, decline_start, END_DATE, segment=segment),
+                revenue_between(orders, previous_start, previous_end, segment=segment),
+            )
+        )
+
+    return {
+        "$comment": (
+            "Ground truth for the pizza demo dataset, written by "
+            "ops/seed/seed_pizza.py. Regenerate with `make seed` or `make truths`; "
+            "`make check.truths` fails if this file and the generator disagree. "
+            "Phase 9 evals must read expected answers from here, never hardcode them."
+        ),
+        "definitions": {
+            "revenue": "SUM(orders.total_amount) WHERE status = 'completed'",
+            "average_order_value": "revenue / completed order count",
+        },
+        "generator": {
+            "script": "ops/seed/seed_pizza.py",
+            "rng_seed": RNG_SEED,
+            "window_start": START_DATE.isoformat(),
+            "window_end": END_DATE.isoformat(),
+        },
+        "row_counts": {
+            "stores": len(STORES),
+            "customers": len(customers),
+            "staff": len(staff),
+            "menu_items": menu_size,
+            "orders": len(orders),
+            "payments": sum(1 for order in orders if order.status != "cancelled"),
+        },
+        "orders": {
+            "total": len(orders),
+            "completed": len(completed),
+            "by_status": status_counts,
+            "cancelled_rate": ratio(status_counts["cancelled"] / len(orders)),
+            "in_july_2026": len(july_2026),
+            "busiest_weekday": weekday_names[
+                max(by_weekday, key=lambda day: by_weekday[day].orders)
+            ],
+        },
+        "revenue": {
+            "total": cash(sum((o.total_amount for o in completed), Decimal("0"))),
+            "by_store": [
+                by_store[key].render("store_id", key) | {"store_name": store_names[key]}
+                for key in sorted(by_store)
+            ],
+            "by_channel": [by_channel[key].render("channel", key) for key in sorted(by_channel)],
+            "by_store_channel": [
+                by_store_channel[key].render("store_channel", list(key))
+                for key in sorted(by_store_channel)
+            ],
+            "by_month": [by_month[key].render("month", key) for key in sorted(by_month)],
+            "top_store_by_revenue": max(by_store, key=lambda key: by_store[key].revenue),
+            "slowest_week_starting": min(
+                by_week, key=lambda week: by_week[week].revenue
+            ).isoformat(),
+        },
+        "decline": {
+            "weeks": DECLINE_WEEKS,
+            "recent_window": [decline_start.isoformat(), END_DATE.isoformat()],
+            "previous_window": [previous_start.isoformat(), previous_end.isoformat()],
+            "store_id": DECLINE_STORE_ID,
+            "store_name": store_names[DECLINE_STORE_ID],
+            "channel": DECLINE_CHANNEL,
+            "overall_pct": segment_change("all"),
+            "affected_pct": segment_change("affected"),
+            "unaffected_pct": segment_change("rest"),
+        },
+        "customers": {
+            "total": len(customers),
+            "with_at_least_one_order": len(orders_per_customer),
+            "repeat_customers": repeat_customers,
+            "repeat_rate": ratio(repeat_customers / len(orders_per_customer)),
+        },
+        "staff_by_store": [
+            {"store_id": key, "store_name": store_names[key], "staff": staff_per_store[key]}
+            for key in sorted(staff_per_store)
+        ],
+        "date_range_example": {
+            "$comment": "Golden eval #18 asks for a bounded range; this is the answer.",
+            "from": "2026-03-01",
+            "to": "2026-03-15",
+            "completed_orders": len(march_window),
+            "revenue": cash(sum((o.total_amount for o in march_window), Decimal("0"))),
+        },
+        "unanswerable": {
+            "$comment": (
+                "There is no order_items table and no join path from orders to "
+                "menu_items, so these must produce an honest refusal, not a number."
+            ),
+            "examples": [
+                "Which menu items sell best?",
+                "What is the revenue per pizza type?",
+            ],
+        },
+    }
+
+
+def render_truths(truths: dict[str, object]) -> str:
+    """Stable JSON: sorted keys, fixed indent, LF endings — so a diff means a real change."""
+    return json.dumps(truths, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+
+
 def connection_string() -> str:
     load_dotenv(REPO_ROOT / ".env")
 
@@ -414,7 +613,20 @@ def copy_rows(
             copy.write_row(row)
 
 
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--truths-only",
+        action="store_true",
+        help="write ops/seed/truths.json and skip the database entirely",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="regenerate the truths and fail if the committed file disagrees (used by CI)",
+    )
+    args = parser.parse_args(argv)
+
     # S311: a seeded, non-cryptographic PRNG is the requirement here, not a
     # weakness — reproducibility is the whole point of this fixture.
     rng = random.Random(RNG_SEED)  # noqa: S311
@@ -470,6 +682,28 @@ def main() -> int:
             f"FAIL: the rest of the business moved {delta_rest:+.1%}, so the decline is not "
             f"concentrated in store {DECLINE_STORE_ID} / {DECLINE_CHANNEL}"
         )
+
+    truths = render_truths(build_truths(orders, customers, staff, len(menu)))
+
+    if args.check:
+        committed = TRUTHS_FILE.read_text(encoding="utf-8") if TRUTHS_FILE.exists() else ""
+        if committed != truths:
+            sys.exit(
+                f"FAIL: {TRUTHS_FILE.relative_to(REPO_ROOT)} is out of date.\n"
+                "The fixture and the numbers the evals trust have drifted apart. "
+                "Run `make truths` and commit the result."
+            )
+        print(f"{TRUTHS_FILE.relative_to(REPO_ROOT)} matches the generator.")
+        return 0
+
+    # newline="" keeps the LF endings render_truths produced; on Windows the
+    # default would rewrite them to CRLF and every CI diff check would fail.
+    with TRUTHS_FILE.open("w", encoding="utf-8", newline="") as handle:
+        handle.write(truths)
+    print(f"Wrote {TRUTHS_FILE.relative_to(REPO_ROOT)}")
+
+    if args.truths_only:
+        return 0
 
     with psycopg.connect(connection_string()) as connection, connection.cursor() as cursor:
         cursor.execute(SCHEMA_FILE.read_text(encoding="utf-8"))
