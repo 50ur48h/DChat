@@ -1,8 +1,8 @@
 # STATUS — data-agent build
 
-Current position: Phase 0 / WP0.5 (gate PR open, awaiting review + sign-off)
+Current position: Phase 1 / WP1.1 (PR open, awaiting review)
 Merge policy: ASK
-Blocked on user: review of the WP0.5 gate PR, and the Phase 0 gate demo
+Blocked on user: review + merge of the WP1.1 PR — WP1.2 builds directly on it
 Last updated: 2026-08-11 by Claude Code
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
@@ -11,12 +11,13 @@ Last updated: 2026-08-11 by Claude Code
 - [x] WP0.3 Web skeleton (Next.js, health page, tooling, Dockerfile)
 - [x] WP0.4 Compose stack + Makefile + pizza seed v0
 - [x] WP0.5 CI v1 (lint/type/test/build, gitleaks, TODO check)   ← gate PR
-- [ ] GATE: compose up → page calls API; CI green on main; user sign-off
+- [x] GATE: compose up → page calls API; CI green on main; user sign-off
+      — signed off 2026-08-11: page showed Healthy, CI green on main
 
 ## Phase 1 — Platform DB + tenancy (M1)
-- [ ] WP1.1 SQLAlchemy models + alembic + core tables
-      — also adds CI's Postgres service + `DATABASE_URL` + the migration
-      up/down step, deferred from WP0.5 (DECISIONS D-006)
+- [x] WP1.1 SQLAlchemy models + alembic + core tables
+      — also added CI's Postgres service + `DATABASE_URL` + `REQUIRE_DB=1`,
+      the migration up/down test deferred from WP0.5 (DECISIONS D-006, done)
 - [ ] WP1.2 RLS migration + tenancy session + base repository
 - [ ] WP1.3 RLS proof tests + migration up/down in CI            ← gate PR
 - [ ] GATE: cross-org read provably blocked; user sign-off

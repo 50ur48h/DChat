@@ -69,6 +69,16 @@ ps: ## Show stack status
 seed: .env ## (Re)build the pizza demo dataset in seed-pizza-pg
 	uv run ops/seed/seed_pizza.py
 
+.PHONY: migrate migrate.down migration
+migrate: .env ## alembic upgrade head against the local platform database
+	$(UV_API) alembic upgrade head
+
+migrate.down: .env ## Roll back one revision
+	$(UV_API) alembic downgrade -1
+
+migration: .env ## Autogenerate a revision: make migration m="add widgets"
+	$(UV_API) alembic revision --autogenerate -m "$(m)"
+
 .PHONY: truths check.truths
 truths: ## Regenerate ops/seed/truths.json without touching the database
 	uv run ops/seed/seed_pizza.py --truths-only
