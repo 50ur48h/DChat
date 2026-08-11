@@ -1,0 +1,217 @@
+"""The role matrix, asserted route by route and snapshotted.
+
+Architecture Part 6.2 states the matrix in prose. This asserts it against the
+real routes, and then writes what it observed to a committed snapshot — so a
+change to who can do what shows up as a diff in review rather than as a surprise
+in production. Widening access accidentally is the failure this exists to catch.
+
+Every route the API exposes must appear here. A new org-scoped route with no
+entry fails ``test_every_org_route_is_covered``, which is what stops the matrix
+quietly falling behind the surface it describes.
+"""
+
+from __future__ import annotations
+
+import json
+import uuid
+from collections.abc import AsyncIterator
+from pathlib import Path
+from typing import Any
+
+import pytest
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import URL, text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from dataagent.auth.jwt_validator import TokenValidator
+from dataagent.auth.principal import Principal, TokenError
+from dataagent.config import Settings
+from dataagent.db import engine as engine_module
+from dataagent.main import create_app
+from dataagent.tenancy import session as session_module
+
+SNAPSHOT = Path(__file__).with_name("role_matrix.json")
+
+ROLES = ("admin", "contributor", "reader")
+
+#: Routes that are not org-scoped, and so are not part of this matrix. Listed
+#: explicitly rather than pattern-matched: an unlisted route is a route nobody
+#: thought about.
+NOT_ORG_SCOPED = {
+    ("GET", "/healthz"),
+    ("GET", "/v1/me"),
+    ("POST", "/v1/orgs"),
+    ("POST", "/v1/invitations/accept"),
+    ("GET", "/dev/token"),
+    ("GET", "/dev/jwks.json"),
+    ("GET", "/dev/.well-known/openid-configuration"),
+}
+
+#: One representative request per org-scoped route. Bodies are valid, so a 4xx
+#: can only be an authorization decision and never a validation error.
+PROBES: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
+    ("GET", "/v1/orgs/{org_id}/members", None),
+    ("PATCH", "/v1/orgs/{org_id}/members/{user_id}", {"role": "reader"}),
+    ("DELETE", "/v1/orgs/{org_id}/members/{user_id}", None),
+    (
+        "POST",
+        "/v1/orgs/{org_id}/invitations",
+        {"email": "invitee@example.com", "role": "reader"},
+    ),
+)
+
+
+class _SubjectAsToken(TokenValidator):
+    def __init__(self) -> None:
+        pass
+
+    async def validate(self, token: str) -> Principal:
+        if not token:
+            raise TokenError("malformed", "nope")
+        return Principal(subject=token, email=f"{token}@example.com")
+
+
+@pytest.fixture
+async def matrix_app(
+    app_database: URL, migrated_database: URL, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[tuple[FastAPI, uuid.UUID, dict[str, uuid.UUID]]]:
+    """One organization holding a member of every role, plus a spare target."""
+    owner = create_async_engine(migrated_database)
+    app_engine = create_async_engine(app_database)
+    monkeypatch.setattr(engine_module, "get_engine", lambda: owner)
+    monkeypatch.setattr(
+        session_module,
+        "_session_factory",
+        lambda: async_sessionmaker(app_engine, expire_on_commit=False, autoflush=False),
+    )
+
+    org_id = uuid.uuid4()
+    users: dict[str, uuid.UUID] = {}
+    async with owner.begin() as connection:
+        await connection.execute(
+            text("SELECT set_config('app.org_id', :org, true)"), {"org": str(org_id)}
+        )
+        await connection.execute(
+            text("INSERT INTO organizations (id, name) VALUES (:id, 'Matrix')"), {"id": org_id}
+        )
+        # Two admins, so that a PATCH or DELETE aimed at one is refused on role
+        # grounds only — never by the last-admin rule, which would look identical.
+        for subject, role in (
+            ("admin", "admin"),
+            ("spare-admin", "admin"),
+            ("contributor", "contributor"),
+            ("reader", "reader"),
+        ):
+            user_id = uuid.uuid4()
+            users[subject] = user_id
+            await connection.execute(
+                text("INSERT INTO users (id, external_subject, email) VALUES (:i, :s, :e)"),
+                {"i": user_id, "s": subject, "e": f"{subject}@example.com"},
+            )
+            await connection.execute(
+                text("INSERT INTO org_memberships (org_id, user_id, role) VALUES (:o, :u, :r)"),
+                {"o": org_id, "u": user_id, "r": role},
+            )
+
+    app = create_app(settings=Settings(auth_mode="dev", env="ci", build_env="dev"))
+    app.state.token_validator = _SubjectAsToken()
+
+    try:
+        yield app, org_id, users
+    finally:
+        await owner.dispose()
+        await app_engine.dispose()
+
+
+async def _probe(
+    app: FastAPI, method: str, path: str, who: str, body: dict[str, Any] | None
+) -> int:
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://testserver"
+    ) as client:
+        response = await client.request(
+            method, path, headers={"Authorization": f"Bearer {who}"}, json=body
+        )
+    return response.status_code
+
+
+async def test_the_role_matrix_matches_its_snapshot(
+    matrix_app: tuple[FastAPI, uuid.UUID, dict[str, uuid.UUID]],
+) -> None:
+    """Observe who may do what, then compare with the committed record."""
+    app, org_id, users = matrix_app
+
+    observed: dict[str, dict[str, str]] = {}
+    for method, template, body in PROBES:
+        path = template.format(org_id=org_id, user_id=users["spare-admin"])
+        key = f"{method} {template}"
+        observed[key] = {}
+        for role in ROLES:
+            status = await _probe(app, method, path, role, body)
+            observed[key][role] = "allow" if status < 400 else f"deny({status})"
+
+    rendered = json.dumps(observed, indent=2, sort_keys=True) + "\n"
+
+    if not SNAPSHOT.exists():  # pragma: no cover - first run only
+        SNAPSHOT.write_text(rendered, encoding="utf-8", newline="")
+        pytest.fail(f"wrote a new snapshot to {SNAPSHOT.name}; review it and re-run")
+
+    expected = SNAPSHOT.read_text(encoding="utf-8")
+    assert rendered == expected, (
+        "the role matrix changed. If that was intended, update "
+        f"{SNAPSHOT.name} in this PR so the change is reviewed."
+    )
+
+
+async def test_the_snapshot_says_what_the_architecture_says(
+    matrix_app: tuple[FastAPI, uuid.UUID, dict[str, uuid.UUID]],
+) -> None:
+    """A snapshot only proves stability. This proves it is the *right* matrix.
+
+    Architecture Part 6.2: managing members and data sources is Admin-only;
+    everyone may read.
+    """
+    recorded = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
+
+    assert recorded["GET /v1/orgs/{org_id}/members"] == {
+        "admin": "allow",
+        "contributor": "allow",
+        "reader": "allow",
+    }
+    for admin_only in (
+        "PATCH /v1/orgs/{org_id}/members/{user_id}",
+        "DELETE /v1/orgs/{org_id}/members/{user_id}",
+        "POST /v1/orgs/{org_id}/invitations",
+    ):
+        assert recorded[admin_only]["admin"] == "allow"
+        assert recorded[admin_only]["contributor"].startswith("deny")
+        assert recorded[admin_only]["reader"].startswith("deny")
+
+
+def test_every_org_route_is_covered() -> None:
+    """A new org-scoped route with no probe is a role nobody decided on."""
+    app = create_app(settings=Settings(auth_mode="dev", env="ci", build_env="dev"))
+
+    # Read the OpenAPI schema rather than walking app.routes: this FastAPI nests
+    # included routers instead of flattening them, and the schema is the stable
+    # public description of what the API actually exposes.
+    paths = app.openapi()["paths"]
+    exposed = {
+        (method.upper(), path)
+        for path, operations in paths.items()
+        for method in operations
+        if method.upper() != "HEAD"
+    }
+    probed = {(method, template) for method, template, _ in PROBES}
+    org_scoped = {
+        (method, path)
+        for method, path in exposed
+        if "{org_id}" in path and (method, path) not in NOT_ORG_SCOPED
+    }
+
+    assert org_scoped == probed, (
+        "org-scoped routes and the role matrix disagree. Unprobed routes: "
+        f"{sorted(org_scoped - probed)}; probes for routes that no longer exist: "
+        f"{sorted(probed - org_scoped)}"
+    )

@@ -1,0 +1,22 @@
+{
+  "DELETE /v1/orgs/{org_id}/members/{user_id}": {
+    "admin": "allow",
+    "contributor": "deny(403)",
+    "reader": "deny(403)"
+  },
+  "GET /v1/orgs/{org_id}/members": {
+    "admin": "allow",
+    "contributor": "allow",
+    "reader": "allow"
+  },
+  "PATCH /v1/orgs/{org_id}/members/{user_id}": {
+    "admin": "allow",
+    "contributor": "deny(403)",
+    "reader": "deny(403)"
+  },
+  "POST /v1/orgs/{org_id}/invitations": {
+    "admin": "allow",
+    "contributor": "deny(403)",
+    "reader": "deny(403)"
+  }
+}
