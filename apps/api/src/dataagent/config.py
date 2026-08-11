@@ -86,9 +86,21 @@ class Settings(BaseSettings):
             "process willing to mint its own tokens."
         ),
     )
+    oidc_authority: str | None = Field(
+        default=None,
+        description=(
+            "Where the identity provider publishes /.well-known/openid-configuration. "
+            "Required when AUTH_MODE=entra. For a Microsoft Entra external tenant: "
+            "https://<domain-prefix>.ciamlogin.com/<tenant-id>/v2.0"
+        ),
+    )
     oidc_issuer: str | None = Field(
         default=None,
-        description="Entra External ID issuer URL. Required when AUTH_MODE=entra.",
+        description=(
+            "Optional pin for the expected `iss` claim. Normally left unset: the "
+            "issuer is read from the discovery document, which is authoritative "
+            "and, for Entra external tenants, not guessable from the authority URL."
+        ),
     )
     oidc_audience: str = Field(
         default="dataagent-api",
@@ -132,16 +144,17 @@ class Settings(BaseSettings):
             return json.loads(text)
         return tuple(origin.strip() for origin in text.split(",") if origin.strip())
 
-    def resolve_issuer(self) -> str:
-        """The issuer tokens must claim, whichever mode we are in."""
+    def resolve_authority(self) -> str:
+        """Where to fetch the provider's discovery document."""
         if self.auth_mode == "dev":
             return self.dev_issuer_url
-        if not self.oidc_issuer:
+        if not self.oidc_authority:
             raise RuntimeError(
-                "AUTH_MODE=entra requires OIDC_ISSUER. Without it every token "
-                "would be accepted from any issuer, which is worse than no auth."
+                "AUTH_MODE=entra requires OIDC_AUTHORITY. Without it there is "
+                "nothing to discover signing keys from, and every token would "
+                "have to be taken on trust."
             )
-        return self.oidc_issuer
+        return self.oidc_authority
 
     def assert_auth_is_production_safe(self) -> None:
         """Refuse to start a production build that trusts the dev issuer.

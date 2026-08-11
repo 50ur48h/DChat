@@ -1,11 +1,10 @@
 # STATUS — data-agent build
 
-Current position: Phase 2 / WP2.3 (partial — PR open for the half that does
-                 not need Entra)
+Current position: Phase 2 / WP2.3 (partial — API side complete and verified
+                 against the real tenant; web sign-in UI remains)
 Merge policy: ASK
-Blocked on user: **Entra External ID values** (plan §3.2) — tenant ID, SPA
-                 client ID, API audience. Until they arrive, WP2.3's MSAL
-                 provider and the browser gate demo cannot be built or run
+Blocked on user: review + merge. Entra values received and working; the
+                 remaining work is the browser half, not a dependency
 Last updated: 2026-08-11 by Claude Code
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
@@ -35,8 +34,10 @@ Last updated: 2026-08-11 by Claude Code
 - [~] WP2.3 Web auth (MSAL) + /me + invite UI + role matrix tests ← gate PR
       DONE: role-matrix integration test + committed snapshot + a coverage
       guard that fails when an org-scoped route has no entry.
-      REMAINS (needs Entra IDs): MSAL provider, dev-mode toggle, /me page,
-      members + invite screens, and the browser gate demo.
+      DONE: entra mode wired and verified against the real tenant — the
+      issuer is read from the discovery document, not configured (D-009).
+      REMAINS: MSAL browser provider, dev-mode toggle, /me page, members +
+      invite screens, and the browser gate demo.
 - [ ] GATE: signup→org→invite Reader; Reader 403 audited; user sign-off
 
 ## Phase 3 — Data source connectors (M3)

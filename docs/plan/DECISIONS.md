@@ -43,6 +43,24 @@ does not exist yet; the protection that matters in that window (no direct pushes
 no force-push, no branch deletion) is live from commit one. Plan §4.5 updated to
 say the same thing so the document does not lie.
 
+## D-009 — The expected issuer is discovered, not configured
+Date: 2026-08-11 · Phase: 2 · PR: WP2.3
+Context: Plan §3.2 and arch Part 6.1 treat the issuer as a value the operator
+supplies. Checked against the real Entra external tenant before writing any
+config, and the assumption does not hold: the tenant publishes its discovery
+document at `https://dchat.ciamlogin.com/<tenant-id>/v2.0` but issues tokens
+claiming `https://<tenant-id>.ciamlogin.com/<tenant-id>/v2.0` — a different host.
+The same tenant *also* answers on `login.microsoftonline.com/<tenant-id>/v2.0`
+with a third issuer value. Any of the three looks plausible in a `.env`.
+Options: (a) document the correct string and hope nobody picks another;
+(b) read `issuer` from the discovery document, which is what OIDC defines it for.
+Decision: (b). `OIDC_AUTHORITY` says where to discover; the expected `iss` comes
+from that document. `OIDC_ISSUER` remains as an optional pin for a provider whose
+metadata is not trusted, and a test covers both paths.
+Consequences: one fewer hand-copied string that silently rejects every token, and
+rotation of the issuer host by the provider stops being a breaking change.
+`.env.example` documents `OIDC_AUTHORITY` and leaves `OIDC_ISSUER` commented out.
+
 ## D-008 — 401s are logged, 403s are audited, and orphan denials get their own table
 Date: 2026-08-11 · Phase: 2 · PR: WP2.1b · Approved by the owner before implementation
 Context: Plan §6 WP2.1 says "every 401/403 writes an `audit_log` row", but
