@@ -18,6 +18,10 @@ under "Unreleased", only for changes a user would notice.
   cannot bypass it. The audit log is append-only by grant.
 
 ### Added
+- A web app you can actually use: sign in, see who you are and which
+  organizations you belong to, create one, invite people with a role, and
+  manage members. Sign-in works against Microsoft Entra External ID, or
+  against a local development issuer when no tenant is configured.
 - Sign in, create an organization, invite people to it by email with a role,
   and accept an invitation. `GET /v1/me` shows who you are and which
   organizations you belong to. The last Admin cannot demote or remove

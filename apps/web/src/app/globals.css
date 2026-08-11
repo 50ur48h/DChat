@@ -1,27 +1,102 @@
 /*
- * Minimal foundation. No font downloads at build time — `next/font/google`
- * would make `docker build` and CI depend on network access to Google's CDN.
+ * Design tokens. The single source; see docs/design.md.
+ * A raw hex value in any other file is a bug.
+ *
+ * No webfont: downloading one at build time would make `docker build` and CI
+ * depend on a third-party CDN (settled in WP0.3).
  */
 
 :root {
-  --background: #ffffff;
-  --surface: #fafafa;
-  --foreground: #171717;
-  --muted: #6b7280;
-  --border: #e5e7eb;
-  --ok: #16a34a;
-  --bad: #dc2626;
+  /* Surfaces and text */
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface-sunken: #f1f3f7;
+  --fg: #101828;
+  --fg-muted: #667085;
+  --fg-subtle: #98a2b3;
+  --border: #eaecf0;
+
+  /* One friendly primary */
+  --primary: #5b5bd6;
+  --primary-hover: #4a4ac4;
+  --primary-soft: #eeeefc;
+  --on-primary: #ffffff;
+  --focus-ring: #c7c7f5;
+
+  /* Pastel accents: -soft is a background, -strong is its readable foreground */
+  --accent-mint-soft: #e6f6ee;
+  --accent-mint-strong: #0f7a52;
+  --accent-sky-soft: #e8f1fd;
+  --accent-sky-strong: #1a5fb4;
+  --accent-lilac-soft: #eeeefc;
+  --accent-lilac-strong: #4a4ac4;
+  --accent-peach-soft: #fdf1e3;
+  --accent-peach-strong: #a35b06;
+  --accent-rose-soft: #fdeced;
+  --accent-rose-strong: #b42318;
+
+  /* Semantic aliases, so status code never names a hue */
+  --ok: var(--accent-mint-strong);
+  --ok-soft: var(--accent-mint-soft);
+  --warn: var(--accent-peach-strong);
+  --warn-soft: var(--accent-peach-soft);
+  --danger: var(--accent-rose-strong);
+  --danger-soft: var(--accent-rose-soft);
+
+  /* 4px scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-full: 999px;
+
+  /* Soft and low contrast: large blur, small offset, never a hard drop */
+  --shadow-sm: 0 1px 2px rgb(16 24 40 / 4%), 0 4px 16px rgb(16 24 40 / 5%);
+  --shadow-md: 0 2px 4px rgb(16 24 40 / 5%), 0 12px 28px rgb(16 24 40 / 9%);
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --surface: #141414;
-    --foreground: #ededed;
-    --muted: #9ca3af;
-    --border: #262626;
-    --ok: #22c55e;
-    --bad: #f87171;
+    --bg: #0e1014;
+    --surface: #171a21;
+    --surface-sunken: #1e222b;
+    --fg: #f2f4f7;
+    --fg-muted: #98a2b3;
+    --fg-subtle: #667085;
+    --border: #262b35;
+
+    --primary: #8b8bf0;
+    --primary-hover: #a0a0f5;
+    --primary-soft: #23233a;
+    --on-primary: #0e1014;
+    --focus-ring: #4a4a8f;
+
+    /* Pastels lose saturation in the dark rather than gaining it */
+    --accent-mint-soft: #12261e;
+    --accent-mint-strong: #6ee7b7;
+    --accent-sky-soft: #12203a;
+    --accent-sky-strong: #93c5fd;
+    --accent-lilac-soft: #23233a;
+    --accent-lilac-strong: #c4b5fd;
+    --accent-peach-soft: #2b2013;
+    --accent-peach-strong: #fcd34d;
+    --accent-rose-soft: #2e1618;
+    --accent-rose-strong: #fca5a5;
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 24%);
+    --shadow-md: 0 2px 4px rgb(0 0 0 / 32%), 0 12px 28px rgb(0 0 0 / 36%);
   }
 }
 
@@ -37,13 +112,43 @@ body {
 
 body {
   margin: 0;
-  background: var(--background);
-  color: var(--foreground);
-  font-family:
-    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 24px;
   -webkit-font-smoothing: antialiased;
 }
 
+h1,
+h2,
+h3,
+p,
+figure {
+  margin: 0;
+}
+
 code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+/* Numbers in tables must line up. */
+table {
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

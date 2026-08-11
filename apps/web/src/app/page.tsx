@@ -1,19 +1,22 @@
-import { ApiHealth } from "@/components/api-health";
+"use client";
 
-import styles from "./page.module.css";
+import { Profile } from "@/components/screens/profile";
+import { SignIn } from "@/components/screens/sign-in";
+import { ApiHealth } from "@/components/api-health";
+import { Page, PageHeader, Stack } from "@/components/ui/page";
+import { useSession } from "@/lib/auth/session";
 
 export default function Home() {
-  return (
-    <main className={styles.main}>
-      <header className={styles.header}>
-        <h1 className={styles.title}>data-agent</h1>
-        <p className={styles.subtitle}>
-          AI-native data analysis. Phase 0 — walking skeleton: this page exists to prove the browser
-          can reach the API.
-        </p>
-      </header>
+  const session = useSession();
 
+  return (
+    <Page>
+      <PageHeader
+        title="data-agent"
+        subtitle="Ask questions of your own databases, and see the evidence behind every answer."
+      />
+      <Stack>{session.who ? <Profile /> : <SignIn />}</Stack>
       <ApiHealth />
-    </main>
+    </Page>
   );
 }

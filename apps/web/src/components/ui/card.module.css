@@ -1,0 +1,32 @@
+.card {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-5);
+}
+
+.sunken {
+  background: var(--surface-sunken);
+  box-shadow: none;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.title {
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
+}
+
+.subtitle {
+  margin-top: var(--space-1);
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 20px;
+}

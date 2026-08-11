@@ -1,9 +1,8 @@
 /**
  * Response shapes of the data-agent API.
  *
- * Hand-written for now. From Phase 7 these are generated from the FastAPI
- * OpenAPI schema (`openapi-typescript`) so contract drift breaks CI instead of
- * production — see BACKLOG B-003 and architecture Part 3.1.
+ * Hand-written, and narrowed at runtime rather than cast — a lying type is worse
+ * than no type. Generated from the OpenAPI schema in Phase 7 (backlog B-003).
  */
 
 export interface Health {
@@ -12,13 +11,83 @@ export interface Health {
   git_sha: string;
 }
 
-/** Runtime narrowing, because `await res.json()` is `any` and a cast would lie. */
+export interface Membership {
+  org_id: string;
+  org_name: string;
+  role: string;
+}
+
+export interface Me {
+  subject: string;
+  user_id: string;
+  email: string;
+  name: string | null;
+  memberships: Membership[];
+}
+
+export interface Member {
+  user_id: string;
+  email: string;
+  name: string | null;
+  role: string;
+}
+
+export interface Invitation {
+  invitation_id: string;
+  email: string;
+  role: string;
+  expires_at: string;
+  token: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 export function isHealth(value: unknown): value is Health {
-  if (typeof value !== "object" || value === null) return false;
-  const candidate = value as Record<string, unknown>;
   return (
-    candidate.status === "ok" &&
-    typeof candidate.version === "string" &&
-    typeof candidate.git_sha === "string"
+    isRecord(value) &&
+    value.status === "ok" &&
+    typeof value.version === "string" &&
+    typeof value.git_sha === "string"
+  );
+}
+
+function isMembership(value: unknown): value is Membership {
+  return (
+    isRecord(value) &&
+    typeof value.org_id === "string" &&
+    typeof value.org_name === "string" &&
+    typeof value.role === "string"
+  );
+}
+
+export function isMe(value: unknown): value is Me {
+  return (
+    isRecord(value) &&
+    typeof value.subject === "string" &&
+    typeof value.user_id === "string" &&
+    typeof value.email === "string" &&
+    Array.isArray(value.memberships) &&
+    value.memberships.every(isMembership)
+  );
+}
+
+export function isMember(value: unknown): value is Member {
+  return (
+    isRecord(value) &&
+    typeof value.user_id === "string" &&
+    typeof value.email === "string" &&
+    typeof value.role === "string"
+  );
+}
+
+export function isInvitation(value: unknown): value is Invitation {
+  return (
+    isRecord(value) &&
+    typeof value.invitation_id === "string" &&
+    typeof value.token === "string" &&
+    typeof value.role === "string" &&
+    typeof value.expires_at === "string"
   );
 }
