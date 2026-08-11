@@ -3,10 +3,29 @@
 # Targets grow with the phases; nothing here refers to a component that does not
 # exist yet (plan §4). Run `make` or `make help` for the current list.
 #
-# Requires GNU make, run from a POSIX shell (Git Bash on Windows — the recipes
-# use sh, grep and awk). See README for the prerequisites.
+# Requires GNU make. On Windows run it from Git Bash.
+#
+# Every recipe here is a SINGLE line, deliberately. GNU make hands a recipe to
+# the shell with its backslash-newline continuations intact, and on Windows it
+# falls back to cmd.exe whenever sh.exe is not on PATH — cmd.exe does not
+# understand `\` continuation, so a multi-line recipe silently runs truncated
+# (`docker build --target prod \` alone, which fails with an unhelpful
+# "requires 1 argument"). Anything too long for one line belongs in
+# ops/scripts/*.sh, invoked as `bash ops/scripts/thing.sh`.
+#
+# SHELL is set below when a POSIX shell can be found, so pipelines and quoting
+# behave the same on every machine.
 
 .DEFAULT_GOAL := help
+
+# Prefer a POSIX shell. On Windows this finds Git Bash's sh.exe; if the
+# default shell is already sh, `command -v` answers and nothing changes.
+SH := $(shell command -v sh 2>/dev/null)
+ifneq ($(SH),)
+SHELL := $(SH)
+endif
+
+GIT_SHA := $(shell git rev-parse HEAD 2>/dev/null)
 
 API_DIR := apps/api
 UV_API  := uv run --directory $(API_DIR)
@@ -21,9 +40,7 @@ COMPOSE := docker compose --env-file .env -f ops/docker-compose.yml
 # ---------------------------------------------------------------------------
 .PHONY: help
 help: ## Show available targets
-	@grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' $(MAKEFILE_LIST) \
-		| sort \
-		| awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
+	@grep -hE '^[a-zA-Z0-9_.-]+:.*?## ' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
 
 .PHONY: env
 env: .env ## Create .env from .env.example if it does not exist
@@ -117,9 +134,7 @@ api.dev: ## uvicorn with reload on :8000
 	$(UV_API) uvicorn dataagent.main:app --host 0.0.0.0 --port 8000 --reload
 
 build.api: ## Build the production API image
-	docker build --target prod \
-		--build-arg GIT_SHA=$$(git rev-parse HEAD) \
-		-t dataagent-api:local $(API_DIR)
+	docker build --target prod --build-arg GIT_SHA=$(GIT_SHA) -t dataagent-api:local $(API_DIR)
 
 # ---------------------------------------------------------------------------
 # ops/seed — a standalone uv script, so it has its own dependencies and is not

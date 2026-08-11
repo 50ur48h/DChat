@@ -1,8 +1,8 @@
 # STATUS — data-agent build
 
-Current position: Phase 2 / WP2.1a (PR open, awaiting review)
+Current position: Phase 2 / WP2.1b (PR open, awaiting review)
 Merge policy: ASK
-Blocked on user: review + merge of the WP2.1a PR. Entra IDs are due at WP2.3
+Blocked on user: review + merge of the WP2.1b PR. Entra IDs are due at WP2.3
 Last updated: 2026-08-11 by Claude Code
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
@@ -25,7 +25,7 @@ Last updated: 2026-08-11 by Claude Code
 
 ## Phase 2 — AuthN/AuthZ (M2)
 - [x] WP2.1a JWT validation + JWKS cache + dev issuer (guarded, excluded from prod)
-- [ ] WP2.1b Request context resolution + role guards + audited denials
+- [x] WP2.1b Request context resolution + role guards + audited denials
       — WP2.1 split in two (plan §1.1): authentication and authorization are
       separately reviewable, which matters more than usual in a security phase
 - [ ] WP2.2 Orgs/users/invitations APIs + bootstrap + audit events

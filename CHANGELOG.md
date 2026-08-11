@@ -10,6 +10,9 @@ under "Unreleased", only for changes a user would notice.
 ## [Unreleased]
 
 ### Security
+- Three fixed roles are enforced on every org-scoped route. A refusal is
+  recorded where its organization can find it, and refusals that belong to no
+  organization are kept in a platform security log rather than dropped.
 - Tenant isolation is enforced by the database: every tenant table has a
   row-level security policy, and the API connects as an unprivileged role that
   cannot bypass it. The audit log is append-only by grant.

@@ -11,6 +11,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from dataagent import health
+from dataagent.auth.jwks import JwksCache
+from dataagent.auth.jwt_validator import TokenValidator
 from dataagent.config import Settings, get_settings
 
 
@@ -43,6 +45,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+    )
+
+    # One validator per application: the JWKS cache is the point, and a fresh
+    # one per request would fetch the provider's keys on every call.
+    app.state.token_validator = TokenValidator(
+        issuer=resolved.resolve_issuer(),
+        audience=resolved.oidc_audience,
+        jwks=JwksCache(issuer=resolved.resolve_issuer()),
     )
 
     app.include_router(health.router)
