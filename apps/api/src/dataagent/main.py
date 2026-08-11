@@ -11,8 +11,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from dataagent import health
-from dataagent.auth.jwks import JwksCache
-from dataagent.auth.jwt_validator import TokenValidator
 from dataagent.config import Settings, get_settings
 
 
@@ -47,13 +45,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    # One validator per application: the JWKS cache is the point, and a fresh
-    # one per request would fetch the provider's keys on every call.
-    app.state.token_validator = TokenValidator(
-        issuer=resolved.resolve_issuer(),
-        audience=resolved.oidc_audience,
-        jwks=JwksCache(issuer=resolved.resolve_issuer()),
-    )
+    # Settings, not a validator. Building one here would mean an application
+    # with no identity provider configured could not boot at all — and
+    # /healthz must answer on a bare checkout, which is what WP0.2 promised
+    # and what CI relies on. The validator is built on first use instead, so a
+    # misconfigured deployment fails closed on protected routes rather than
+    # taking down the liveness probe with it.
+    app.state.settings = resolved
+    app.state.token_validator = None
 
     app.include_router(health.router)
 

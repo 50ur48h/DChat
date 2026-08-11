@@ -25,8 +25,10 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from dataagent.auth import audit
 from dataagent.auth.context import AuthorizationError, RequestContext, resolve_context
+from dataagent.auth.jwks import JwksCache
 from dataagent.auth.jwt_validator import TokenValidator
 from dataagent.auth.principal import Principal, TokenError
+from dataagent.config import Settings
 
 #: Roles that may do each class of thing. Named rather than inlined so the matrix
 #: above and the code cannot drift, and so WP2.3's snapshot test has something to
@@ -56,10 +58,27 @@ def _forbidden(message: str) -> HTTPException:
 
 
 def _validator(request: Request) -> TokenValidator:
+    """The application's one validator, built on first use.
+
+    Lazy because an unconfigured identity provider must not stop the process
+    booting — /healthz has to answer on a bare checkout. It does mean a
+    misconfigured deployment discovers the problem on its first protected
+    request; that direction is safe, because the failure is a refusal.
+    """
     validator = getattr(request.app.state, "token_validator", None)
-    if not isinstance(validator, TokenValidator):  # pragma: no cover - wiring error
-        raise RuntimeError("No token validator is configured on this application")
-    return validator
+    if isinstance(validator, TokenValidator):
+        return validator
+
+    settings = getattr(request.app.state, "settings", None)
+    if not isinstance(settings, Settings):  # pragma: no cover - wiring error
+        raise RuntimeError("No settings are configured on this application")
+
+    issuer = settings.resolve_issuer()
+    built = TokenValidator(
+        issuer=issuer, audience=settings.oidc_audience, jwks=JwksCache(issuer=issuer)
+    )
+    request.app.state.token_validator = built
+    return built
 
 
 async def current_principal(
