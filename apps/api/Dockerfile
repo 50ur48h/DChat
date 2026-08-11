@@ -89,6 +89,12 @@ WORKDIR /app
 COPY --from=build --chown=app:app /app/.venv /app/.venv
 COPY --from=build --chown=app:app /app/src /app/src
 
+# The development token issuer is physically absent from this image. Settings
+# already refuse AUTH_MODE=dev in a prod build; removing the module means even a
+# process that somehow got past that check has nothing to import and mint with.
+RUN rm -f /app/src/dataagent/auth/dev_issuer.py \
+    && test ! -f /app/src/dataagent/auth/dev_issuer.py
+
 USER app
 EXPOSE 8000
 

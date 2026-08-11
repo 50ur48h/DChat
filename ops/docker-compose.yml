@@ -59,6 +59,10 @@ services:
       GIT_SHA: ${GIT_SHA:-dev}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      # Explicit, because the default is the stricter mode.
+      AUTH_MODE: ${AUTH_MODE:-dev}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-dataagent-api}
+      DEV_ISSUER_URL: ${DEV_ISSUER_URL:-http://localhost:8000/dev}
       # Built from the same parts as the root DATABASE_URL, but reaching the
       # database over the compose network rather than a published host port.
       DATABASE_URL: postgresql+asyncpg://${PLATFORM_DB_USER:-dataagent}:${PLATFORM_DB_PASSWORD:?set PLATFORM_DB_PASSWORD in .env}@platform-pg:5432/${PLATFORM_DB_NAME:-dataagent}
