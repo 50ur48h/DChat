@@ -63,6 +63,9 @@ services:
       AUTH_MODE: ${AUTH_MODE:-dev}
       OIDC_AUDIENCE: ${OIDC_AUDIENCE:-dataagent-api}
       DEV_ISSUER_URL: ${DEV_ISSUER_URL:-http://localhost:8000/dev}
+      # Where to fetch the provider's discovery document. The expected `iss`
+      # comes from that document, not from configuration (DECISIONS D-009).
+      OIDC_AUTHORITY: ${OIDC_AUTHORITY:-}
       # Built from the same parts as the root DATABASE_URL, but reaching the
       # database over the compose network rather than a published host port.
       DATABASE_URL: postgresql+asyncpg://${PLATFORM_DB_USER:-dataagent}:${PLATFORM_DB_PASSWORD:?set PLATFORM_DB_PASSWORD in .env}@platform-pg:5432/${PLATFORM_DB_NAME:-dataagent}
@@ -91,8 +94,14 @@ services:
       context: ../apps/web
       target: dev
     environment:
-      # The browser resolves this, not the container, so it is a host URL.
+      # The browser resolves these, not the container, so they are host URLs.
+      # NEXT_PUBLIC_* is inlined into the bundle; in this dev target `next dev`
+      # reads them at runtime, so a change here needs only a restart.
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      NEXT_PUBLIC_AUTH_MODE: ${NEXT_PUBLIC_AUTH_MODE:-dev}
+      NEXT_PUBLIC_ENTRA_AUTHORITY: ${NEXT_PUBLIC_ENTRA_AUTHORITY:-}
+      NEXT_PUBLIC_ENTRA_CLIENT_ID: ${NEXT_PUBLIC_ENTRA_CLIENT_ID:-}
+      NEXT_PUBLIC_API_SCOPE: ${NEXT_PUBLIC_API_SCOPE:-}
       # Bind mounts on Windows and macOS do not deliver inotify events.
       WATCHPACK_POLLING: "true"
     ports:
@@ -121,7 +130,10 @@ services:
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_PID: Developer
-      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?set MSSQL_SA_PASSWORD in .env}
+      # Defaulted, not required. Compose resolves `${VAR:?}` for every service
+      # in the file regardless of profiles, so a required variable here would
+      # make plain `make up` fail over a container it never starts.
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:-Local_dev_only_1}
     ports:
       - "${MSSQL_PORT:-1433}:1433"
     volumes:

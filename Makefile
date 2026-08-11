@@ -18,12 +18,17 @@
 
 .DEFAULT_GOAL := help
 
-# Prefer a POSIX shell. On Windows this finds Git Bash's sh.exe; if the
-# default shell is already sh, `command -v` answers and nothing changes.
-SH := $(shell command -v sh 2>/dev/null)
-ifneq ($(SH),)
-SHELL := $(SH)
+# These recipes need a POSIX shell. On Windows, make falls back to cmd.exe
+# whenever sh.exe is not on PATH -- the normal state when make is run from
+# PowerShell, because Git puts cmd\ on PATH but not usr\bin\. Under cmd.exe
+# `printf` does not exist, and a bare `bash` resolves to WSL's bash, which
+# cannot reach the Docker CLI or this drive the same way. Both fail late and
+# confusingly, so probe once and stop with an instruction instead.
+SHELL_PROBE := $(shell sh -c "echo yes" 2>&1)
+ifneq ($(SHELL_PROBE),yes)
+$(error No POSIX shell found, so these recipes cannot run. Use Git Bash, or add Git's usr\bin to PATH first: $$env:PATH = 'C:\Program Files\Git\usr\bin;' + $$env:PATH)
 endif
+SHELL := sh
 
 GIT_SHA := $(shell git rev-parse HEAD 2>/dev/null)
 
@@ -88,7 +93,7 @@ seed: .env ## (Re)build the pizza demo dataset in seed-pizza-pg
 
 .PHONY: db.setup migrate migrate.down migration
 db.setup: .env ## Migrate, then give dataagent_app its local login
-	bash ops/scripts/db_setup.sh
+	$(SHELL) ops/scripts/db_setup.sh
 
 migrate: .env ## alembic upgrade head against the local platform database
 	$(UV_API) alembic upgrade head
