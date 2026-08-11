@@ -9,6 +9,11 @@ under "Unreleased", only for changes a user would notice.
 
 ## [Unreleased]
 
+### Security
+- Tenant isolation is enforced by the database: every tenant table has a
+  row-level security policy, and the API connects as an unprivileged role that
+  cannot bypass it. The audit log is append-only by grant.
+
 ### Added
 - API service (`apps/api`) with `GET /healthz`, reporting application version and
   the commit its image was built from.

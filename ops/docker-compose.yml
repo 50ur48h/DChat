@@ -62,6 +62,8 @@ services:
       # Built from the same parts as the root DATABASE_URL, but reaching the
       # database over the compose network rather than a published host port.
       DATABASE_URL: postgresql+asyncpg://${PLATFORM_DB_USER:-dataagent}:${PLATFORM_DB_PASSWORD:?set PLATFORM_DB_PASSWORD in .env}@platform-pg:5432/${PLATFORM_DB_NAME:-dataagent}
+      # What the request path actually connects as: no superuser, no BYPASSRLS.
+      APP_DATABASE_URL: postgresql+asyncpg://dataagent_app:${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}@platform-pg:5432/${PLATFORM_DB_NAME:-dataagent}
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:

@@ -61,7 +61,12 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = [
     "S101",  # asserts are the point of a test
+    "S608",  # test SQL is built from module constants, never from input
 ]
+# Migrations are DDL assembled from constants in the file itself. There is no
+# request data within a mile of them, and the alternative — hand-quoting every
+# identifier — would be less readable and no safer.
+"src/dataagent/db/alembic/versions/*" = ["S608"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["dataagent"]

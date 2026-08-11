@@ -22,10 +22,15 @@ from sqlalchemy.ext.asyncio import (
 from dataagent.config import Settings, get_settings
 
 
-def build_engine(settings: Settings | None = None) -> AsyncEngine:
+def build_engine(settings: Settings | None = None, *, url: str | None = None) -> AsyncEngine:
+    """An engine for the owner/migration role, or for an explicit DSN.
+
+    The request path does not use this: it goes through
+    ``tenancy.session``, which connects as ``dataagent_app``.
+    """
     resolved = settings if settings is not None else get_settings()
     return create_async_engine(
-        resolved.require_database_url(),
+        url if url is not None else resolved.require_database_url(),
         # We are a polite guest on every database, including our own: small pools
         # keep a scale-to-zero container from monopolising a B-series server.
         pool_size=5,

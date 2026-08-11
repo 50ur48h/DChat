@@ -17,11 +17,29 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["local", "ci", "dev", "prod"]
 
-#: The repository's `.env`, resolved from this file rather than the working
-#: directory: `make migrate` runs Alembic with its cwd inside apps/api, and a
-#: developer running uvicorn by hand may be anywhere. In a container this path
-#: does not exist and configuration comes from the environment, as it should.
-_REPO_ENV_FILE = Path(__file__).resolve().parents[4] / ".env"
+
+def find_env_file(start: Path) -> Path | None:
+    """First ``.env`` at or above ``start``, or None.
+
+    Resolved from the source file rather than the working directory, because
+    `make migrate` runs Alembic with its cwd inside apps/api and a developer
+    running uvicorn by hand may be anywhere.
+
+    Searching upward rather than counting parents is not stylistic: inside the
+    container this module lives at ``/app/src/dataagent/config.py``, which has
+    fewer ancestors than the repository layout. A fixed index raised IndexError
+    there — at import time, so the image would not start at all.
+    """
+    for parent in start.resolve().parents:
+        candidate = parent / ".env"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+#: In a container there is no .env and configuration comes from the environment,
+#: which is how it should be; this is a local-development convenience only.
+_REPO_ENV_FILE = find_env_file(Path(__file__))
 
 
 class Settings(BaseSettings):
@@ -35,7 +53,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         # Later entries win, so a directory-local .env can override the repo one.
-        env_file=(_REPO_ENV_FILE, ".env"),
+        env_file=(_REPO_ENV_FILE, ".env") if _REPO_ENV_FILE else ".env",
         env_file_encoding="utf-8",
         extra="ignore",
         frozen=True,
@@ -61,8 +79,15 @@ class Settings(BaseSettings):
     database_url: str | None = Field(
         default=None,
         description=(
-            "Platform Postgres DSN, e.g. postgresql+asyncpg://user:pw@host:5432/db. "
-            "Optional so the app still boots for /healthz without a database."
+            "Owner/migration DSN, e.g. postgresql+asyncpg://user:pw@host:5432/db. "
+            "Used by Alembic only. Optional so the app still boots for /healthz."
+        ),
+    )
+    app_database_url: str | None = Field(
+        default=None,
+        description=(
+            "Runtime DSN, connecting as dataagent_app: no superuser, no BYPASSRLS, "
+            "owner of nothing. Everything the request path touches goes through it."
         ),
     )
 
@@ -85,7 +110,7 @@ class Settings(BaseSettings):
         return tuple(origin.strip() for origin in text.split(",") if origin.strip())
 
     def require_database_url(self) -> str:
-        """The DSN, or a failure that names the fix.
+        """The owner DSN, or a failure that names the fix.
 
         Code paths that genuinely need the database call this instead of reading
         the optional field, so a missing DSN surfaces as one clear message rather
@@ -97,6 +122,21 @@ class Settings(BaseSettings):
                 "and start the platform database with `make up`."
             )
         return self.database_url
+
+    def require_app_database_url(self) -> str:
+        """The runtime DSN. Never falls back to the owner DSN.
+
+        A fallback here would mean that forgetting one environment variable
+        silently promotes the API to the role that owns every table — which
+        ``FORCE ROW LEVEL SECURITY`` would still contain, but which is exactly
+        the kind of quiet privilege drift this separation exists to prevent.
+        """
+        if not self.app_database_url:
+            raise RuntimeError(
+                "APP_DATABASE_URL is not set. It must connect as dataagent_app, "
+                "not as the owner. Run `make db.setup` after `make up`."
+            )
+        return self.app_database_url
 
 
 @lru_cache(maxsize=1)

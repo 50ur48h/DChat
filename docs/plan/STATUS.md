@@ -1,8 +1,8 @@
 # STATUS — data-agent build
 
-Current position: Phase 1 / WP1.1 (PR open, awaiting review)
+Current position: Phase 1 / WP1.2 (PR open, awaiting review)
 Merge policy: ASK
-Blocked on user: review + merge of the WP1.1 PR — WP1.2 builds directly on it
+Blocked on user: review + merge of the WP1.2 PR — WP1.3 is the Phase 1 gate
 Last updated: 2026-08-11 by Claude Code
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
@@ -18,7 +18,7 @@ Last updated: 2026-08-11 by Claude Code
 - [x] WP1.1 SQLAlchemy models + alembic + core tables
       — also added CI's Postgres service + `DATABASE_URL` + `REQUIRE_DB=1`,
       the migration up/down test deferred from WP0.5 (DECISIONS D-006, done)
-- [ ] WP1.2 RLS migration + tenancy session + base repository
+- [x] WP1.2 RLS migration + tenancy session + base repository
 - [ ] WP1.3 RLS proof tests + migration up/down in CI            ← gate PR
 - [ ] GATE: cross-org read provably blocked; user sign-off
 

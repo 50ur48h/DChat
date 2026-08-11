@@ -18,6 +18,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from alembic import command
 from alembic.config import Config
 from sqlalchemy import URL, make_url, text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -25,6 +26,9 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from dataagent.config import Settings
 
 API_DIR = Path(__file__).resolve().parents[2]
+
+#: The unprivileged role the API connects as, created by migration 0002.
+APP_ROLE = "dataagent_app"
 
 #: Connecting to a database in order to create another one has to happen through
 #: some existing database; `postgres` is present on every server.
@@ -105,3 +109,56 @@ def alembic_config(temp_database: URL, monkeypatch: pytest.MonkeyPatch) -> Confi
     config = Config(str(API_DIR / "alembic.ini"))
     config.set_main_option("script_location", str(API_DIR / "src" / "dataagent" / "db" / "alembic"))
     return config
+
+
+@pytest.fixture(scope="session")
+def app_role_password() -> str:
+    """The password the application role should carry, taken from APP_DATABASE_URL.
+
+    Reusing the configured value rather than inventing one matters: ``ALTER ROLE``
+    is cluster-wide, so a test that made up its own password would silently
+    change the credential of the developer's running stack.
+    """
+    raw = Settings().app_database_url
+    if not raw:
+        message = "APP_DATABASE_URL is not set"
+        if os.environ.get("REQUIRE_DB") == "1":
+            pytest.fail(f"REQUIRE_DB=1 but {message}")
+        pytest.skip(f"{message} — run `make db.setup`")
+    return make_url(raw).password or ""
+
+
+@pytest.fixture
+def migrated_database(alembic_config: Config, temp_database: URL) -> URL:
+    """A temp database at head: schema, RLS policies and the application role."""
+    command.upgrade(alembic_config, "head")
+    return temp_database
+
+
+@pytest.fixture
+def app_database(migrated_database: URL, app_role_password: str) -> URL:
+    """A DSN for the same database, connecting as ``dataagent_app``.
+
+    Migration 0002 creates that role without LOGIN, exactly as it will exist in
+    production; granting it a password is environment provisioning, which here
+    means this fixture.
+    """
+
+    # ALTER ROLE is DDL and cannot take a bind parameter, so the password has to
+    # be a literal. Doubling single quotes is the correct and complete escaping
+    # for a string literal while standard_conforming_strings is on, which is the
+    # default and which PostgreSQL has not allowed to be turned off since 9.1.
+    literal = "'{}'".format(app_role_password.replace("'", "''"))
+
+    async def _grant_login() -> None:
+        engine = create_async_engine(migrated_database, isolation_level="AUTOCOMMIT")
+        try:
+            async with engine.connect() as connection:
+                await connection.execute(
+                    text(f"ALTER ROLE {APP_ROLE} WITH LOGIN PASSWORD {literal}")
+                )
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_grant_login())
+    return migrated_database.set(username=APP_ROLE, password=app_role_password)
