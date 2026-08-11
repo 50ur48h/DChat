@@ -25,6 +25,10 @@ import {
 } from "react";
 
 import { authConfig, missingEntraSettings, type AuthConfig } from "./config";
+
+// Without these the token carries no email or name, and a person shows up as
+// their opaque subject id.
+const OIDC_SCOPES = ["openid", "profile", "email"];
 import {
   forgetDevSubject,
   mintDevToken,
@@ -47,6 +51,35 @@ export interface Session {
 }
 
 const SessionContext = createContext<Session | null>(null);
+
+/**
+ * One MSAL instance per page, created outside React and initialized once.
+ *
+ * React Strict Mode invokes effects twice in development. Creating the instance
+ * inside the effect made two of them: the first consumed the redirect response
+ * and cached the account, then had its result discarded because cleanup had
+ * already run; the second called handleRedirectPromise() on a spent response,
+ * got null, and raced the first one's cache write. The visible symptom was
+ * landing back on the sign-in screen and having to click Sign in a second time.
+ */
+let msalInstance: PublicClientApplication | null = null;
+let msalReady: Promise<IPublicClientApplication> | null = null;
+
+function msalOnce(authority: string, clientId: string): Promise<IPublicClientApplication> {
+  if (msalReady) return msalReady;
+  msalInstance = new PublicClientApplication({
+    auth: { authority, clientId, redirectUri: "/" },
+    cache: { cacheLocation: "sessionStorage" },
+  });
+  const instance = msalInstance;
+  msalReady = instance
+    .initialize()
+    // Must run before anything else touches the cache, and exactly once: the
+    // response is consumed by the first caller.
+    .then(() => instance.handleRedirectPromise())
+    .then(() => instance);
+  return msalReady;
+}
 
 export function useSession(): Session {
   const session = useContext(SessionContext);
@@ -86,20 +119,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (config.mode !== "entra" || problems.length > 0) return;
     let cancelled = false;
 
-    const instance = new PublicClientApplication({
-      auth: { authority: config.authority, clientId: config.clientId, redirectUri: "/" },
-      cache: { cacheLocation: "sessionStorage" },
-    });
-
-    instance
-      .initialize()
-      .then(() => instance.handleRedirectPromise())
-      .then((result) => {
+    msalOnce(config.authority, config.clientId)
+      .then((instance) => {
         if (cancelled) return;
-        const signedIn = result?.account ?? instance.getAllAccounts()[0] ?? null;
+        // Read the account after initialization has settled, not from the
+        // redirect result: whichever mount consumed the response, the account
+        // is in the shared cache by now.
+        const signedIn = instance.getActiveAccount() ?? instance.getAllAccounts()[0] ?? null;
+        if (signedIn) instance.setActiveAccount(signedIn);
         setMsal(instance);
         setAccount(signedIn);
-        setWho(signedIn?.username ?? null);
+        setWho(signedIn?.username ?? signedIn?.name ?? null);
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(cause instanceof Error ? cause.message : "Sign-in failed");
@@ -115,14 +145,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     if (!msal || !account) return null;
     try {
       const result = await msal.acquireTokenSilent({
-        scopes: [config.apiScope],
+        scopes: [...OIDC_SCOPES, config.apiScope],
         account,
       });
       return result.accessToken;
     } catch {
       // A silent failure means interaction is required; ask for it rather than
       // leaving the caller with a null token and no explanation.
-      await msal.acquireTokenRedirect({ scopes: [config.apiScope], account });
+      await msal.acquireTokenRedirect({ scopes: [...OIDC_SCOPES, config.apiScope], account });
       return null;
     }
   }, [config.mode, config.apiScope, devToken, msal, account]);
@@ -140,7 +170,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           return;
         }
         if (!msal) throw new Error("Sign-in is still starting up. Try again in a moment.");
-        await msal.loginRedirect({ scopes: [config.apiScope] });
+        await msal.loginRedirect({ scopes: [...OIDC_SCOPES, config.apiScope] });
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : "Sign-in failed");
       } finally {

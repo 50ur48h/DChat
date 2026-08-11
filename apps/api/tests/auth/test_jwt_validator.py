@@ -278,3 +278,23 @@ async def test_a_third_partys_audience_is_still_refused() -> None:
         await validator.validate(_mint(aud="00000003-0000-0000-c000-000000000000"))
 
     assert caught.value.code == "bad_audience"
+
+
+async def test_identity_falls_back_to_whatever_claim_the_provider_sent() -> None:
+    """Entra populates email, preferred_username or upn depending on the tenant.
+
+    Regression: with only `email` consulted, a real Entra sign-in showed the
+    person their opaque subject id at `@unknown.invalid`.
+    """
+    principal = await _validator().validate(
+        _mint(email=None, name=None, preferred_username="person@contoso.com", given_name="Person")
+    )
+
+    assert principal.email == "person@contoso.com"
+    assert principal.name == "Person"
+
+
+async def test_email_still_wins_when_it_is_present() -> None:
+    principal = await _validator().validate(_mint(preferred_username="other@contoso.com"))
+
+    assert principal.email == "person@example.com"
