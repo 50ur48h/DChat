@@ -43,6 +43,31 @@ does not exist yet; the protection that matters in that window (no direct pushes
 no force-push, no branch deletion) is live from commit one. Plan §4.5 updated to
 say the same thing so the document does not lie.
 
+## D-008 — 401s are logged, 403s are audited, and orphan denials get their own table
+Date: 2026-08-11 · Phase: 2 · PR: WP2.1b · Approved by the owner before implementation
+Context: Plan §6 WP2.1 says "every 401/403 writes an `audit_log` row", but
+`audit_log.org_id` is NOT NULL and RLS-scoped. A 401 has no trustworthy identity
+and therefore no organization; taking one from the URL would let an
+unauthenticated caller choose whose audit log to fill, which is a denial-of-service
+against the very record meant to detect abuse.
+Options: (a) make `audit_log.org_id` nullable; (b) attribute 401s to the
+organization named in the path; (c) split by how much is actually known.
+Decision: (c), three destinations.
+  * **401, no trustworthy identity** → application log only. Nothing stored.
+  * **403 with a resolved membership** → `audit_log`, scoped to that org. This is
+    the row an admin expects to find, and the M2 acceptance criterion.
+  * **403 with no resolvable organization** (unknown subject, or a known account
+    asking for a tenant it does not belong to) → `security_events`, a new
+    platform-level table added in revision 0003. Not tenant-scoped, append-only
+    for the app role, indexed on `actor_subject` and `attempted_org_id`.
+Consequences: "which accounts are probing for tenants they do not belong to" is
+one indexed query, and nothing is lost. `security_events` names its organization
+column `attempted_org_id` rather than `org_id` on purpose — it records what was
+asked for, not what the row belongs to, and the RLS proof suite treats any
+`org_id` column as a tenant scope that must be declared and protected, so
+misnaming it would either break that guard or quietly weaken it. Plan §6 WP2.1's
+wording is superseded on this point.
+
 ## D-007 — CI path filters gate steps, not jobs
 Date: 2026-08-11 · Phase: 0 · PR: WP0.5
 Context: Plan §4.1 puts `if: needs.changes.outputs.api == 'true'` on the `api`

@@ -45,6 +45,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Settings, not a validator. Building one here would mean an application
+    # with no identity provider configured could not boot at all — and
+    # /healthz must answer on a bare checkout, which is what WP0.2 promised
+    # and what CI relies on. The validator is built on first use instead, so a
+    # misconfigured deployment fails closed on protected routes rather than
+    # taking down the liveness probe with it.
+    app.state.settings = resolved
+    app.state.token_validator = None
+
     app.include_router(health.router)
 
     if resolved.auth_mode == "dev":

@@ -28,6 +28,11 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from dataagent.db.base import ROLES, Base, CreatedAt, OrgId, UuidPk
 
+# Imported for its side effect: the table has to be on Base.metadata or
+# Alembic autogenerate would propose dropping it. Not tenant-scoped, so it
+# lives outside this module and outside TENANT_TABLES (DECISIONS D-008).
+from dataagent.db.security_events import SecurityEvent
+
 __all__ = [
     "TENANT_TABLES",
     "AuditLog",
@@ -35,6 +40,7 @@ __all__ = [
     "Invitation",
     "OrgMembership",
     "Organization",
+    "SecurityEvent",
     "User",
 ]
 

@@ -87,3 +87,17 @@ def test_find_env_file_locates_a_dot_env_above_it(tmp_path: Path) -> None:
     nested.mkdir(parents=True)
 
     assert find_env_file(nested / "config.py") == tmp_path / ".env"
+
+
+def test_the_app_boots_with_no_identity_provider_configured() -> None:
+    """The promise from WP0.2: /healthz answers on a bare checkout.
+
+    Regression: building the token validator eagerly made an unconfigured
+    AUTH_MODE=entra fatal at import, which broke every test in CI while passing
+    locally, where a developer's .env happens to set AUTH_MODE=dev.
+    """
+    from dataagent.main import create_app
+
+    app = create_app(settings=Settings(env="ci", build_env="dev", auth_mode="entra"))
+
+    assert app.state.token_validator is None
