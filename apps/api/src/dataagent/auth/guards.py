@@ -73,9 +73,11 @@ def _validator(request: Request) -> TokenValidator:
     if not isinstance(settings, Settings):  # pragma: no cover - wiring error
         raise RuntimeError("No settings are configured on this application")
 
-    issuer = settings.resolve_issuer()
+    authority = settings.resolve_authority()
     built = TokenValidator(
-        issuer=issuer, audience=settings.oidc_audience, jwks=JwksCache(issuer=issuer)
+        issuer=settings.oidc_issuer,
+        audience=settings.oidc_audience,
+        jwks=JwksCache(issuer=authority),
     )
     request.app.state.token_validator = built
     return built

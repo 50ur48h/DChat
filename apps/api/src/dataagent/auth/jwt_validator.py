@@ -32,7 +32,16 @@ LEEWAY_SECONDS = 30
 
 
 class TokenValidator:
-    def __init__(self, issuer: str, audience: str, jwks: JwksCache) -> None:
+    def __init__(self, issuer: str | None, audience: str, jwks: JwksCache) -> None:
+        """``issuer`` pins the expected issuer; None means "trust discovery".
+
+        Trusting discovery is the better default. A Microsoft Entra external
+        tenant publishes its metadata at one host and issues tokens claiming
+        another, and the *same* tenant also answers on login.microsoftonline.com
+        with a different issuer — so a hand-written value is a coin flip that
+        fails every token with bad_issuer. Pinning remains available for a
+        provider whose discovery document cannot be trusted.
+        """
         self._issuer = issuer
         self._audience = audience
         self._jwks = jwks
@@ -54,13 +63,18 @@ class TokenValidator:
 
         key = await self._jwks.key_for(kid)
 
+        # After key_for, discovery has run at least once.
+        expected_issuer = self._issuer or self._jwks.discovered_issuer
+        if not expected_issuer:  # pragma: no cover - only if discovery is empty
+            raise TokenError("no_issuer", "No issuer is configured or discoverable")
+
         try:
             claims: dict[str, Any] = jwt.decode(
                 token,
                 key=key,  # type: ignore[arg-type]
                 algorithms=ALGORITHMS,
                 audience=self._audience,
-                issuer=self._issuer,
+                issuer=expected_issuer,
                 leeway=LEEWAY_SECONDS,
                 options={"require": ["exp", "iss", "aud", "sub"], "verify_signature": True},
             )

@@ -31,6 +31,7 @@ class _JwksFromDocument(JwksCache):
         self._keys = {
             key.key_id: key for key in jwt.PyJWKSet.from_dict(document).keys if key.key_id
         }
+        self.discovered_issuer = issuer
         self._fetched_at = time.monotonic()
 
 
@@ -56,9 +57,9 @@ async def test_a_dev_token_passes_the_real_validator() -> None:
 
     assert minted.status_code == 200
     validator = TokenValidator(
-        issuer=settings.resolve_issuer(),
+        issuer=settings.resolve_authority(),
         audience=settings.oidc_audience,
-        jwks=_JwksFromDocument(settings.resolve_issuer(), keys.json()),
+        jwks=_JwksFromDocument(settings.resolve_authority(), keys.json()),
     )
 
     principal = await validator.validate(minted.json()["access_token"])
@@ -101,9 +102,9 @@ async def test_a_token_from_a_different_application_does_not_verify_here() -> No
         keys = (await client.get("/dev/jwks.json")).json()
 
     validator = TokenValidator(
-        issuer=settings.resolve_issuer(),
+        issuer=settings.resolve_authority(),
         audience=settings.oidc_audience,
-        jwks=_JwksFromDocument(settings.resolve_issuer(), keys),
+        jwks=_JwksFromDocument(settings.resolve_authority(), keys),
     )
 
     with pytest.raises(TokenError) as caught:
@@ -141,7 +142,7 @@ async def test_the_dev_routes_are_absent_when_auth_mode_is_not_dev() -> None:
     assert not hasattr(app.state, "dev_issuer")
 
 
-def test_entra_mode_without_an_issuer_is_refused() -> None:
-    """Falling back to "no issuer check" would be worse than having no auth."""
-    with pytest.raises(RuntimeError, match="requires OIDC_ISSUER"):
-        Settings(auth_mode="entra").resolve_issuer()
+def test_entra_mode_without_an_authority_is_refused() -> None:
+    """Nothing to discover keys from means every token taken on trust."""
+    with pytest.raises(RuntimeError, match="requires OIDC_AUTHORITY"):
+        Settings(auth_mode="entra").resolve_authority()

@@ -36,10 +36,18 @@ def _no_keys() -> dict[str, PyJWK]:
 
 @dataclass
 class JwksCache:
+    #: Where the discovery document lives. Not necessarily the issuer.
     issuer: str
     ttl_seconds: float = 3600.0
     timeout_seconds: float = 5.0
     _keys: dict[str, PyJWK] = field(default_factory=_no_keys, init=False)
+    #: The issuer the provider says it is, read from its discovery document.
+    #: Trusted over anything configured by hand: for a Microsoft Entra
+    #: external tenant the discovery host and the issuer host differ
+    #: (dchat.ciamlogin.com vs <tenant-id>.ciamlogin.com), and the same tenant
+    #: also answers on login.microsoftonline.com with a *different* issuer.
+    #: A hand-written guess fails every token with bad_issuer.
+    discovered_issuer: str | None = field(default=None, init=False)
     _fetched_at: float = field(default=0.0, init=False)
     _last_attempt_at: float = field(default=0.0, init=False)
 
@@ -68,7 +76,9 @@ class JwksCache:
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 discovery = await client.get(self.issuer.rstrip("/") + DISCOVERY_PATH)
                 discovery.raise_for_status()
-                jwks_uri = discovery.json()["jwks_uri"]
+                document_json = discovery.json()
+                jwks_uri = document_json["jwks_uri"]
+                discovered_issuer = document_json["issuer"]
 
                 document = await client.get(jwks_uri)
                 document.raise_for_status()
@@ -80,4 +90,5 @@ class JwksCache:
             raise TokenError("jwks_unavailable", "Could not retrieve signing keys") from error
 
         self._keys = {key.key_id: key for key in jwt.PyJWKSet.from_dict(payload).keys if key.key_id}
+        self.discovered_issuer = discovered_issuer
         self._fetched_at = now

@@ -46,6 +46,7 @@ class _StubJwks(JwksCache):
         self._keys = {
             key.key_id: key for key in jwt.PyJWKSet.from_dict(document).keys if key.key_id
         }
+        self.discovered_issuer = ISSUER
         self._fetched_at = time.monotonic()
 
 
@@ -213,3 +214,33 @@ async def test_optional_claims_may_be_absent() -> None:
     assert principal.subject == "user-123"
     assert principal.email is None
     assert principal.name is None
+
+
+async def test_the_issuer_is_taken_from_discovery_when_not_pinned() -> None:
+    """issuer=None means "believe the discovery document".
+
+    This is the default because a Microsoft Entra external tenant publishes its
+    metadata at <prefix>.ciamlogin.com while issuing tokens that claim
+    <tenant-id>.ciamlogin.com — and the same tenant also answers on
+    login.microsoftonline.com with a third value. Verified against a real tenant
+    before this was written; a hand-configured guess would reject every token.
+    """
+    validator = TokenValidator(issuer=None, audience=AUDIENCE, jwks=_StubJwks(_jwks(_TRUSTED_KEY)))
+
+    principal = await validator.validate(_mint())
+
+    assert principal.subject == "user-123"
+
+
+async def test_a_pinned_issuer_still_wins_when_it_disagrees() -> None:
+    """Pinning remains available for a provider whose metadata is not trusted."""
+    validator = TokenValidator(
+        issuer="https://pinned.example.com",
+        audience=AUDIENCE,
+        jwks=_StubJwks(_jwks(_TRUSTED_KEY)),
+    )
+
+    with pytest.raises(TokenError) as caught:
+        await validator.validate(_mint())
+
+    assert caught.value.code == "bad_issuer"
