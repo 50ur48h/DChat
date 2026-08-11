@@ -69,7 +69,10 @@ ps: ## Show stack status
 seed: .env ## (Re)build the pizza demo dataset in seed-pizza-pg
 	uv run ops/seed/seed_pizza.py
 
-.PHONY: migrate migrate.down migration
+.PHONY: db.setup migrate migrate.down migration
+db.setup: .env ## Migrate, then give dataagent_app its local login
+	bash ops/scripts/db_setup.sh
+
 migrate: .env ## alembic upgrade head against the local platform database
 	$(UV_API) alembic upgrade head
 

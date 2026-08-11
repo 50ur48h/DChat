@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from dataagent.config import Settings, get_settings
+from dataagent.config import Settings, find_env_file, get_settings
 
 
 def test_defaults_are_safe_for_local_development() -> None:
@@ -57,3 +59,21 @@ def test_settings_are_immutable() -> None:
 
 def test_get_settings_is_cached() -> None:
     assert get_settings() is get_settings()
+
+
+def test_find_env_file_survives_a_shallow_path() -> None:
+    """Regression: the container layout has fewer ancestors than the repo layout.
+
+    Counting parents from this module raised IndexError at *import* time inside
+    the image, so the API could not start at all — invisible from a repo checkout,
+    fatal in production.
+    """
+    assert find_env_file(Path("/app/src/dataagent/config.py")) is None
+
+
+def test_find_env_file_locates_a_dot_env_above_it(tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("ENV=local\n", encoding="utf-8")
+    nested = tmp_path / "apps" / "api" / "src"
+    nested.mkdir(parents=True)
+
+    assert find_env_file(nested / "config.py") == tmp_path / ".env"

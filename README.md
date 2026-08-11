@@ -40,8 +40,9 @@ the phases deliver them.
 ## Quickstart
 
 ```bash
-make up      # .env from .env.example, then platform Postgres + demo DB + api + web
-make seed    # build the pizza demo dataset (~72k orders, about 5 seconds)
+make up        # .env from .env.example, then platform Postgres + demo DB + api + web
+make db.setup  # migrate, and give the API's unprivileged role its login
+make seed      # build the pizza demo dataset (~72k orders, about 5 seconds)
 ```
 
 Then open <http://localhost:3000>: the page reports the API's health, version and
@@ -52,7 +53,7 @@ throws the volumes away. `make logs` follows all services, `make ps` shows statu
 |---|---|---|
 | web | http://localhost:3000 | Next.js app |
 | api | http://localhost:8000/healthz | FastAPI service |
-| platform-pg | localhost:5432 | the platform's own database (pgvector) |
+| platform-pg | localhost:5432 | the platform's own database (pgvector, row-level security) |
 | seed-pizza-pg | localhost:6543 | stands in for a *customer's* database |
 
 `seed-pizza-pg` holds a generated 18-month pizza-chain dataset. It is a fixture

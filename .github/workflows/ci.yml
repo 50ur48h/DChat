@@ -69,7 +69,11 @@ jobs:
       # Migration and isolation tests need a real server. REQUIRE_DB turns their
       # local "skip when nothing is reachable" into a hard failure here — a
       # silently skipped RLS proof would be worse than having no proof at all.
+      # Owner role: migrations and test-database creation.
       DATABASE_URL: postgresql+asyncpg://postgres:test@localhost:5432/postgres
+      # The unprivileged role the RLS proof suite connects as. Only the username
+      # and password are read from this; each test builds its own database name.
+      APP_DATABASE_URL: postgresql+asyncpg://dataagent_app:apptest@localhost:5432/postgres
       REQUIRE_DB: "1"
     services:
       # pgvector, not plain postgres: revision 0001 creates the vector extension.

@@ -14,6 +14,7 @@ MERGE_POLICY: ASK        # ASK | AUTO — see docs/plan/implementation-plan.md �
 make up / make down     # local stack (compose: platform-pg, seed DBs, api, web)
 make seed               # (re)build the pizza demo dataset
 make migrate            # alembic upgrade head against local platform-pg
+make db.setup           # migrate + grant dataagent_app its local login
 make api.dev / web.dev  # hot-reload dev servers
 make lint / typecheck / test / fmt
 make evals              # eval harness with FakeLLM (Phase 9+)
@@ -27,6 +28,10 @@ make evals              # eval harness with FakeLLM (Phase 9+)
 - Deviating from docs/architecture.md → DECISIONS.md entry + doc edit, same PR.
 - dal/ and infra/ changes always need human review.
 - The LLM is never a security boundary; all data access goes through dal/.
+- The API connects as `dataagent_app` (no superuser, no BYPASSRLS, owns
+  nothing). Migrations run as the owner. Never collapse the two.
+- Every new tenant table needs an RLS policy in the same PR, plus a line in
+  `TENANT_TABLES` and an extension of the rls_proof suite.
 
 ## Environment quirks
 - Python via uv (apps/api); Node via pnpm (apps/web).
