@@ -32,9 +32,11 @@ make evals              # eval harness with FakeLLM (Phase 9+)
   nothing). Migrations run as the owner. Never collapse the two.
 - Every new tenant table needs an RLS policy in the same PR, plus a line in
   `TENANT_TABLES` and an extension of the rls_proof suite.
-- **Every gate PR, and any PR changing something user-visible, ends with a
-  manual test script**: numbered steps and what the user should see at each.
-  Include the failure case, not just the happy path.
+- **Every gate PR ends with a manual test script**: numbered steps and what
+  the user should see at each, including the failure case.
+- Mid-phase, verify it yourself and report the evidence. Only ask the user to
+  check what you genuinely cannot: rendered browser UI, anything specific to
+  their machine, and decisions. Their time is the scarce resource.
 
 ## Environment quirks
 - Python via uv (apps/api); Node via pnpm (apps/web).

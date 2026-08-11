@@ -18,6 +18,10 @@ under "Unreleased", only for changes a user would notice.
   cannot bypass it. The audit log is append-only by grant.
 
 ### Added
+- Sign in, create an organization, invite people to it by email with a role,
+  and accept an invitation. `GET /v1/me` shows who you are and which
+  organizations you belong to. The last Admin cannot demote or remove
+  themselves.
 - API service (`apps/api`) with `GET /healthz`, reporting application version and
   the commit its image was built from.
 - Web app (`apps/web`) with a landing page that reports whether the API is

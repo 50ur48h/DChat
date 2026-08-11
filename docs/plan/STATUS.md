@@ -1,8 +1,9 @@
 # STATUS — data-agent build
 
-Current position: Phase 2 / WP2.1b (PR open, awaiting review)
+Current position: Phase 2 / WP2.2 (PR open, awaiting review)
 Merge policy: ASK
-Blocked on user: review + merge of the WP2.1b PR. Entra IDs are due at WP2.3
+Blocked on user: review + merge of the WP2.2 PR. WP2.3 is the Phase 2 gate and
+                 needs the Entra IDs (plan §3.2) — ask before starting it
 Last updated: 2026-08-11 by Claude Code
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
@@ -28,7 +29,7 @@ Last updated: 2026-08-11 by Claude Code
 - [x] WP2.1b Request context resolution + role guards + audited denials
       — WP2.1 split in two (plan §1.1): authentication and authorization are
       separately reviewable, which matters more than usual in a security phase
-- [ ] WP2.2 Orgs/users/invitations APIs + bootstrap + audit events
+- [x] WP2.2 Orgs/users/invitations APIs + bootstrap + audit events
 - [ ] WP2.3 Web auth (MSAL) + /me + invite UI + role matrix tests ← gate PR
 - [ ] GATE: signup→org→invite Reader; Reader 403 audited; user sign-off
 

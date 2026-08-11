@@ -12,6 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from dataagent import health
 from dataagent.config import Settings, get_settings
+from dataagent.invitations import routes as invitation_routes
+from dataagent.orgs import routes as orgs_routes
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -55,6 +57,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.token_validator = None
 
     app.include_router(health.router)
+    app.include_router(orgs_routes.router)
+    app.include_router(invitation_routes.router)
 
     if resolved.auth_mode == "dev":
         # Imported here, not at module scope: the prod image does not contain
