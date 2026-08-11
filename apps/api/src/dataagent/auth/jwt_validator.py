@@ -18,6 +18,7 @@ which half of the forgery worked.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import jwt
@@ -32,7 +33,7 @@ LEEWAY_SECONDS = 30
 
 
 class TokenValidator:
-    def __init__(self, issuer: str | None, audience: str, jwks: JwksCache) -> None:
+    def __init__(self, issuer: str | None, audience: str | Sequence[str], jwks: JwksCache) -> None:
         """``issuer`` pins the expected issuer; None means "trust discovery".
 
         Trusting discovery is the better default. A Microsoft Entra external

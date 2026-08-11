@@ -104,7 +104,12 @@ class Settings(BaseSettings):
     )
     oidc_audience: str = Field(
         default="dataagent-api",
-        description="Audience every accepted token must carry — this API, and no other.",
+        description=(
+            "Audience every accepted token must carry. Comma-separated when one API "
+            "is known by more than one name: Entra v2 access tokens carry the "
+            "resource's client-ID GUID, while v1 tokens carry its api:// URI. Both "
+            "name the same app registration, so accepting both is not a widening."
+        ),
     )
     dev_issuer_url: str = Field(
         default="http://localhost:8000/dev",
@@ -143,6 +148,15 @@ class Settings(BaseSettings):
         if text.startswith("["):
             return json.loads(text)
         return tuple(origin.strip() for origin in text.split(",") if origin.strip())
+
+    def resolve_audiences(self) -> list[str]:
+        """Every audience value that identifies *this* API.
+
+        A token is still accepted only if it names this one registration; the
+        list exists because Entra spells that registration differently depending
+        on the token version it issued.
+        """
+        return [part.strip() for part in self.oidc_audience.split(",") if part.strip()]
 
     def resolve_authority(self) -> str:
         """Where to fetch the provider's discovery document."""
