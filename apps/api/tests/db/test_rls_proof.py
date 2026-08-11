@@ -5,15 +5,21 @@ and tries to do the thing the design forbids. They are marked ``rls_proof`` and
 may never be skipped or xfailed (plan §4.4); WP1.3 asserts in CI that the marker
 really ran.
 
-The load-bearing test is ``test_unfiltered_select_returns_only_the_session_org``:
-it issues a deliberately unfiltered ``SELECT *``, the exact bug a repository is
-most likely to contain, and shows the database refusing to leak.
+The load-bearing test is ``test_unfiltered_select_leaks_nothing_from_any_tenant_table``:
+it issues a deliberately unfiltered ``SELECT *`` against every tenant table, the
+exact bug a repository is most likely to contain, and shows the database
+refusing to leak.
+
+``test_no_tenant_table_can_be_added_without_protecting_it`` is what keeps this
+suite honest as the schema grows: it asks the database which tables carry
+``org_id`` and fails if any of them is undeclared or unprotected.
 """
 
 from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import pytest
@@ -48,15 +54,37 @@ async def _rows(url: URL, statement: str, org_id: uuid.UUID | None = None) -> Se
         await connection.engine.dispose()
 
 
-async def _seed_two_orgs(owner_url: URL) -> tuple[uuid.UUID, uuid.UUID]:
-    """Create two organizations with a row in every tenant table.
+@dataclass(frozen=True)
+class SeededOrgs:
+    """Two organizations, each with exactly one row in every tenant table."""
 
-    Written as the owner, which is also subject to FORCE RLS, so each insert sets
-    ``app.org_id`` first — proving on the way in that the WITH CHECK clause is live.
+    a: uuid.UUID
+    b: uuid.UUID
+    user_id: uuid.UUID
+
+
+async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
+    """Populate every tenant table for two organizations.
+
+    The *same* user belongs to both, which is the realistic case and a sharper
+    test: isolation has to come from the organization, not from the user.
+
+    Written as the owner, which FORCE RLS also subjects to the policies, so every
+    insert sets ``app.org_id`` first — proving the WITH CHECK clause is live on
+    the way in.
     """
-    org_a, org_b = uuid.uuid4(), uuid.uuid4()
+    org_a, org_b, user_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     engine = create_async_engine(owner_url)
     try:
+        async with engine.begin() as connection:
+            # users is global: no org_id, no policy, one row shared by both orgs.
+            await connection.execute(
+                text(
+                    "INSERT INTO users (id, external_subject, email) VALUES (:id, :subject, :email)"
+                ),
+                {"id": user_id, "subject": f"sub-{user_id}", "email": "person@example.com"},
+            )
+
         for org_id, name in ((org_a, "Org A"), (org_b, "Org B")):
             async with engine.begin() as connection:
                 await connection.execute(
@@ -65,6 +93,13 @@ async def _seed_two_orgs(owner_url: URL) -> tuple[uuid.UUID, uuid.UUID]:
                 await connection.execute(
                     text("INSERT INTO organizations (id, name) VALUES (:id, :name)"),
                     {"id": org_id, "name": name},
+                )
+                await connection.execute(
+                    text(
+                        "INSERT INTO org_memberships (org_id, user_id, role) "
+                        "VALUES (:org, :user, 'admin')"
+                    ),
+                    {"org": org_id, "user": user_id},
                 )
                 await connection.execute(
                     text(
@@ -79,7 +114,30 @@ async def _seed_two_orgs(owner_url: URL) -> tuple[uuid.UUID, uuid.UUID]:
                 )
     finally:
         await engine.dispose()
-    return org_a, org_b
+    return SeededOrgs(a=org_a, b=org_b, user_id=user_id)
+
+
+def _forged_insert(table: str, other_org: uuid.UUID, user_id: uuid.UUID) -> str:
+    """A row that belongs to somebody else, written as SQL for one table.
+
+    ``organizations`` is scoped by its own ``id``, so "somebody else's row" there
+    means any organization that is not the one this session is scoped to — which
+    is also why bootstrap must set ``app.org_id`` to the new id before inserting.
+    """
+    statements = {
+        "organizations": f"INSERT INTO organizations (id, name) VALUES ('{other_org}', 'forged')",
+        "org_memberships": (
+            "INSERT INTO org_memberships (org_id, user_id, role) "
+            f"VALUES ('{other_org}', '{user_id}', 'admin')"
+        ),
+        "invitations": (
+            "INSERT INTO invitations (org_id, email, role, token_hash, expires_at) VALUES "
+            f"('{other_org}', 'forged@example.com', 'reader', '{uuid.uuid4().hex}', "
+            "now() + interval '7 days')"
+        ),
+        "audit_log": f"INSERT INTO audit_log (org_id, action) VALUES ('{other_org}', 'forged')",
+    }
+    return statements[table]
 
 
 async def _expect_failure(
@@ -100,9 +158,92 @@ async def _expect_failure(
         await connection.engine.dispose()
 
 
+_TABLES_WITH_ORG_ID = (
+    "SELECT c.relname FROM pg_class c "
+    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+    "JOIN pg_attribute a ON a.attrelid = c.oid "
+    "WHERE n.nspname = 'public' AND c.relkind = 'r' "
+    "AND a.attname = 'org_id' AND a.attnum > 0 AND NOT a.attisdropped"
+)
+
+_TABLES_WITH_ENFORCED_RLS = (
+    "SELECT c.relname FROM pg_class c "
+    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+    "JOIN pg_policies p ON p.tablename = c.relname AND p.schemaname = n.nspname "
+    "WHERE n.nspname = 'public' AND c.relrowsecurity AND c.relforcerowsecurity"
+)
+
+
+async def _names(url: URL, statement: str) -> set[str]:
+    return {row[0] for row in await _rows(url, statement)}
+
+
 # ---------------------------------------------------------------------------
 # What the role is
 # ---------------------------------------------------------------------------
+
+
+async def test_no_tenant_table_can_be_added_without_protecting_it(app_database: URL) -> None:
+    """The guard that keeps this suite honest as the schema grows.
+
+    Plan §6 WP1.3 requires that every tenant table added in any later phase
+    extends this proof. Relying on someone remembering is not a control, so this
+    asks the database instead: any table carrying ``org_id`` must be declared in
+    ``TENANT_TABLES`` and must already have RLS enabled, forced, and a policy.
+
+    Phase 4 adds catalog tables, Phase 7 adds runs and events, Phase 10 adds
+    documents. Each of those will fail here until it is protected — which is the
+    point.
+    """
+    carrying_org_id = await _names(app_database, _TABLES_WITH_ORG_ID)
+    declared = {table for table, key in TENANT_TABLES.items() if key == "org_id"}
+
+    assert carrying_org_id == declared, (
+        "tables with an org_id column disagree with TENANT_TABLES. Undeclared "
+        f"tables are unprotected: {sorted(carrying_org_id - declared)}; declared "
+        f"but missing from the database: {sorted(declared - carrying_org_id)}"
+    )
+
+    protected = await _names(app_database, _TABLES_WITH_ENFORCED_RLS)
+
+    assert set(TENANT_TABLES) <= protected, (
+        f"declared tenant tables without enforced RLS: {sorted(set(TENANT_TABLES) - protected)}"
+    )
+
+
+async def test_the_guard_above_actually_detects_an_unprotected_table(
+    app_database: URL, migrated_database: URL
+) -> None:
+    """A guard that has never failed is a guard nobody has tested.
+
+    Create the exact mistake a later phase might make — a tenant table with an
+    ``org_id`` and no policy — and show that the query the guard uses reports it
+    as both undeclared and unprotected.
+    """
+    engine = create_async_engine(migrated_database)
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "CREATE TABLE rogue_findings ("
+                    "  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),"
+                    "  org_id uuid NOT NULL,"
+                    "  statement text"
+                    ")"
+                )
+            )
+    finally:
+        await engine.dispose()
+
+    carrying_org_id = await _names(app_database, _TABLES_WITH_ORG_ID)
+    protected = await _names(app_database, _TABLES_WITH_ENFORCED_RLS)
+
+    assert "rogue_findings" in carrying_org_id, "the guard cannot see a new tenant table"
+    assert "rogue_findings" not in set(TENANT_TABLES), "fixture leaked into the declaration"
+    assert "rogue_findings" not in protected, "an unprotected table looked protected"
+
+    # And therefore the guard's own assertion would have failed:
+    assert carrying_org_id != {table for table, key in TENANT_TABLES.items() if key == "org_id"}
 
 
 async def test_the_api_role_has_no_way_to_bypass_rls(app_database: URL) -> None:
@@ -174,59 +315,70 @@ async def test_every_tenant_table_has_an_isolation_policy(app_database: URL) -> 
 # ---------------------------------------------------------------------------
 
 
-async def test_unfiltered_select_returns_only_the_session_org(
+async def test_unfiltered_select_leaks_nothing_from_any_tenant_table(
     app_database: URL, migrated_database: URL
 ) -> None:
-    """The flagship. A repository forgets its WHERE clause; nothing leaks.
+    """The M1 acceptance test, across every tenant table.
 
-    Two organizations exist with rows in every tenant table. The query below has
-    no filter of any kind — it is the bug — and it still cannot see org B.
+    Two organizations hold one row each in all four tables. The queries below
+    carry no filter of any kind — they are the bug a repository is most likely to
+    contain — and each still returns exactly its own organization's row.
+
+    Looping rather than parametrising keeps this to one migrated database instead
+    of four; the assertion messages name the table, so a failure is still precise.
     """
-    org_a, org_b = await _seed_two_orgs(migrated_database)
+    seeded = await _seed_two_orgs(migrated_database)
 
-    for table in ("organizations", "invitations", "audit_log"):
-        rows = await _rows(app_database, f"SELECT * FROM {table}", org_id=org_a)
+    for table in TENANT_TABLES:
+        for org_id in (seeded.a, seeded.b):
+            rows = await _rows(app_database, f"SELECT * FROM {table}", org_id=org_id)
 
-        assert len(rows) == 1, f"{table} returned {len(rows)} rows for a single-org query"
+            assert len(rows) == 1, (
+                f"{table}: an unfiltered SELECT returned {len(rows)} rows while scoped "
+                f"to one organization — isolation is not holding"
+            )
 
-    visible = await _rows(app_database, "SELECT id FROM organizations", org_id=org_a)
-    assert [row[0] for row in visible] == [org_a]
 
-    other = await _rows(app_database, "SELECT id FROM organizations", org_id=org_b)
-    assert [row[0] for row in other] == [org_b]
+async def test_the_visible_row_is_the_right_one(app_database: URL, migrated_database: URL) -> None:
+    """Not merely "one row", but *that* organization's row."""
+    seeded = await _seed_two_orgs(migrated_database)
+
+    for org_id in (seeded.a, seeded.b):
+        organizations = await _rows(app_database, "SELECT id FROM organizations", org_id=org_id)
+        memberships = await _rows(app_database, "SELECT org_id FROM org_memberships", org_id=org_id)
+
+        assert [row[0] for row in organizations] == [org_id]
+        assert [row[0] for row in memberships] == [org_id]
 
 
 async def test_naming_another_org_explicitly_still_returns_nothing(
     app_database: URL, migrated_database: URL
 ) -> None:
     """Even asking for it by primary key. The policy is not a default, it is a wall."""
-    org_a, org_b = await _seed_two_orgs(migrated_database)
+    seeded = await _seed_two_orgs(migrated_database)
 
     rows = await _rows(
         app_database,
-        f"SELECT * FROM organizations WHERE id = '{org_b}'",
-        org_id=org_a,
+        f"SELECT * FROM organizations WHERE id = '{seeded.b}'",
+        org_id=seeded.a,
     )
 
     assert rows == []
 
 
-async def test_insert_under_another_orgs_id_is_rejected(
+async def test_insert_under_another_org_is_rejected_on_every_tenant_table(
     app_database: URL, migrated_database: URL
 ) -> None:
-    """WITH CHECK: you may not write rows into someone else's organization."""
-    org_a, org_b = await _seed_two_orgs(migrated_database)
+    """WITH CHECK, everywhere: you may not write into somebody else's organization."""
+    seeded = await _seed_two_orgs(migrated_database)
 
-    connection = await _connect(app_database, org_a)
-    try:
-        with pytest.raises(DBAPIError, match="row-level security"):
-            await connection.execute(
-                text("INSERT INTO audit_log (org_id, action) VALUES (:org, 'forged')"),
-                {"org": org_b},
-            )
-    finally:
-        await connection.close()
-        await connection.engine.dispose()
+    for table in TENANT_TABLES:
+        await _expect_failure(
+            app_database,
+            _forged_insert(table, seeded.b, seeded.user_id),
+            org_id=seeded.a,
+            match="row-level security",
+        )
 
 
 async def test_a_session_without_an_org_sees_nothing_and_says_so(
@@ -265,13 +417,13 @@ async def test_audit_log_is_append_only_for_the_api_role(
     app_database: URL, migrated_database: URL
 ) -> None:
     """History can be written and never rewritten (architecture Part 8.2)."""
-    org_a, _ = await _seed_two_orgs(migrated_database)
+    seeded = await _seed_two_orgs(migrated_database)
 
-    connection = await _connect(app_database, org_a)
+    connection = await _connect(app_database, seeded.a)
     try:
         await connection.execute(
             text("INSERT INTO audit_log (org_id, action) VALUES (:org, 'allowed')"),
-            {"org": org_a},
+            {"org": seeded.a},
         )
         await connection.commit()
     finally:
@@ -279,4 +431,4 @@ async def test_audit_log_is_append_only_for_the_api_role(
         await connection.engine.dispose()
 
     for forbidden in ("UPDATE audit_log SET action = 'rewritten'", "DELETE FROM audit_log"):
-        await _expect_failure(app_database, forbidden, org_id=org_a, match="permission denied")
+        await _expect_failure(app_database, forbidden, org_id=seeded.a, match="permission denied")

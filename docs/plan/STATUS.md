@@ -1,8 +1,8 @@
 # STATUS — data-agent build
 
-Current position: Phase 1 / WP1.2 (PR open, awaiting review)
+Current position: Phase 1 / WP1.3 (gate PR open, awaiting review + sign-off)
 Merge policy: ASK
-Blocked on user: review + merge of the WP1.2 PR — WP1.3 is the Phase 1 gate
+Blocked on user: review of the WP1.3 gate PR, and the Phase 1 gate sign-off
 Last updated: 2026-08-11 by Claude Code
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
@@ -19,7 +19,7 @@ Last updated: 2026-08-11 by Claude Code
       — also added CI's Postgres service + `DATABASE_URL` + `REQUIRE_DB=1`,
       the migration up/down test deferred from WP0.5 (DECISIONS D-006, done)
 - [x] WP1.2 RLS migration + tenancy session + base repository
-- [ ] WP1.3 RLS proof tests + migration up/down in CI            ← gate PR
+- [x] WP1.3 RLS proof tests + migration up/down in CI            ← gate PR
 - [ ] GATE: cross-org read provably blocked; user sign-off
 
 ## Phase 2 — AuthN/AuthZ (M2)
@@ -90,6 +90,12 @@ Last updated: 2026-08-11 by Claude Code
 ---
 
 ## Notes
+
+- **Every new tenant table, in every later phase, must be added to
+  `TENANT_TABLES` and given an RLS policy in the same PR.** This is not left
+  to memory: `test_no_tenant_table_can_be_added_without_protecting_it` asks
+  the database which tables carry `org_id` and fails on any that are
+  undeclared or unprotected.
 
 - **WP0.1** shipped as the single allowed direct push to `main` (plan §6, Phase 0).
   Its checkbox was flipped to `[x]` in the first follow-up PR (WP0.2), because a WP
