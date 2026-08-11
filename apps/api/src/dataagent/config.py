@@ -76,6 +76,29 @@ class Settings(BaseSettings):
     )
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
+    auth_mode: Literal["dev", "entra"] = Field(
+        default="entra",
+        description=(
+            "'dev' mounts a local OIDC issuer so the stack runs without an Entra "
+            "tenant, and is refused in a prod build or environment. The default is "
+            "'entra' so that the weaker mode is always something someone chose: an "
+            "environment that forgets to set this gets real identity, not a "
+            "process willing to mint its own tokens."
+        ),
+    )
+    oidc_issuer: str | None = Field(
+        default=None,
+        description="Entra External ID issuer URL. Required when AUTH_MODE=entra.",
+    )
+    oidc_audience: str = Field(
+        default="dataagent-api",
+        description="Audience every accepted token must carry — this API, and no other.",
+    )
+    dev_issuer_url: str = Field(
+        default="http://localhost:8000/dev",
+        description="Where the dev issuer publishes its discovery document and JWKS.",
+    )
+
     database_url: str | None = Field(
         default=None,
         description=(
@@ -108,6 +131,30 @@ class Settings(BaseSettings):
         if text.startswith("["):
             return json.loads(text)
         return tuple(origin.strip() for origin in text.split(",") if origin.strip())
+
+    def resolve_issuer(self) -> str:
+        """The issuer tokens must claim, whichever mode we are in."""
+        if self.auth_mode == "dev":
+            return self.dev_issuer_url
+        if not self.oidc_issuer:
+            raise RuntimeError(
+                "AUTH_MODE=entra requires OIDC_ISSUER. Without it every token "
+                "would be accepted from any issuer, which is worse than no auth."
+            )
+        return self.oidc_issuer
+
+    def assert_auth_is_production_safe(self) -> None:
+        """Refuse to start a production build that trusts the dev issuer.
+
+        Checked at application startup rather than at first request, because a
+        service that boots and *then* fails open is indistinguishable from one
+        that works until someone looks.
+        """
+        if self.auth_mode == "dev" and (self.build_env == "prod" or self.env == "prod"):
+            raise RuntimeError(
+                "AUTH_MODE=dev is not permitted in a production build or environment: "
+                "it would accept tokens this process minted for itself."
+            )
 
     def require_database_url(self) -> str:
         """The owner DSN, or a failure that names the fix.

@@ -1,8 +1,8 @@
 # STATUS — data-agent build
 
-Current position: Phase 1 / WP1.3 (gate PR open, awaiting review + sign-off)
+Current position: Phase 2 / WP2.1a (PR open, awaiting review)
 Merge policy: ASK
-Blocked on user: review of the WP1.3 gate PR, and the Phase 1 gate sign-off
+Blocked on user: review + merge of the WP2.1a PR. Entra IDs are due at WP2.3
 Last updated: 2026-08-11 by Claude Code
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
@@ -20,10 +20,14 @@ Last updated: 2026-08-11 by Claude Code
       the migration up/down test deferred from WP0.5 (DECISIONS D-006, done)
 - [x] WP1.2 RLS migration + tenancy session + base repository
 - [x] WP1.3 RLS proof tests + migration up/down in CI            ← gate PR
-- [ ] GATE: cross-org read provably blocked; user sign-off
+- [x] GATE: cross-org read provably blocked; user sign-off
+      — signed off 2026-08-11
 
 ## Phase 2 — AuthN/AuthZ (M2)
-- [ ] WP2.1 JWT validation, dev issuer (guarded), context, role guards
+- [x] WP2.1a JWT validation + JWKS cache + dev issuer (guarded, excluded from prod)
+- [ ] WP2.1b Request context resolution + role guards + audited denials
+      — WP2.1 split in two (plan §1.1): authentication and authorization are
+      separately reviewable, which matters more than usual in a security phase
 - [ ] WP2.2 Orgs/users/invitations APIs + bootstrap + audit events
 - [ ] WP2.3 Web auth (MSAL) + /me + invite UI + role matrix tests ← gate PR
 - [ ] GATE: signup→org→invite Reader; Reader 403 audited; user sign-off

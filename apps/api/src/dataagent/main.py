@@ -22,6 +22,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """
     resolved = settings if settings is not None else get_settings()
 
+    # Before anything is mounted: a process that boots and then fails open is
+    # indistinguishable from one that works until somebody looks.
+    resolved.assert_auth_is_production_safe()
+
     app = FastAPI(
         title="data-agent API",
         version=health.resolve_version(),
@@ -42,6 +46,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     app.include_router(health.router)
+
+    if resolved.auth_mode == "dev":
+        # Imported here, not at module scope: the prod image does not contain
+        # this module at all, so a top-level import would break that image even
+        # though the branch could never be taken.
+        from dataagent.auth import dev_issuer
+
+        app.state.dev_issuer = dev_issuer.build_dev_issuer(resolved)
+        app.include_router(dev_issuer.router)
 
     return app
 

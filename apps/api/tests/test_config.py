@@ -19,6 +19,16 @@ def test_defaults_are_safe_for_local_development() -> None:
     assert settings.cors_origins == ("http://localhost:3000",)
 
 
+def test_the_default_auth_mode_is_the_strict_one() -> None:
+    """Forgetting to configure auth must not hand you a token-minting process.
+
+    The field default is read directly: the developer's own .env sets
+    AUTH_MODE=dev, and a test of the *default* must not read the machine it
+    happens to be running on.
+    """
+    assert Settings.model_fields["auth_mode"].default == "entra"
+
+
 def test_cors_origins_from_env_accepts_a_comma_separated_string(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
