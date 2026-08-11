@@ -92,7 +92,7 @@ check.truths: ## Fail if truths.json and the seed generator disagree
 # ---------------------------------------------------------------------------
 # apps/api
 # ---------------------------------------------------------------------------
-.PHONY: install.api lint.api fmt.api typecheck.api test.api api.dev build.api
+.PHONY: install.api lint.api fmt.api typecheck.api test.api test.rls api.dev build.api
 install.api: ## Sync the API virtualenv from uv.lock
 	uv sync --directory $(API_DIR)
 
@@ -109,6 +109,9 @@ typecheck.api: ## pyright (strict)
 
 test.api: ## pytest with coverage
 	$(UV_API) pytest --cov --cov-report=term-missing
+
+test.rls: ## Tenant-isolation proof suite on its own; fails if it collects nothing
+	$(UV_API) pytest -m rls_proof
 
 api.dev: ## uvicorn with reload on :8000
 	$(UV_API) uvicorn dataagent.main:app --host 0.0.0.0 --port 8000 --reload

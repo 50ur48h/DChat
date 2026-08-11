@@ -101,6 +101,14 @@ jobs:
       - name: Lint, typecheck, test
         if: env.RUN == 'true'
         run: make lint.api lint.seed typecheck.api test.api
+      # Its own step so the tenant-isolation proof is a named signal in the log
+      # rather than a line inside a larger run. `pytest -m rls_proof` exits 5 if
+      # it collects nothing, so a deleted or renamed marker fails the build
+      # instead of quietly testing nothing. REQUIRE_DB=1 above means these
+      # cannot skip either.
+      - name: Tenant isolation proof (may never be skipped)
+        if: env.RUN == 'true'
+        run: make test.rls
       - name: Nothing to do
         if: env.RUN != 'true'
         run: echo "No changes under apps/api or ops — skipping."
