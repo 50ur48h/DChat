@@ -82,6 +82,21 @@ export function isMember(value: unknown): value is Member {
   );
 }
 
+export interface Accepted {
+  org_id: string;
+  org_name: string;
+  role: string;
+}
+
+export function isAccepted(value: unknown): value is Accepted {
+  return (
+    isRecord(value) &&
+    typeof value.org_id === "string" &&
+    typeof value.org_name === "string" &&
+    typeof value.role === "string"
+  );
+}
+
 export function isInvitation(value: unknown): value is Invitation {
   return (
     isRecord(value) &&

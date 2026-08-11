@@ -14,6 +14,24 @@ import styles from "./members.module.css";
 
 const ROLES = ["reader", "contributor", "admin"] as const;
 
+function IssuedLink({ invitation }: { invitation: Invitation }) {
+  // Computed during render, not in an effect: this panel only ever appears
+  // after someone clicks Send invite, so window is always there by then.
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
+  const link = `${origin}/invitations/accept?token=${encodeURIComponent(invitation.token)}`;
+
+  return (
+    <div className={styles.token}>
+      Invitation for {invitation.email} as {invitation.role}. Send them this link — the token is
+      stored only as a hash, so it cannot be shown again.
+      <code>{link}</code>
+      <Row>
+        <Button onClick={() => void navigator.clipboard.writeText(link)}>Copy link</Button>
+      </Row>
+    </div>
+  );
+}
+
 export function Members({ orgId }: { orgId: string }) {
   const session = useSession();
   const api = useMemo(() => createApi(session.getToken), [session.getToken]);
@@ -143,13 +161,7 @@ export function Members({ orgId }: { orgId: string }) {
           </Row>
         </form>
 
-        {issued && (
-          <div className={styles.token}>
-            Invitation for {issued.email} as {issued.role}. Copy this token now — it is stored only
-            as a hash and cannot be shown again.
-            <code>{issued.token}</code>
-          </div>
-        )}
+        {issued && <IssuedLink invitation={issued} />}
       </Card>
     </Stack>
   );

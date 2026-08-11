@@ -9,10 +9,12 @@
  */
 
 import {
+  isAccepted,
   isHealth,
   isInvitation,
   isMe,
   isMember,
+  type Accepted,
   type Health,
   type Invitation,
   type Me,
@@ -106,6 +108,7 @@ export interface Api {
   createOrg(name: string): Promise<void>;
   members(orgId: string): Promise<Member[]>;
   invite(orgId: string, email: string, role: string): Promise<Invitation>;
+  acceptInvitation(token: string): Promise<Accepted>;
   changeRole(orgId: string, userId: string, role: string): Promise<void>;
   removeMember(orgId: string, userId: string): Promise<void>;
 }
@@ -134,6 +137,13 @@ export function createApi(getToken: () => Promise<string | null>): Api {
         await call(`/v1/orgs/${orgId}/invitations`, { method: "POST", body: { email, role } }),
         isInvitation,
         "invitation",
+      );
+    },
+    async acceptInvitation(token) {
+      return narrow(
+        await call("/v1/invitations/accept", { method: "POST", body: { token } }),
+        isAccepted,
+        "invitation acceptance",
       );
     },
     async changeRole(orgId, userId, role) {

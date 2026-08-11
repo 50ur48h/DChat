@@ -1,0 +1,30 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 480px;
+}
+
+.token {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.success {
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--accent-mint-soft);
+  color: var(--accent-mint-strong);
+}
+
+.error {
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.hint {
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
