@@ -33,9 +33,15 @@ function IssuedLink({ invitation }: { invitation: Invitation }) {
   );
 }
 
-export function Members({ orgId }: { orgId: string }) {
+export function Members({ orgId, role: myRole }: { orgId: string; role: string | null }) {
   const session = useSession();
   const api = useMemo(() => createApi(session.getToken), [session.getToken]);
+
+  // B-008: a Reader was shown Change role, Remove and Send invite, earned a 403
+  // from each, and learned that the product was broken rather than that they
+  // lacked permission. Unknown role is treated as not-an-admin, so this fails
+  // closed while `/v1/me` is still in flight.
+  const isAdmin = myRole === "admin";
 
   const [members, setMembers] = useState<Member[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -86,7 +92,10 @@ export function Members({ orgId }: { orgId: string }) {
 
   return (
     <Stack>
-      <Card title="Members">
+      <Card
+        title="Members"
+        subtitle={isAdmin ? undefined : "Only an Admin can change roles or invite people."}
+      >
         {members === null && !error && <p className={styles.muted}>Loading…</p>}
         {members && (
           <table className={styles.table}>
@@ -94,7 +103,7 @@ export function Members({ orgId }: { orgId: string }) {
               <tr>
                 <th>Person</th>
                 <th>Role</th>
-                <th aria-label="Actions" />
+                {isAdmin && <th aria-label="Actions" />}
               </tr>
             </thead>
             <tbody>
@@ -107,26 +116,28 @@ export function Members({ orgId }: { orgId: string }) {
                   <td>
                     <Badge tone={ROLE_TONES[member.role] ?? "neutral"}>{member.role}</Badge>
                   </td>
-                  <td>
-                    <div className={styles.actions}>
-                      <Select
-                        label="Change role"
-                        options={ROLES}
-                        value={member.role}
-                        disabled={busy}
-                        onChange={(event) =>
-                          void run(() => api.changeRole(orgId, member.user_id, event.target.value))
-                        }
-                      />
-                      <Button
-                        variant="danger"
-                        disabled={busy}
-                        onClick={() => void run(() => api.removeMember(orgId, member.user_id))}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  </td>
+                  {isAdmin && (
+                    <td>
+                      <div className={styles.actions}>
+                        <Select
+                          label="Change role"
+                          options={ROLES}
+                          value={member.role}
+                          disabled={busy}
+                          onChange={(event) =>
+                            void run(() => api.changeRole(orgId, member.user_id, event.target.value))
+                          }
+                        />
+                        <Button
+                          variant="danger"
+                          disabled={busy}
+                          onClick={() => void run(() => api.removeMember(orgId, member.user_id))}
+                        >
+                          Remove
+                        </Button>
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -135,38 +146,40 @@ export function Members({ orgId }: { orgId: string }) {
         {error && <p className={styles.error}>{error}</p>}
       </Card>
 
-      <Card title="Invite someone" subtitle="Admins only. The link is shown once.">
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void run(async () => {
-              setIssued(await api.invite(orgId, email.trim(), role));
-              setEmail("");
-            });
-          }}
-        >
-          <Row>
-            <Input
-              label="Email"
-              type="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="bob@example.com"
-            />
-            <Select
-              label="Role"
-              options={ROLES}
-              value={role}
-              onChange={(event) => setRole(event.target.value)}
-            />
-            <Button variant="primary" type="submit" disabled={busy || !email.trim()}>
-              {busy ? "Inviting…" : "Send invite"}
-            </Button>
-          </Row>
-        </form>
+      {isAdmin && (
+        <Card title="Invite someone" subtitle="Admins only. The link is shown once.">
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void run(async () => {
+                setIssued(await api.invite(orgId, email.trim(), role));
+                setEmail("");
+              });
+            }}
+          >
+            <Row>
+              <Input
+                label="Email"
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="bob@example.com"
+              />
+              <Select
+                label="Role"
+                options={ROLES}
+                value={role}
+                onChange={(event) => setRole(event.target.value)}
+              />
+              <Button variant="primary" type="submit" disabled={busy || !email.trim()}>
+                {busy ? "Inviting…" : "Send invite"}
+              </Button>
+            </Row>
+          </form>
 
-        {issued && <IssuedLink invitation={issued} />}
-      </Card>
+          {issued && <IssuedLink invitation={issued} />}
+        </Card>
+      )}
     </Stack>
   );
 }

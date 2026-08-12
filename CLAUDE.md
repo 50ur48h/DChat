@@ -45,6 +45,13 @@ make evals              # eval harness with FakeLLM (Phase 9+)
 - Windows dev host: GNU make comes from `winget install ezwinports.make` and
   lands on the **user** PATH, so a shell started before the install will not see
   it. Run make from Git Bash — its recipes use `sh`, `grep` and `awk`.
+- A **new** route directory under `apps/web/src/app/` needs the web container
+  restarted (`docker compose restart web`, or `make down && make up`). The bind
+  mount delivers the files, but `next dev` does not notice a directory that
+  appeared after it started, and serves a 404 that looks like a routing bug.
+- Git Bash rewrites any argument starting with `/` into a `C:\...` path, so a
+  `docker exec … sh -c '/opt/…'` arrives as nonsense. Start such command strings
+  with a word (`exec /opt/…`), as `ops/scripts/seed_mssql.sh` does.
 
 ## Repo facts (this clone)
 - GitHub remote: https://github.com/50ur48h/DChat — **public**. Secret hygiene is
