@@ -17,8 +17,11 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install --no-install-recommends -y ca-certificates curl gnupg
 
+# --batch --yes --no-tty: on a CI runner there is no controlling terminal, and
+# gpg fails with "cannot open /dev/tty" rather than reading from the pipe it was
+# given. --yes so a re-run overwrites the keyring instead of prompting.
 curl -fsSL https://packages.microsoft.com/keys/microsoft.asc |
-	gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
+	gpg --batch --yes --no-tty --dearmor -o /usr/share/keyrings/microsoft-prod.gpg
 
 # Microsoft publishes one repository per distribution release, so the path is
 # looked up rather than guessed. An allow-list, not a fallback: a base image that
