@@ -598,6 +598,57 @@ def connection_string() -> str:
     )
 
 
+def grant_readonly_role(cursor: psycopg.Cursor[tuple[object, ...]], database: str) -> str:
+    """Create the login a data source should actually be registered with (B-006).
+
+    A demo database that ships only its owner login teaches the wrong lesson and
+    makes ``readonly_verified`` impossible to demonstrate honestly. This role can
+    connect, and read, and nothing else: no CREATE anywhere, no write privilege
+    on any table, now or on the tables a future reseed creates.
+
+    Idempotent, because ``make seed`` is run repeatedly and the role is a
+    cluster-level object that outlives any one database.
+    """
+    role = os.environ.get("SEED_PIZZA_READONLY_USER", "pizza_readonly")
+    password = os.environ.get("SEED_PIZZA_READONLY_PASSWORD")
+    if not password:
+        sys.exit(
+            "SEED_PIZZA_READONLY_PASSWORD is not set.\n"
+            "Copy the new key from .env.example into .env (`make env` creates the file)."
+        )
+
+    identifier = sql.Identifier(role)
+    secret = sql.Literal(password)
+
+    cursor.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,))
+    if cursor.fetchone() is None:
+        cursor.execute(sql.SQL("CREATE ROLE {} WITH LOGIN PASSWORD {}").format(identifier, secret))
+    else:
+        cursor.execute(sql.SQL("ALTER ROLE {} WITH LOGIN PASSWORD {}").format(identifier, secret))
+
+    # Revoke before granting, so a role left over from an earlier experiment
+    # cannot keep a privilege this fixture never meant it to have.
+    cursor.execute(sql.SQL("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM {}").format(identifier))
+    cursor.execute(sql.SQL("REVOKE ALL ON SCHEMA public FROM {}").format(identifier))
+    cursor.execute(
+        sql.SQL("REVOKE ALL ON DATABASE {} FROM {}").format(sql.Identifier(database), identifier)
+    )
+
+    cursor.execute(
+        sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(sql.Identifier(database), identifier)
+    )
+    cursor.execute(sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(identifier))
+    cursor.execute(sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA public TO {}").format(identifier))
+    # The tables this script drops and recreates on the next run are covered too.
+    cursor.execute(
+        sql.SQL("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO {}").format(
+            identifier
+        )
+    )
+
+    return role
+
+
 def copy_rows(
     cursor: psycopg.Cursor[tuple[object, ...]],
     table: str,
@@ -723,9 +774,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             [tuple(order) for order in orders],
         )
         copy_rows(cursor, "payments", ("id", "order_id", "method", "amount", "paid_at"), payments)
+        # After the tables exist: GRANT SELECT ON ALL TABLES only covers the
+        # tables that are there when it runs.
+        role = grant_readonly_role(cursor, os.environ.get("SEED_PIZZA_DB", "pizza"))
         connection.commit()
 
-    print("Seed complete.")
+    print(f"Seed complete. Register this database as {role} — it can read and nothing else.")
     return 0
 
 

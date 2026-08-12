@@ -195,8 +195,10 @@ Last updated: <date> by Claude Code
 ## Phase 3 — Data source connectors (M3)
 - [ ] WP3.1 SecretsProvider (local backend) + datasources CRUD + sanitizer
 - [ ] WP3.2 Connector protocol + Postgres connector + test-connection
-- [ ] WP3.3 SQL Server connector + compose profile + dialect tests ← gate PR
-- [ ] GATE: seed DBs registered; creds never echoed; user sign-off
+- [ ] WP3.3 SQL Server connector + compose profile + dialect tests
+- [ ] WP3.4 Data sources screen (register, test, rotate, remove)     ← gate PR
+- [ ] GATE: both seed DBs registered **from the browser**; creds never echoed;
+      read-only verified; user sign-off
 
 ## Phase 4 — Discovery & catalog (M4)
 - [ ] WP4.1 Schema discovery → catalog tables + refresh + incremental hash
@@ -493,7 +495,7 @@ Note: review count stays 0 so `MERGE_POLICY: AUTO` can work; ASK mode and the Ph
 | 0 | Bootstrap & walking skeleton | 5 | repo details, merge policy | compose up → web page shows API health; CI green |
 | 1 | Platform DB + tenancy | 3 | — | cross-org read blocked despite buggy repo call |
 | 2 | AuthN/AuthZ | 3 | Entra IDs (can trail) | Reader gets audited 403 on admin route |
-| 3 | Connectors + secrets | 3 | — (key auto-generated) | seed DBs registered; creds never echoed |
+| 3 | Connectors + secrets | 4 | — (key auto-generated) | seed DBs registered from the browser; creds never echoed |
 | 4 | Discovery & catalog | 3 | embedding key (optional) | pizza DB discovered ≤2 min; email auto-masked |
 | 5 | **DAL + policy engine** | 3 | — | arch 7.5 property table fully proven; dal ≥90% cov |
 | 6 | LLM abstraction | 2 | ≥1 real LLM key | same tests pass on both providers; fallback works |
@@ -504,7 +506,7 @@ Note: review count stays 0 so `MERGE_POLICY: AUTO` can work; ASK mode and the Ph
 | 11 | Charts + polish | 2 | — | trend → validated Vega-Lite chart; Playwright green |
 | 12 | **Azure + hardening** | 4 | subscription, OIDC, budget | dev+prod live via Bicep; quota hard-stop; drill done |
 
-Dependency shape is linear except: WP3.3 (MSSQL) may float later if the user wants a faster demo (record as `[-] moved` in STATUS + backlog item); Phase 6 depends only on Phase 0 and may be built while waiting on Phase 2 user inputs.
+Dependency shape is linear except: WP3.3 (MSSQL) may float later if the user wants a faster demo (record as `[-] moved` in STATUS + backlog item) — WP3.4 then becomes the gate PR with Postgres alone; Phase 6 depends only on Phase 0 and may be built while waiting on Phase 2 user inputs.
 
 ---
 
@@ -615,11 +617,25 @@ Format per WP: **Branch → Build → Tests → Accept** (accept = commands/chec
 - Registration verification: `test` endpoint checks connectivity **and** verifies the supplied role cannot write (attempt `CREATE TEMP TABLE`/`INSERT` inside a rolled-back probe; must fail) — arch M3 "read-only verified". Result stored on the data_source row (`last_verified_at`, `readonly_verified`).
 - **Tests:** integration vs compose `seed-pizza-pg` (register, verify, introspect FK graph); failure-path tests through the sanitizer.
 
-### WP3.3 — SQL Server connector — `p3.3-mssql-connector` *(gate PR; may float later — see §5 note)*
+### WP3.3 — SQL Server connector — `p3.3-mssql-connector` *(may float later — see §5 note)*
 - Driver decision per arch Part 3: pyodbc + msodbcsql18 in the API image, wrapped with `asyncio.to_thread` behind the same async protocol; document driver install in Dockerfile.
 - `connectors/sqlserver.py`: introspection via `sys.*` views; capability descriptor marks dialect `tsql` (TOP-not-LIMIT etc. — consumed by DAL in Phase 5); read-only probe uses an attempted write in a rolled-back transaction.
 - Compose `mssql` profile + `ops/seed/seed_pizza_mssql.sql` (same schema/no order_items; smaller row count is fine); CI job for connector tests with mssql service, path-filtered.
-- **Accept/GATE (arch M3):** both seed DBs registered via the API; creds in the secrets store only; `readonly_verified=true`; a forced connector error surfaces sanitized. User sign-off.
+- **Accept:** both seed DBs registerable and verifiable through the API; a forced connector error surfaces sanitized.
+
+### WP3.4 — Data sources screen — `p3.4-datasources-ui` *(gate PR)*
+> Added 2026-08-12 from **B-012**, accepted by the owner. WP3.1 shipped the full
+> CRUD API and the phase's exit criterion was written as "registered via the
+> API", which in practice meant a curl command. Registering a database is the
+> first thing a new organization must do, so it gets a screen — and the gate
+> demo moves into the browser, where the product actually is.
+
+- Admin-only screen at `/orgs/{orgId}/data-sources`, built from the existing primitives in `src/components/ui/` and the tokens in `globals.css` (docs/design.md; a raw hex value anywhere else is a bug). List, register, test, rotate credentials, remove.
+- The form is the one place in the product where a customer credential is typed. `type="password"`, never echoed back into the field from a response, never written to component state that outlives the submit, and never in a URL. The response has no such field to render (WP3.1's schema guard), so the screen shows `username_last4` and `host_display` instead.
+- Test result rendered honestly: reachable / verified / failed with the **sanitized** message the API returned, and the row's `status` and `last_verified_at`. A failure is a normal outcome with a next step, not a red toast.
+- **B-008** (P3) is closed here rather than in Phase 11: a Reader must not be shown Register/Test/Remove at all. `role` is already on `/v1/me` and on the members list, so hiding admin-only controls costs one condition — and the members screen gets the same treatment while the pattern is fresh.
+- **Tests:** vitest for the screen's states (empty, listing, submitting, sanitized failure, forbidden-for-Reader); a test asserting no rendered DOM and no fetch body outside the submit ever contains the typed password.
+- **Accept/GATE (arch M3):** in the browser, as an Admin: register the pizza Postgres and the SQL Server seed, both report `readonly_verified=true`, a deliberately wrong password shows a sanitized failure with no host or DSN in it, and a Reader sees neither form nor buttons. Credentials appear only in the secrets store. User sign-off.
 
 ---
 

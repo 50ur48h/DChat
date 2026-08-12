@@ -25,6 +25,12 @@ under "Unreleased", only for changes a user would notice.
 - Register the databases an organization wants analysed: list, register, rename,
   rotate credentials, remove, and check that the address answers. Admin-only,
   except for listing, which any member may do.
+- Testing a PostgreSQL data source now connects with the stored credentials and
+  reports whether they can write. A data source counts as verified only when the
+  database itself says the account cannot write, and rotating a credential or
+  changing an address retires that verification until it is checked again.
+- `make seed` creates a read-only login for the demo database, so it can be
+  registered the way a real one should be.
 - A web app you can actually use: sign in, see who you are and which
   organizations you belong to, create one, invite people with a role, and
   manage members. Sign-in works against Microsoft Entra External ID, or

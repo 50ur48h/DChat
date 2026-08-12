@@ -23,16 +23,19 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from dataagent.connectors.probe import Reachability, check_reachable
+from dataagent.connectors.base import ConnectorError, Health
+from dataagent.connectors.factory import connector_for, require_supported
+from dataagent.connectors.probe import check_reachable
 from dataagent.db.models import DataSource
 from dataagent.orgs.service import ConflictError, audit
-from dataagent.secrets.base import SecretsProvider
+from dataagent.secrets.base import SecretNotFoundError, SecretsProvider
 from dataagent.secrets.factory import get_secrets_provider
+from dataagent.secrets.local import SecretDecryptionError
 from dataagent.tenancy.session import org_session
 
 __all__ = [
@@ -48,6 +51,8 @@ __all__ = [
 ]
 
 STATUS_REGISTERED = "registered"
+STATUS_VERIFIED = "verified"
+STATUS_ERROR = "error"
 
 #: How much of the username a response may carry (architecture Part 7.3).
 USERNAME_HINT_CHARS = 4
@@ -90,6 +95,8 @@ class DataSourceView:
     status: str
     secret_ref: str
     username_last4: str
+    readonly_verified: bool
+    last_verified_at: datetime | None
     created_by: uuid.UUID | None
     created_at: datetime
 
@@ -148,6 +155,8 @@ def _view(row: DataSource) -> DataSourceView:
         status=row.status,
         secret_ref=row.secret_ref,
         username_last4=_field(settings, "username_last4"),
+        readonly_verified=row.readonly_verified,
+        last_verified_at=row.last_verified_at,
         created_by=row.created_by,
         created_at=row.created_at,
     )
@@ -298,6 +307,12 @@ async def update_data_source(
         row.host_display = _display(next_host, next_port, next_database)
 
         if changed:
+            # A verification describes the address and credentials it was run
+            # against. Change either and it is no longer evidence about this row,
+            # so it goes back to unverified rather than staying comfortingly green.
+            row.status = STATUS_REGISTERED
+            row.readonly_verified = False
+            row.last_verified_at = None
             audit(
                 session,
                 org_id=org_id,
@@ -349,18 +364,43 @@ async def delete_data_source(
 
 
 async def test_data_source(
-    *, org_id: uuid.UUID, actor_user_id: uuid.UUID, data_source_id: uuid.UUID
-) -> Reachability:
-    """Check that the recorded address answers, and record that we asked.
+    *,
+    org_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    data_source_id: uuid.UUID,
+    provider: SecretsProvider | None = None,
+) -> Health:
+    """Is the address reachable, do the credentials work, and can they write?
 
-    The probe runs between two transactions rather than inside one: holding a
+    Two steps, because they fail differently and a person needs to know which:
+    a TCP probe first (a typo or a firewall, answered without a credential on the
+    wire), then the connector's own verification with the stored credentials.
+
+    All of it happens between transactions rather than inside one. Holding a
     database transaction open across a network call to somebody else's machine is
     how a slow third party becomes a lock queue on your own.
     """
+    store = provider if provider is not None else get_secrets_provider()
     view = await get_data_source(org_id, data_source_id)
-    result = await check_reachable(host=view.host, port=view.port)
+
+    health = await _verify(view, store)
+    status = STATUS_VERIFIED if health.readonly_verified else STATUS_ERROR
 
     async with org_session(org_id) as session:
+        row = (
+            (await session.execute(select(DataSource).where(DataSource.id == data_source_id)))
+            .scalars()
+            .one_or_none()
+        )
+        if row is not None:
+            row.status = status
+            row.readonly_verified = health.readonly_verified
+            if health.readonly_verified:
+                # Only on success. The column answers "when was this last proven
+                # read-only", and stamping it after a failure would let a screen
+                # say "verified a minute ago" about a check that just failed. Every
+                # attempt, successful or not, is in the audit log with its own time.
+                row.last_verified_at = health.checked_at
         audit(
             session,
             org_id=org_id,
@@ -368,7 +408,75 @@ async def test_data_source(
             action="datasource.tested",
             object_type="data_source",
             object_id=str(data_source_id),
-            details={"reachable": result.reachable, "host_display": view.host_display},
+            # The detail is already sanitized by the connector; the evidence
+            # names privileges and roles, never credentials.
+            details={
+                "reachable": health.reachable,
+                "readonly_verified": health.readonly_verified,
+                "status": status,
+                "host_display": view.host_display,
+                "detail": health.detail,
+            },
         )
 
-    return result
+    return health
+
+
+async def _verify(view: DataSourceView, store: SecretsProvider) -> Health:
+    """The checks, cheapest and most local first.
+
+    An engine we cannot speak is decided here, before a secret is read or a
+    socket is opened towards somebody else's network.
+    """
+    try:
+        require_supported(view.engine)
+    except ConnectorError as error:
+        return Health(
+            reachable=False,
+            readonly_verified=False,
+            detail=str(error),
+            checked_at=datetime.now(UTC),
+        )
+
+    reachability = await check_reachable(host=view.host, port=view.port)
+    if not reachability.reachable:
+        return Health(
+            reachable=False,
+            readonly_verified=False,
+            detail=reachability.detail,
+            checked_at=reachability.checked_at,
+        )
+
+    checked_at = datetime.now(UTC)
+    try:
+        credentials = await store.get(view.secret_ref)
+    except (SecretNotFoundError, SecretDecryptionError) as error:
+        return Health(
+            reachable=True,
+            readonly_verified=False,
+            detail=(
+                "The address answered, but this data source's stored credentials "
+                f"could not be read: {error}"
+            ),
+            checked_at=checked_at,
+        )
+
+    try:
+        connector = connector_for(
+            engine=view.engine,
+            host=view.host,
+            port=view.port,
+            database=view.database,
+            username=credentials.get("username", ""),
+            password=credentials.get("password", ""),
+        )
+    except ConnectorError as error:
+        return Health(
+            reachable=True, readonly_verified=False, detail=str(error), checked_at=checked_at
+        )
+
+    try:
+        return await connector.test_connection()
+    finally:
+        # Whatever happened, the session on the customer's server ends here.
+        await connector.aclose()

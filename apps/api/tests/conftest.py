@@ -23,6 +23,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import URL, make_url, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+import customer_db
+from customer_db import CustomerDatabase
 from dataagent.config import Settings
 from dataagent.datasources import service as datasource_service
 from dataagent.main import create_app
@@ -168,6 +170,17 @@ def app_role_password() -> str:
             pytest.fail(f"REQUIRE_DB=1 but {message}")
         pytest.skip(f"{message} — run `make db.setup`")
     return make_url(raw).password or ""
+
+
+@pytest.fixture
+def customer_database(temp_database: URL) -> CustomerDatabase:
+    """An empty database, populated to look like a customer's.
+
+    Separate from ``migrated_database``: that one is the platform's own schema,
+    this one is somebody else's database that a connector must describe without
+    knowing anything about it in advance.
+    """
+    return asyncio.run(customer_db.build(temp_database))
 
 
 @pytest.fixture
