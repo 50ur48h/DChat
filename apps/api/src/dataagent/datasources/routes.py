@@ -81,14 +81,28 @@ class DataSourceOut(BaseModel):
     username_last4: str = Field(
         description="The last four characters of the connecting username, and no more."
     )
+    readonly_verified: bool = Field(
+        description=(
+            "True only when this service has proven the credentials cannot write. "
+            "Unknown, unchecked and failed all read as false."
+        )
+    )
+    last_verified_at: datetime | None
     created_by: uuid.UUID | None
     created_at: datetime
 
 
 class TestResultOut(BaseModel):
     reachable: bool
+    readonly_verified: bool
+    status: str = Field(description="What the data source's row now says: verified | error.")
     detail: str = Field(description="Sanitized: connection strings and addresses are stripped.")
     checked_at: datetime
+    server_version: str | None = None
+    evidence: list[str] = Field(
+        default_factory=list,
+        description=("What each check found — privileges and role membership, never a credential."),
+    )
 
 
 def _out(view: DataSourceView) -> DataSourceOut:
@@ -103,6 +117,8 @@ def _out(view: DataSourceView) -> DataSourceOut:
         status=view.status,
         secret_ref=view.secret_ref,
         username_last4=view.username_last4,
+        readonly_verified=view.readonly_verified,
+        last_verified_at=view.last_verified_at,
         created_by=view.created_by,
         created_at=view.created_at,
     )
@@ -213,20 +229,19 @@ async def delete_data_source(
 @router.post(
     "/orgs/{org_id}/data-sources/{data_source_id}/test",
     response_model=TestResultOut,
-    summary="Check that the recorded address answers",
+    summary="Verify the address, the credentials, and that they cannot write",
 )
 async def test_data_source(
     context: Annotated[RequestContext, Depends(require_admin)], data_source_id: DataSourceId
 ) -> TestResultOut:
-    """Transport-level only in this work package.
+    """Answers 200 for an unusable data source too.
 
-    Whether the credentials work, and whether they are genuinely read-only, is
-    checked by the connector in WP3.2 and recorded on the row as ``verified``.
-    Until then this answers the question that fails most often — is the address
-    reachable from here at all — and answers it without sending a credential.
+    "Your credentials can write to 14 tables" is a successful test with a bad
+    result, not a failed request, and an admin needs the detail either way. The
+    row records what was found; the response says it in words.
     """
     try:
-        result = await service.test_data_source(
+        health = await service.test_data_source(
             org_id=context.org_id,
             actor_user_id=context.user_id,
             data_source_id=data_source_id,
@@ -234,5 +249,11 @@ async def test_data_source(
     except NotFoundError as error:
         raise _not_found() from error
     return TestResultOut(
-        reachable=result.reachable, detail=result.detail, checked_at=result.checked_at
+        reachable=health.reachable,
+        readonly_verified=health.readonly_verified,
+        status=service.STATUS_VERIFIED if health.readonly_verified else service.STATUS_ERROR,
+        detail=health.detail,
+        checked_at=health.checked_at,
+        server_version=health.server_version,
+        evidence=list(health.evidence),
     )

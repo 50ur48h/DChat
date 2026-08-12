@@ -1,9 +1,9 @@
 # STATUS — data-agent build
 
-Current position: Phase 3 in progress. WP3.1 done. Next: WP3.2
+Current position: Phase 3 in progress. WP3.1–3.2 done. Next: WP3.3
 Merge policy: ASK
-Blocked on user: nothing. WP3.2 needs no user input — it connects to the local
-                 seed databases the compose stack already provides
+Blocked on user: nothing. WP3.3 pulls the SQL Server image (~1.5 GB) on first
+                 `make up.mssql`; nothing else is needed
 Last updated: 2026-08-12 by Claude Code
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
@@ -44,9 +44,20 @@ Last updated: 2026-08-12 by Claude Code
       recorded as missing rather than as `<subject>@unknown.invalid`), and
       taught coverage about greenlets, which had been hiding half of what the
       async service tests actually execute
-- [ ] WP3.2 Connector protocol + Postgres connector + test-connection
-- [ ] WP3.3 SQL Server connector + compose profile + dialect tests ← gate PR
-- [ ] GATE: seed DBs registered; creds never echoed; user sign-off
+- [x] WP3.2 Connector protocol + Postgres connector + test-connection
+      — also closed **B-006** (`make seed` now creates `pizza_readonly`, so the
+      demo database can be registered with credentials that genuinely cannot
+      write), and defined `ValidatedQuery` with its grant, four phases before
+      the DAL that will hold it
+- [ ] WP3.3 SQL Server connector + compose profile + dialect tests
+- [ ] WP3.4 Data sources screen (register, test, rotate, remove)     ← gate PR
+      — added 2026-08-12 from **B-012**, accepted by the owner: the phase's exit
+      criterion said "registered via the API", which meant a curl command for
+      the first thing a new organization must do. The gate demo is now in the
+      browser. WP3.3 keeps its work and hands the gate marker to WP3.4.
+- [ ] GATE: both seed DBs registered **from the browser**; creds never echoed;
+      read-only verified; a wrong password fails with a sanitized message;
+      a Reader sees no admin controls; user sign-off
 
 ## Phase 4 — Discovery & catalog (M4)
 - [ ] WP4.1 Schema discovery → catalog tables + refresh + incremental hash
@@ -105,39 +116,49 @@ Last updated: 2026-08-12 by Claude Code
 
 ## Next step
 
-Phase 3 / **WP3.2 — Connector protocol + Postgres connector**
-(`p3.2-postgres-connector`). Read plan §6 Phase 3 and architecture Part 5.1
-first. It brings:
+Phase 3 / **WP3.3 — SQL Server connector** (`p3.3-mssql-connector`). Read plan
+§6 Phase 3 and architecture Part 3, 5.1. It brings:
 
-- `connectors/base.py` — the arch 5.1 protocol, and the `ValidatedQuery` type
-  **defined now** even though the DAL does not exist until Phase 5: `execute`
-  must be unable to accept anything else, so the type gate exists before there
-  is anything to gate.
-- `connectors/postgres.py` on asyncpg — read-only session, per-call statement
-  timeout, introspection from `information_schema`/`pg_catalog` templates.
-- The real `POST …/test`: connect with the stored credentials **and** prove they
-  cannot write (an attempted `CREATE TEMP TABLE`/`INSERT` inside a rolled-back
-  probe must fail), then record `readonly_verified` and `last_verified_at` on
-  the row and move its `status` to `verified` or `error`.
+- pyodbc + msodbcsql18 in the API image, wrapped in `asyncio.to_thread` behind
+  the same async protocol WP3.2 defined; the driver install goes in the
+  Dockerfile and is the reason this WP touches the image at all.
+- `connectors/sqlserver.py`: introspection from the `sys.*` views, capabilities
+  declaring dialect `tsql` and `limit_syntax="top"`, and the same two-part
+  read-only verification — privilege introspection (`HAS_PERMS_BY_NAME`, the
+  `db_datawriter`/`db_owner` role memberships) plus one attempted write inside a
+  rolled-back transaction, on a connection that is **not** read-only.
+- Compose `mssql` profile (already present) + `ops/seed/seed_pizza_mssql.sql`,
+  same schema and still no `order_items`; a smaller row count is fine.
+- A path-filtered CI job with an mssql service, because that image is heavy.
 
-What WP3.1 left for it, deliberately:
+What WP3.2 leaves for it, deliberately:
 
-- `POST /v1/orgs/{o}/data-sources/{d}/test` today answers only "is the address
-  reachable from here" — a TCP connect, no credential on the wire. That is the
-  half that needs no driver, and it stays as the first check; WP3.2 layers the
-  credential and read-only verification on top rather than replacing it.
-- `data_sources.status` can only be `registered` until WP3.2 can honestly set
-  the other two values. `last_verified_at` and `readonly_verified` are not
-  columns yet — they arrive with the code that fills them (the D-006 rule).
-- `connectors/sanitizer.py` exists and is proven against a corpus of realistic
-  driver errors; WP3.2 is the first caller with real exceptions to pass through
-  it. Every connector error must go through `sanitize_exception`, with the host,
-  username and database passed as `known=` — the patterns are the second layer,
-  not the first.
-- **B-006** (P2) should be closed in WP3.2: the pizza fixture ships only its
-  owner login, and `readonly_verified` cannot be true for a role that can write.
+- `connectors/factory.py` refuses `mssql` today with a message naming this work
+  package. Adding the connector means adding one entry to `SUPPORTED_ENGINES`
+  and removing one line from `_NOT_YET`.
+- The `Connector` protocol is complete for what exists: `capabilities`,
+  `test_connection`, the three `list_*` calls, `execute` and `aclose`. Arch 5.1
+  also lists `sample`, `profile` and `explain`; those arrive with the profiler
+  in Phase 4 and the DAL in Phase 5, each with the caller that needs it.
+- `Caps.statement_timeout_mechanism` exists precisely because SQL Server does
+  not have `SET statement_timeout`: it needs the driver's query timeout instead.
+  WP3.3 is the first code to read that field rather than assume Postgres.
+- The read-only *shape* of verification is settled and should not be
+  re-invented: never ask a read-only session to prove the credentials are
+  read-only, because it proves only that the session setting works.
+
+Then **WP3.4** (`p3.4-datasources-ui`) closes the phase with the browser screen
+and the gate demo — see the Phase 3 checklist above and plan §6 WP3.4.
 
 ## Notes
+
+- **`readonly_verified` is a claim, so it is earned.** It is false until this
+  service has evidence: the engine's privilege catalog says the role cannot
+  write, *and* an attempted write on a connection with normal session settings
+  was refused. Asking a read-only session to fail a write proves only that we
+  can configure our own driver, which is why the probe opens its own connection.
+  A rotation or a change of address retires the verification — a green tick must
+  describe the credentials the row holds now.
 
 - **Customer credentials have exactly one home.** They go to the
   `SecretsProvider` and nowhere else: the platform database holds a

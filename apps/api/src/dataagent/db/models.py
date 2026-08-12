@@ -188,6 +188,10 @@ class DataSource(Base):
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
     secret_ref: Mapped[str] = mapped_column(String(300), nullable=False)
+    #: Proven, never assumed (revision 0006). False is the safe default and the
+    #: state every failed or incomplete verification leaves behind.
+    readonly_verified: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    last_verified_at: Mapped[datetime | None]
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )

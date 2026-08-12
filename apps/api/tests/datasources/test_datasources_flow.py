@@ -8,11 +8,10 @@ error path where a half-finished registration is rolled back.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import uuid
 from collections.abc import AsyncIterator, Sequence
-from typing import Any
+from typing import Any, cast, get_args
 
 import pytest
 from fastapi import FastAPI
@@ -21,11 +20,16 @@ from sqlalchemy import URL, Row, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from customer_db import CustomerDatabase
 from dataagent.auth.jwt_validator import TokenValidator
 from dataagent.auth.principal import Principal, TokenError
 from dataagent.config import Settings
+from dataagent.connectors.base import ConnectorError
+from dataagent.connectors.factory import SUPPORTED_ENGINES, require_supported
+from dataagent.datasources.routes import Engine
 from dataagent.datasources.service import create_data_source, credentials_ref
 from dataagent.db import engine as engine_module
+from dataagent.db.models import DATA_SOURCE_ENGINES
 from dataagent.main import create_app
 from dataagent.secrets.base import SecretNotFoundError
 from dataagent.secrets.local import LocalSecretsProvider
@@ -391,38 +395,159 @@ async def test_a_registration_that_fails_late_leaves_no_credential_behind(
     assert _entries(secrets_provider) == before, "a failed registration left a credential behind"
 
 
-async def test_the_test_endpoint_reports_a_reachable_address(api: Api, app_database: URL) -> None:
-    """A real socket: the endpoint answers about the address it was given."""
+async def _register_customer_database(
+    api: Api, org_id: uuid.UUID, database: CustomerDatabase, *, as_owner: bool = False
+) -> dict[str, Any]:
+    account = database.url.username if as_owner else database.reader_username
+    login = database.url.password if as_owner else database.reader_password
+    _, created = await api.call(
+        "POST",
+        f"/v1/orgs/{org_id}/data-sources",
+        who="alice",
+        body={
+            "name": "Owner login" if as_owner else "Customer",
+            "engine": "pg",
+            "host": database.host,
+            "port": database.port,
+            "database": database.database,
+            "username": account,
+            "password": login,
+        },
+    )
+    return cast("dict[str, Any]", created)
 
-    async def ignore(_: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        writer.close()
 
-    server = await asyncio.start_server(ignore, "127.0.0.1", 0)
-    port = int(server.sockets[0].getsockname()[1])
-    try:
-        org_id = await _org(api, "alice", "Acme")
-        _, created = await api.call(
-            "POST",
-            f"/v1/orgs/{org_id}/data-sources",
-            who="alice",
-            body=REGISTRATION | {"host": "127.0.0.1", "port": port},
-        )
+async def test_a_read_only_login_verifies_end_to_end(
+    api: Api, app_database: URL, customer_database: CustomerDatabase
+) -> None:
+    """The M3 promise, through the API a person will actually use."""
+    org_id = await _org(api, "alice", "Acme")
+    created = await _register_customer_database(api, org_id, customer_database)
 
-        status, result = await api.call(
-            "POST", f"/v1/orgs/{org_id}/data-sources/{created['id']}/test", who="alice"
-        )
-    finally:
-        server.close()
-        await server.wait_closed()
+    assert created["status"] == "registered"
+    assert created["readonly_verified"] is False
+    assert created["last_verified_at"] is None
+
+    status, result = await api.call(
+        "POST", f"/v1/orgs/{org_id}/data-sources/{created['id']}/test", who="alice"
+    )
 
     assert status == 200
     assert result["reachable"] is True
+    assert result["readonly_verified"] is True
+    assert result["status"] == "verified"
+    assert result["server_version"].startswith("PostgreSQL")
+
+    # And the row remembers it, so a screen does not have to re-test to know.
+    _, fetched = await api.call(
+        "GET", f"/v1/orgs/{org_id}/data-sources/{created['id']}", who="alice"
+    )
+    assert fetched["status"] == "verified"
+    assert fetched["readonly_verified"] is True
+    assert fetched["last_verified_at"] is not None
 
     actions = [
         row[0]
         for row in await _rows(app_database, org_id, "SELECT action FROM audit_log ORDER BY id")
     ]
     assert actions == ["org.created", "datasource.created", "datasource.tested"]
+
+
+async def test_credentials_that_can_write_are_refused_verification(
+    api: Api, customer_database: CustomerDatabase
+) -> None:
+    """Registering with the owner account is the mistake this check exists for."""
+    org_id = await _org(api, "alice", "Acme")
+    created = await _register_customer_database(api, org_id, customer_database, as_owner=True)
+
+    _, result = await api.call(
+        "POST", f"/v1/orgs/{org_id}/data-sources/{created['id']}/test", who="alice"
+    )
+
+    assert result["reachable"] is True
+    assert result["readonly_verified"] is False
+    assert result["status"] == "error"
+    assert "not read-only" in result["detail"]
+    assert result["evidence"], "a refusal must say what it found"
+
+    _, fetched = await api.call(
+        "GET", f"/v1/orgs/{org_id}/data-sources/{created['id']}", who="alice"
+    )
+    assert fetched["status"] == "error"
+    assert fetched["readonly_verified"] is False
+    # A failed check does not get to claim a verification time: the column says
+    # when this was last *proven* read-only, and it never was.
+    assert fetched["last_verified_at"] is None
+
+
+async def test_rotating_credentials_retires_the_previous_verification(
+    api: Api, customer_database: CustomerDatabase
+) -> None:
+    """A green tick must describe the credentials the row holds *now*."""
+    org_id = await _org(api, "alice", "Acme")
+    created = await _register_customer_database(api, org_id, customer_database)
+    await api.call("POST", f"/v1/orgs/{org_id}/data-sources/{created['id']}/test", who="alice")
+
+    _, updated = await api.call(
+        "PATCH",
+        f"/v1/orgs/{org_id}/data-sources/{created['id']}",
+        who="alice",
+        body={"password": "some-other-password"},
+    )
+
+    assert updated["readonly_verified"] is False
+    assert updated["status"] == "registered"
+    assert updated["last_verified_at"] is None
+
+
+async def test_a_verification_failure_never_quotes_the_credential(
+    api: Api, customer_database: CustomerDatabase
+) -> None:
+    org_id = await _org(api, "alice", "Acme")
+    _, created = await api.call(
+        "POST",
+        f"/v1/orgs/{org_id}/data-sources",
+        who="alice",
+        body={
+            "name": "Wrong password",
+            "engine": "pg",
+            "host": customer_database.host,
+            "port": customer_database.port,
+            "database": customer_database.database,
+            "username": customer_database.reader_username,
+            "password": PIZZA_LOGIN,
+        },
+    )
+
+    _, result = await api.call(
+        "POST", f"/v1/orgs/{org_id}/data-sources/{created['id']}/test", who="alice"
+    )
+
+    assert result["readonly_verified"] is False
+    assert PIZZA_LOGIN not in result["detail"]
+    assert customer_database.reader_username not in result["detail"]
+
+
+async def test_an_engine_without_a_connector_says_when_it_arrives(api: Api) -> None:
+    """Registered today, unusable until WP3.3 — and the message says so.
+
+    The engine is checked before the address is probed and before the credential
+    is read, so this answers without touching the network at all.
+    """
+    org_id = await _org(api, "alice", "Acme")
+    _, created = await api.call(
+        "POST",
+        f"/v1/orgs/{org_id}/data-sources",
+        who="alice",
+        body=REGISTRATION | {"engine": "mssql"},
+    )
+
+    _, result = await api.call(
+        "POST", f"/v1/orgs/{org_id}/data-sources/{created['id']}/test", who="alice"
+    )
+
+    assert result["readonly_verified"] is False
+    assert "WP3.3" in result["detail"]
 
 
 async def test_an_unreachable_address_is_reported_without_leaking_it(api: Api) -> None:
@@ -440,6 +565,7 @@ async def test_an_unreachable_address_is_reported_without_leaking_it(api: Api) -
 
     assert status == 200
     assert result["reachable"] is False
+    assert result["readonly_verified"] is False
     assert "no-such-host.invalid" not in result["detail"]
 
 
@@ -454,3 +580,23 @@ def _entries(provider: LocalSecretsProvider) -> set[str]:
         return set()
     document = json.loads(provider.path.read_text(encoding="utf-8"))
     return set(document["secrets"])
+
+
+def test_the_routes_and_the_database_agree_on_which_engines_exist() -> None:
+    """Two declarations of the same fact; a test rather than a comment.
+
+    The route's Literal produces a 422 that lists what is accepted; the CHECK
+    constraint is what the database will enforce. If they drift, one of them
+    starts lying and the other starts returning 500s.
+    """
+    assert set(get_args(Engine)) == set(DATA_SOURCE_ENGINES)
+
+
+def test_every_engine_the_api_accepts_is_either_supported_or_names_its_work_package() -> None:
+    """Registering an engine with no connector yet is allowed — silently failing
+    to explain why is not."""
+    for engine in DATA_SOURCE_ENGINES:
+        if engine in SUPPORTED_ENGINES:
+            continue
+        with pytest.raises(ConnectorError, match=r"WP|V1\.1"):
+            require_supported(engine)
