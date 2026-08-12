@@ -207,6 +207,17 @@ flagged idempotent job (plan §6 Phase 4).
   *render* and is not a permission check: the guard is server-side, and it still
   refuses and audits regardless of what the browser believes.
 
+- **`ops/scripts/set_role.sh` is an operator escape hatch, not a feature.**
+  Roles change through the API, which audits every one and refuses to let the
+  last Admin demote themselves. This script edits `org_memberships` directly,
+  for the case the API cannot help with: nobody who can sign in holds Admin —
+  an identity-provider problem, not an authorization one. Added 2026-08-12 when
+  the Entra External ID account that created the demo org (`sourabh@rereed.com`)
+  stopped being findable at sign-in and the Phase 3 gate had no Admin. It writes
+  its own `member.role_changed` row with a **null actor**, because "someone
+  edited the database" is the honest description. If it is ever reached for
+  anything but a locked-out tenant, that is a missing product feature.
+
 - **UI follows docs/design.md.** Tokens live in `apps/web/src/app/globals.css`;
   primitives in `src/components/ui/`. A raw hex value anywhere else is a bug,
   and adding a component library needs a DECISIONS entry first.
