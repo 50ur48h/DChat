@@ -12,10 +12,15 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["local", "ci", "dev", "prod"]
+SecretsBackend = Literal["local", "keyvault"]
+
+#: Where the local backend keeps its encrypted file, relative to the repository
+#: root. Gitignored, and every value inside it is encrypted regardless.
+LOCAL_SECRETS_RELATIVE_PATH = Path("ops") / ".secrets" / "secrets.json"
 
 
 def find_env_file(start: Path) -> Path | None:
@@ -131,12 +136,51 @@ class Settings(BaseSettings):
         ),
     )
 
+    secrets_backend: SecretsBackend = Field(
+        default="local",
+        description=(
+            "Where customer credentials are kept. 'local' is the Fernet-encrypted "
+            "file backend for development (DECISIONS D-001) and is refused in a "
+            "production build or environment; 'keyvault' arrives in WP12.2."
+        ),
+    )
+    #: SecretStr, unlike the DSNs above: this one key decrypts every customer
+    #: credential this deployment holds, so it must not be readable from a repr,
+    #: a traceback frame, or a settings dump.
+    local_secrets_key: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Fernet key for the local secrets backend. Generated, never chosen: "
+            "`make secrets.key`. Required when SECRETS_BACKEND=local."
+        ),
+    )
+    local_secrets_path: Path | None = Field(
+        default=None,
+        description=(
+            "Where the local backend keeps its encrypted file. Defaults to "
+            "ops/.secrets/secrets.json beside the repository's .env."
+        ),
+    )
+
     # NoDecode: without it pydantic-settings JSON-decodes any complex-typed env
     # var, so the natural `CORS_ORIGINS=http://a,http://b` would be a boot error.
     cors_origins: Annotated[tuple[str, ...], NoDecode] = Field(
         default=("http://localhost:3000",),
         description="Browser origins allowed to call this API. The web app only.",
     )
+
+    @field_validator("local_secrets_key", mode="before")
+    @classmethod
+    def _blank_key_is_no_key(cls, value: object) -> object:
+        """``LOCAL_SECRETS_KEY=`` in a .env means "not set", not "the empty key".
+
+        Without this, the commented placeholder in .env.example produces a
+        SecretStr("") that fails much later, inside Fernet, with a message about
+        key length rather than about configuration.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -182,6 +226,44 @@ class Settings(BaseSettings):
                 "AUTH_MODE=dev is not permitted in a production build or environment: "
                 "it would accept tokens this process minted for itself."
             )
+
+    def assert_secrets_backend_is_production_safe(self) -> None:
+        """Refuse to start a production build that keeps credentials in a file.
+
+        The local backend's key lives in an environment variable next to the
+        ciphertext it unlocks, which is fine on a laptop and unacceptable for
+        customer credentials. Checked at startup for the same reason as the auth
+        assertion above: a process that boots and then fails open looks healthy.
+        """
+        if self.secrets_backend == "local" and (self.build_env == "prod" or self.env == "prod"):
+            raise RuntimeError(
+                "SECRETS_BACKEND=local is not permitted in a production build or "
+                "environment: it keeps customer credentials in a file whose key "
+                "sits beside it. Production uses Key Vault (DECISIONS D-001)."
+            )
+
+    def require_local_secrets_key(self) -> str:
+        """The Fernet key, or a failure that names the command that makes one."""
+        if self.local_secrets_key is None:
+            raise RuntimeError(
+                "LOCAL_SECRETS_KEY is not set, so data-source credentials cannot "
+                "be encrypted. Generate one with `make secrets.key` and put it in "
+                ".env. It is generated, never chosen."
+            )
+        return self.local_secrets_key.get_secret_value()
+
+    def resolve_local_secrets_path(self) -> Path:
+        """Where the local backend's encrypted file lives.
+
+        Anchored to the repository root — the directory holding ``.env`` — so that
+        `make api.dev` from any directory and `uvicorn` from apps/api use the same
+        file. In a container there is no ``.env``, and the path is resolved
+        against the working directory instead; compose sets it explicitly.
+        """
+        if self.local_secrets_path is not None:
+            return self.local_secrets_path
+        root = _REPO_ENV_FILE.parent if _REPO_ENV_FILE else Path()
+        return root / LOCAL_SECRETS_RELATIVE_PATH
 
     def require_database_url(self) -> str:
         """The owner DSN, or a failure that names the fix.

@@ -29,24 +29,28 @@ class _SubjectAsToken(TokenValidator):
     """The bearer token *is* the subject, so these tests are about the flow."""
 
     def __init__(self) -> None:
-        pass
+        #: Subjects whose token carries no email claim — the Entra default until
+        #: an administrator adds the optional claim (B-009).
+        self.without_email: set[str] = set()
 
     async def validate(self, token: str) -> Principal:
         if not token or token == "invalid":  # noqa: S105
             raise TokenError("bad_signature", "nope")
+        if token in self.without_email:
+            return Principal(subject=token, email=None, name=None)
         return Principal(subject=token, email=f"{token}@example.com", name=token.title())
 
 
 class Api:
     def __init__(self, app: FastAPI) -> None:
-        self._app = app
+        self.app = app
 
     async def call(
         self, method: str, path: str, who: str | None = None, body: dict[str, Any] | None = None
     ) -> tuple[int, Any]:
         headers = {"Authorization": f"Bearer {who}"} if who else {}
         async with AsyncClient(
-            transport=ASGITransport(app=self._app), base_url="http://testserver"
+            transport=ASGITransport(app=self.app), base_url="http://testserver"
         ) as client:
             response = await client.request(method, path, headers=headers, json=body)
         payload = None if response.status_code == 204 else response.json()
@@ -72,6 +76,12 @@ async def api(
     finally:
         await owner.dispose()
         await app_engine.dispose()
+
+
+def _validator(api: Api) -> _SubjectAsToken:
+    validator = api.app.state.token_validator
+    assert isinstance(validator, _SubjectAsToken)
+    return validator
 
 
 async def _audit(url: URL, org_id: uuid.UUID) -> Sequence[Row[Any]]:
@@ -232,6 +242,74 @@ async def test_the_raw_token_is_never_stored(api: Api, migrated_database: URL) -
 
     assert token not in stored
     assert all(token not in row for row in audited), "the raw token reached the audit log"
+
+
+# ---------------------------------------------------------------------------
+# A token that carried no email claim (B-009)
+# ---------------------------------------------------------------------------
+
+
+async def test_a_missing_email_claim_is_recorded_as_missing(
+    api: Api, migrated_database: URL
+) -> None:
+    """Not as ``<subject>@unknown.invalid``, which is a lie a column would keep."""
+    _validator(api).without_email.add("erin")
+
+    status, me = await api.call("GET", "/v1/me", who="erin")
+
+    assert status == 200
+    assert me["email"] is None
+    assert me["subject"] == "erin"
+
+    engine = create_async_engine(migrated_database)
+    try:
+        async with engine.begin() as connection:
+            stored = (
+                await connection.execute(
+                    text("SELECT email FROM users WHERE external_subject = 'erin'")
+                )
+            ).scalar_one()
+    finally:
+        await engine.dispose()
+
+    assert stored is None
+    assert "unknown.invalid" not in str(stored)
+
+
+async def test_a_claim_that_arrives_later_is_recorded_then(api: Api) -> None:
+    """The usual repair: an administrator adds the optional claim afterwards."""
+    validator = _validator(api)
+    validator.without_email.add("frank")
+    await api.call("GET", "/v1/me", who="frank")
+
+    validator.without_email.discard("frank")
+    _, me = await api.call("GET", "/v1/me", who="frank")
+
+    assert me["email"] == "frank@example.com"
+    assert me["name"] == "Frank"
+
+
+async def test_a_member_without_an_email_still_appears_in_the_list(api: Api) -> None:
+    """A missing claim must not make somebody invisible to their own admins."""
+    _validator(api).without_email.add("gwen")
+    _, org = await api.call("POST", "/v1/orgs", who="alice", body={"name": "Acme"})
+    org_id = uuid.UUID(org["org_id"])
+    _, invitation = await api.call(
+        "POST",
+        f"/v1/orgs/{org_id}/invitations",
+        who="alice",
+        body={"email": "gwen@example.com", "role": "reader"},
+    )
+    token = invitation["token"]
+    await api.call("POST", "/v1/invitations/accept", who="gwen", body={"token": token})
+
+    status, members = await api.call("GET", f"/v1/orgs/{org_id}/members", who="alice")
+
+    assert status == 200
+    assert {member["role"]: member["email"] for member in members} == {
+        "admin": "alice@example.com",
+        "reader": None,
+    }
 
 
 # ---------------------------------------------------------------------------

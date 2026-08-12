@@ -34,9 +34,12 @@ from dataagent.db.base import ROLES, Base, CreatedAt, OrgId, UuidPk
 from dataagent.db.security_events import SecurityEvent
 
 __all__ = [
+    "DATA_SOURCE_ENGINES",
+    "DATA_SOURCE_STATUSES",
     "TENANT_TABLES",
     "AuditLog",
     "Base",
+    "DataSource",
     "Invitation",
     "OrgMembership",
     "Organization",
@@ -45,6 +48,16 @@ __all__ = [
 ]
 
 ROLE_CHECK = "role IN ({})".format(", ".join(f"'{role}'" for role in ROLES))
+
+#: The engines a connector exists for. Architecture Part 10.1 gives the column's
+#: domain as ``pg|mssql|mysql``; MySQL is a V1.1 connector (Part 5.1), so it is
+#: left out until it can be tested rather than accepted and then never reachable.
+DATA_SOURCE_ENGINES: tuple[str, ...] = ("pg", "mssql")
+
+#: ``registered`` is what WP3.1 can honestly claim: credentials are stored and
+#: the address is recorded. WP3.2's connector moves a row to ``verified`` (it
+#: connected *and* proved the credentials cannot write) or to ``error``.
+DATA_SOURCE_STATUSES: tuple[str, ...] = ("registered", "verified", "error")
 
 
 class Organization(Base):
@@ -66,13 +79,18 @@ class User(Base):
     Not tenant-scoped, and holds no credentials: Entra External ID owns
     authentication (architecture Part 6.1). We store only what links a token to a
     membership.
+
+    ``email`` is nullable, and that is deliberate (revision 0005, B-009): an
+    access token carries an email claim only when the app registration asks for
+    one, and a NOT NULL column forced provisioning to invent an address. The
+    subject is the identity; the email is a convenience that may be missing.
     """
 
     __tablename__ = "users"
 
     id: Mapped[UuidPk]
     external_subject: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
-    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    email: Mapped[str | None] = mapped_column(String(320))
     name: Mapped[str | None] = mapped_column(String(200))
     created_at: Mapped[CreatedAt]
 
@@ -129,6 +147,53 @@ class Invitation(Base):
     created_at: Mapped[CreatedAt]
 
 
+class DataSource(Base):
+    """A customer database this organization has registered (arch Part 5.1, 10.1).
+
+    What is **not** here is the point of the table: no password, no DSN, no
+    connection string. Credentials go to the ``SecretsProvider`` and this row
+    keeps ``secret_ref``, a pointer that is useless without the store it names.
+
+    ``settings`` holds the non-secret half of the connection — host, port,
+    database, and the last four characters of the username so a screen can say
+    *which* account is in use without reading the credential back.
+    """
+
+    __tablename__ = "data_sources"
+    __table_args__ = (
+        CheckConstraint(
+            "engine IN ({})".format(", ".join(f"'{engine}'" for engine in DATA_SOURCE_ENGINES)),
+            name="engine_valid",
+        ),
+        CheckConstraint(
+            "status IN ({})".format(", ".join(f"'{status}'" for status in DATA_SOURCE_STATUSES)),
+            name="status_valid",
+        ),
+        # Two sources with one name in an organization is a support call waiting
+        # to happen. Scoped by org_id, so another tenant's names are unaffected —
+        # and cannot be probed for, since the conflict can only be your own.
+        Index("uq_data_sources_org_id_name", "org_id", "name", unique=True),
+    )
+
+    id: Mapped[UuidPk]
+    org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    engine: Mapped[str] = mapped_column(String(20), nullable=False)
+    #: Safe to show and safe to log: "host:port/database", never a credential.
+    host_display: Mapped[str] = mapped_column(String(300), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'registered'")
+    )
+    settings: Mapped[dict[str, object]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    secret_ref: Mapped[str] = mapped_column(String(300), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[CreatedAt]
+
+
 class AuditLog(Base):
     """Append-only record of who did what (architecture Part 8.2).
 
@@ -170,4 +235,5 @@ TENANT_TABLES: dict[str, str] = {
     "org_memberships": "org_id",
     "invitations": "org_id",
     "audit_log": "org_id",
+    "data_sources": "org_id",
 }

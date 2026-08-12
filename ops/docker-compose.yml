@@ -71,11 +71,21 @@ services:
       DATABASE_URL: postgresql+asyncpg://${PLATFORM_DB_USER:-dataagent}:${PLATFORM_DB_PASSWORD:?set PLATFORM_DB_PASSWORD in .env}@platform-pg:5432/${PLATFORM_DB_NAME:-dataagent}
       # What the request path actually connects as: no superuser, no BYPASSRLS.
       APP_DATABASE_URL: postgresql+asyncpg://dataagent_app:${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}@platform-pg:5432/${PLATFORM_DB_NAME:-dataagent}
+      # Data-source credentials (DECISIONS D-001). Defaulted rather than
+      # required: the API must still boot and answer /healthz without a key —
+      # only the routes that store credentials refuse, and they say why.
+      SECRETS_BACKEND: ${SECRETS_BACKEND:-local}
+      LOCAL_SECRETS_KEY: ${LOCAL_SECRETS_KEY:-}
+      LOCAL_SECRETS_PATH: /app/ops/.secrets/secrets.json
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
       # Source only: never mount over /app/.venv, which is built into the image.
       - ../apps/api/src:/app/src
+      # The encrypted secrets file, on the host and gitignored, so `make down`
+      # does not throw away registered data sources — and so the ciphertext is
+      # something a developer can actually look at.
+      - ../ops/.secrets:/app/ops/.secrets
     depends_on:
       platform-pg:
         condition: service_healthy

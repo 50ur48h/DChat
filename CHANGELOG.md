@@ -10,6 +10,10 @@ under "Unreleased", only for changes a user would notice.
 ## [Unreleased]
 
 ### Security
+- Database credentials for a registered data source are encrypted and kept
+  outside the platform database, which holds only a reference to them. No API
+  response has a field that could carry one, and connector errors are scrubbed
+  of connection strings, passwords and addresses before they reach a log.
 - Three fixed roles are enforced on every org-scoped route. A refusal is
   recorded where its organization can find it, and refusals that belong to no
   organization are kept in a platform security log rather than dropped.
@@ -18,6 +22,9 @@ under "Unreleased", only for changes a user would notice.
   cannot bypass it. The audit log is append-only by grant.
 
 ### Added
+- Register the databases an organization wants analysed: list, register, rename,
+  rotate credentials, remove, and check that the address answers. Admin-only,
+  except for listing, which any member may do.
 - A web app you can actually use: sign in, see who you are and which
   organizations you belong to, create one, invite people with a role, and
   manage members. Sign-in works against Microsoft Entra External ID, or
@@ -35,3 +42,7 @@ under "Unreleased", only for changes a user would notice.
 - One-command local stack: `make up` starts the platform database, a pizza-chain
   demo database, the API and the web app; `make seed` fills the demo database
   with 18 months of reproducible data.
+
+### Fixed
+- Someone whose sign-in carries no email address is shown by name, or by the
+  identity their account was created with, instead of by a made-up address.

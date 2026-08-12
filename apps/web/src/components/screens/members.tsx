@@ -9,6 +9,7 @@ import { Input, Select } from "@/components/ui/input";
 import { Row, Stack } from "@/components/ui/page";
 import { createApi, type Invitation, type Member } from "@/lib/api-client";
 import { useSession } from "@/lib/auth/session";
+import { personLabel } from "@/lib/identity";
 
 import styles from "./members.module.css";
 
@@ -99,7 +100,10 @@ export function Members({ orgId }: { orgId: string }) {
             <tbody>
               {members.map((member) => (
                 <tr key={member.user_id}>
-                  <td>{member.email}</td>
+                  {/* A member whose token carried no email claim still has to be
+                      identifiable, so fall back to their name and then to the
+                      subject the product authorizes against (B-009). */}
+                  <td>{personLabel(member, member.user_id)}</td>
                   <td>
                     <Badge tone={ROLE_TONES[member.role] ?? "neutral"}>{member.role}</Badge>
                   </td>

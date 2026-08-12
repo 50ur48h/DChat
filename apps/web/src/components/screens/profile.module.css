@@ -39,6 +39,14 @@
   overflow-wrap: anywhere;
 }
 
+/* Said once, quietly: a missing email claim is a configuration fact, not a fault
+   of the person reading it. */
+.note {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--fg-muted);
+}
+
 .error {
   color: var(--danger);
 }

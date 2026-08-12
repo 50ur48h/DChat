@@ -74,6 +74,12 @@ async def ensure_user(principal: Principal) -> User:
     subject, and refusing to record them until an invitation arrives would make
     ``GET /v1/me`` fail for a perfectly legitimate first-time caller. ``users`` is
     not tenant-scoped, so this needs the system session.
+
+    Only claims that actually arrived are stored (B-009). An access token carries
+    ``email`` only when the app registration asks for it, and inventing an address
+    for the ones that do not would write a plausible lie into a column that later
+    features will trust. A claim that shows up later is recorded then — which is
+    what happens when an administrator finally adds the optional claim.
     """
     async with system_session() as session:
         existing = (
@@ -83,11 +89,21 @@ async def ensure_user(principal: Principal) -> User:
         )
 
         if existing is not None:
+            # Filling a blank, never overwriting: the token is authoritative about
+            # who this is, not about what we have already been told they are called.
+            filled = False
+            if existing.email is None and principal.email:
+                existing.email, filled = principal.email, True
+            if existing.name is None and principal.name:
+                existing.name, filled = principal.name, True
+            if filled:
+                await session.commit()
+                await session.refresh(existing)
             return existing
 
         user = User(
             external_subject=principal.subject,
-            email=principal.email or f"{principal.subject}@unknown.invalid",
+            email=principal.email,
             name=principal.name,
         )
         session.add(user)
@@ -137,7 +153,8 @@ async def create_organization(user: User, name: str) -> Membership:
 @dataclass(frozen=True, slots=True)
 class Member:
     user_id: uuid.UUID
-    email: str
+    #: None when the identity provider never sent an email claim (B-009).
+    email: str | None
     name: str | None
     role: str
 

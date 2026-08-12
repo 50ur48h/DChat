@@ -184,6 +184,7 @@ source = { editable = "." }
 dependencies = [
     { name = "alembic" },
     { name = "asyncpg" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "pydantic", extra = ["email"] },
@@ -207,6 +208,7 @@ dev = [
 requires-dist = [
     { name = "alembic", specifier = ">=1.14" },
     { name = "asyncpg", specifier = ">=0.30" },
+    { name = "cryptography", specifier = ">=44.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "pydantic", extras = ["email"], specifier = ">=2.13.4" },

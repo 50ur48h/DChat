@@ -5,7 +5,7 @@ Any deviation from `docs/architecture.md` needs an entry here **and** an edit to
 architecture doc, both in the same PR as the code.
 
 ## D-001 — Local secrets backend before Key Vault (pre-approved)
-Date: 2026-08-10 · Phase: 3 · PR: #NN
+Date: 2026-08-10 · Phase: 3 · PR: #16
 Context: Arch M3 lists Key Vault as a dependency, but Azure arrives in Phase 12.
 Decision: Implement SecretsProvider with an encrypted local-file backend
 (Fernet, key from .env) for dev; KeyVaultSecretsProvider lands in WP12.2
