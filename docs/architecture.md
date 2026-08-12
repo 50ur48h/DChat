@@ -685,9 +685,13 @@ catalog_tables(id, org_id, snapshot_id, schema_name, table_name, kind table|view
                structural_hash, row_estimate, description, card_text, embedding vector(1536),
                flags jsonb)
 catalog_columns(id, org_id, table_id, name, ordinal, data_type, nullable, is_pk, fk_ref,
-                description, null_frac, distinct_est, min_val, max_val, top_values jsonb,
-                semantic_role measure|dimension|time|id|other,
-                sensitivity none|suspected|confirmed, policy allow|mask|deny, mask_type)
+                description, sample_rows, null_frac, distinct_est, min_val, max_val,
+                top_values jsonb, semantic_role measure|dimension|time|id|other,
+                sensitivity none|suspected|confirmed)
+column_policies(id, org_id, data_source_id, schema_name, table_name, column_name,
+                policy allow|mask|deny, mask_type, reason, decided_by, decided_at)
+                -- keyed by name, not by catalog row: a policy outlives every
+                -- snapshot, and a refresh must never reset one (D-013)
 catalog_relationships(id, org_id, snapshot_id, constraint_name,
                       from_schema, from_table, from_cols, to_schema, to_table, to_cols,
                       kind declared|inferred, confidence)

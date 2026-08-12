@@ -70,7 +70,7 @@ async def test_it_lists_tables_and_views_with_their_comments(
         tables = await connector.list_tables(["public"])
 
     by_name = {table.name: table for table in tables}
-    assert set(by_name) == {"regions", "shops", "busy_shops", "products"}
+    assert set(by_name) == {"regions", "shops", "busy_shops", "products", "people"}
     assert by_name["regions"].kind == "table"
     assert by_name["busy_shops"].kind == "view"
     assert by_name["regions"].comment == "Sales regions."

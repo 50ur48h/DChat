@@ -20,7 +20,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dataagent.catalog.discovery import STATUS_ACTIVE, SnapshotView
-from dataagent.db.models import CatalogColumn, CatalogRelationship, CatalogSnapshot, CatalogTable
+from dataagent.catalog.policies import effective_policy
+from dataagent.db.models import (
+    CatalogColumn,
+    CatalogRelationship,
+    CatalogSnapshot,
+    CatalogTable,
+    ColumnPolicy,
+)
 from dataagent.tenancy.session import org_session
 
 __all__ = ["Catalog", "CatalogColumnView", "CatalogTableView", "NoCatalogError", "active_catalog"]
@@ -32,12 +39,27 @@ class NoCatalogError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class CatalogColumnView:
+    id: uuid.UUID
     name: str
     ordinal: int
     data_type: str
     nullable: bool
     is_pk: bool
     description: str | None
+    #: None until the profiler has run over this snapshot (WP4.2).
+    null_frac: float | None = None
+    distinct_est: int | None = None
+    min_val: str | None = None
+    max_val: str | None = None
+    top_values: list[dict[str, object]] | None = None
+    semantic_role: str | None = None
+    sensitivity: str = "none"
+    sample_rows: int | None = None
+    #: What applies right now: an Admin's decision, or the safe default that
+    #: suspicion implies. Never null — "nobody decided" is still an answer.
+    policy: str = "allow"
+    #: True when a person set it, rather than the classifier's default.
+    policy_decided: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,12 +126,14 @@ async def active_catalog(org_id: uuid.UUID, data_source_id: uuid.UUID) -> Catalo
                 object_count=snapshot.object_count,
                 error=snapshot.error,
             ),
-            tables=await _tables(session, snapshot.id),
+            tables=await _tables(session, snapshot.id, data_source_id),
             relationships=await _relationships(session, snapshot.id),
         )
 
 
-async def _tables(session: AsyncSession, snapshot_id: uuid.UUID) -> tuple[CatalogTableView, ...]:
+async def _tables(
+    session: AsyncSession, snapshot_id: uuid.UUID, data_source_id: uuid.UUID
+) -> tuple[CatalogTableView, ...]:
     tables = (
         (
             await session.execute(
@@ -134,16 +158,49 @@ async def _tables(session: AsyncSession, snapshot_id: uuid.UUID) -> tuple[Catalo
         .all()
     )
 
+    # Policies are keyed by name, not by catalog row, so they are fetched once
+    # for the data source and looked up — that is the whole point of them
+    # outliving a snapshot (D-013).
+    decisions = {
+        (policy.schema_name, policy.table_name, policy.column_name): policy
+        for policy in (
+            (
+                await session.execute(
+                    select(ColumnPolicy).where(ColumnPolicy.data_source_id == data_source_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    }
+    named = {table.id: (table.schema_name, table.table_name) for table in tables}
+
     by_table: dict[uuid.UUID, list[CatalogColumnView]] = {}
     for column in columns:
+        schema_name, table_name = named[column.table_id]
+        decision = decisions.get((schema_name, table_name, column.name))
         by_table.setdefault(column.table_id, []).append(
             CatalogColumnView(
+                id=column.id,
                 name=column.name,
                 ordinal=column.ordinal,
                 data_type=column.data_type,
                 nullable=column.nullable,
                 is_pk=column.is_pk,
                 description=column.description,
+                null_frac=column.null_frac,
+                distinct_est=column.distinct_est,
+                min_val=column.min_val,
+                max_val=column.max_val,
+                top_values=column.top_values,
+                semantic_role=column.semantic_role,
+                sensitivity=column.sensitivity,
+                sample_rows=column.sample_rows,
+                policy=effective_policy(
+                    stored=decision.policy if decision else None,
+                    sensitivity=column.sensitivity,
+                ),
+                policy_decided=decision is not None and decision.decided_by is not None,
             )
         )
 

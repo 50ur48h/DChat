@@ -177,6 +177,16 @@ async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
                     ),
                     {"org": org_id, "snap": snapshot_id},
                 )
+                # A decision about a column, which outlives snapshots and so is
+                # keyed by name rather than by a catalog row (WP4.2, D-013).
+                await connection.execute(
+                    text(
+                        "INSERT INTO column_policies "
+                        "(org_id, data_source_id, schema_name, table_name, column_name, policy) "
+                        "VALUES (:org, :ds, 'public', 'customers', 'email', 'mask')"
+                    ),
+                    {"org": org_id, "ds": data_source_id},
+                )
                 if org_id == org_b:
                     catalog.update(data_source=data_source_id, snapshot=snapshot_id, table=table_id)
     finally:
@@ -239,6 +249,11 @@ def _forged_insert(table: str, seeded: SeededOrgs) -> str:
             "to_schema, to_table, to_columns) VALUES "
             f"('{other_org}', '{seeded.b_snapshot}', 'forged', 'public', 'a', ARRAY['x'], "
             "'public', 'b', ARRAY['y'])"
+        ),
+        "column_policies": (
+            "INSERT INTO column_policies "
+            "(org_id, data_source_id, schema_name, table_name, column_name, policy) VALUES "
+            f"('{other_org}', '{seeded.b_data_source}', 'public', 'forged', 'email', 'allow')"
         ),
     }
     return statements[table]

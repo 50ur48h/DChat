@@ -4,6 +4,33 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-013 — A profile belongs to a snapshot; a policy belongs to a column
+Date: 2026-08-12 · Phase: 4 · PR: #22
+Context: Architecture Part 10.1 puts `policy allow|mask|deny` on
+`catalog_columns`, and plan §6 WP4.2 says the classifier "writes
+`column_policies`". Both cannot be right, and the difference matters: since
+D-012, `catalog_columns` rows belong to a snapshot and are rebuilt every time a
+schema changes. A policy stored there would be silently reset by the next
+refresh — a data leak caused by a routine operation, with nothing failing to
+draw attention to it.
+Options: (a) policy on `catalog_columns`, copied forward on each refresh;
+(b) a separate table keyed by column name; (c) policy on the data source's
+"current" columns only, with no history.
+Decision: (b), and the split is by *what kind of fact it is*.
+  * **Statistics describe a sample of a snapshot** — null fraction, distinct
+    estimate, min/max, top values, semantic role, and the sensitivity the
+    classifier *suspects*. These live on `catalog_columns` and die with it.
+  * **A policy is a judgement about a column by name** — schema, table, column —
+    and lives in `column_policies`, which discovery never touches. Copying
+    forward (option a) would work until the day a column is renamed or a refresh
+    half-fails, and then it would work wrongly.
+Consequences: `effective_policy` resolves in one order — a person's decision,
+else `mask` if suspected, else `allow` — so "nobody has decided" is still a safe
+answer, and `policy_decided` tells a screen which is which. A second profiling
+pass never overrules a person. Two tests hold this: an Admin's `allow` survives
+a schema change that rebuilds every catalog row, and a re-profile leaves it
+alone. Architecture Part 10.1 updated; plan §6 WP4.2 was already right.
+
 ## D-012 — The snapshot is the unit of catalog consistency, and of incrementality
 Date: 2026-08-12 · Phase: 4 · PR: #21
 Context: Plan §6 WP4.1 lists `catalog_schemas … catalog_relationships,

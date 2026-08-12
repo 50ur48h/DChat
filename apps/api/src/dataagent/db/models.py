@@ -37,9 +37,13 @@ from dataagent.db.base import ROLES, Base, CreatedAt, OrgId, UuidPk
 from dataagent.db.security_events import SecurityEvent
 
 __all__ = [
+    "COLUMN_POLICIES",
     "DATA_SOURCE_ENGINES",
     "DATA_SOURCE_STATUSES",
+    "PROFILE_STATUSES",
     "RELATIONSHIP_KINDS",
+    "SEMANTIC_ROLES",
+    "SENSITIVITY_LEVELS",
     "SNAPSHOT_STATUSES",
     "TABLE_KINDS",
     "TENANT_TABLES",
@@ -49,6 +53,7 @@ __all__ = [
     "CatalogRelationship",
     "CatalogSnapshot",
     "CatalogTable",
+    "ColumnPolicy",
     "DataSource",
     "Invitation",
     "OrgMembership",
@@ -80,6 +85,22 @@ TABLE_KINDS: tuple[str, ...] = ("table", "view")
 #: ``declared`` is a foreign key the engine enforces. ``inferred`` arrives with
 #: the profiler in WP4.2, which can score a guess; WP4.1 never guesses.
 RELATIONSHIP_KINDS: tuple[str, ...] = ("declared", "inferred")
+
+#: What a column is *for*, which the DAL and the composer both reason about.
+SEMANTIC_ROLES: tuple[str, ...] = ("measure", "dimension", "time", "id", "other")
+
+#: ``suspected`` is the classifier's opinion and is enough to mask by default;
+#: ``confirmed`` is a person's, and only a person may set it (architecture M4).
+SENSITIVITY_LEVELS: tuple[str, ...] = ("none", "suspected", "confirmed")
+
+#: What may be done with a column's values. ``mask`` is the automatic default
+#: for anything the classifier suspects — the safe direction, chosen before
+#: anyone has looked.
+COLUMN_POLICIES: tuple[str, ...] = ("allow", "mask", "deny")
+
+#: How far profiling got. ``partial`` is a normal outcome, not an error: a
+#: budget that stops is a budget doing its job (architecture Part 5.2).
+PROFILE_STATUSES: tuple[str, ...] = ("none", "partial", "complete")
 
 
 class Organization(Base):
@@ -239,6 +260,10 @@ class CatalogSnapshot(Base):
             "status IN ({})".format(", ".join(f"'{s}'" for s in SNAPSHOT_STATUSES)),
             name="status_valid",
         ),
+        CheckConstraint(
+            "profile_status IN ({})".format(", ".join(f"'{s}'" for s in PROFILE_STATUSES)),
+            name="profile_status_valid",
+        ),
         Index(
             "uq_catalog_snapshots_data_source_id_version",
             "data_source_id",
@@ -268,6 +293,12 @@ class CatalogSnapshot(Base):
     completed_at: Mapped[datetime | None]
     object_count: Mapped[int] = mapped_column(nullable=False, server_default=text("0"))
     error: Mapped[str | None] = mapped_column(Text)
+    #: none until the profiler has run over this snapshot; ``partial`` when its
+    #: budget stopped it, which is an outcome rather than a failure.
+    profile_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'none'")
+    )
+    profiled_at: Mapped[datetime | None]
 
 
 class CatalogTable(Base):
@@ -302,10 +333,32 @@ class CatalogTable(Base):
 
 
 class CatalogColumn(Base):
-    """A column of a catalogued table. Profiles and policy arrive in WP4.2."""
+    """A column of a catalogued table, and what a sample of it looked like.
+
+    The profile fields describe **this snapshot's sample**, so they are rebuilt
+    with the snapshot. What an Admin *decided* about the column is not here —
+    that is ``ColumnPolicy``, keyed by name, because a decision must survive a
+    refresh (DECISIONS D-013).
+
+    ``min_val``, ``max_val`` and ``top_values`` are masked before they are
+    written whenever the column is sensitive: a masked sample is the only kind
+    of sample that may exist in this database (architecture M4).
+    """
 
     __tablename__ = "catalog_columns"
-    __table_args__ = (Index("uq_catalog_columns_table_id_name", "table_id", "name", unique=True),)
+    __table_args__ = (
+        CheckConstraint(
+            "semantic_role IS NULL OR semantic_role IN ({})".format(
+                ", ".join(f"'{role}'" for role in SEMANTIC_ROLES)
+            ),
+            name="semantic_role_valid",
+        ),
+        CheckConstraint(
+            "sensitivity IN ({})".format(", ".join(f"'{level}'" for level in SENSITIVITY_LEVELS)),
+            name="sensitivity_valid",
+        ),
+        Index("uq_catalog_columns_table_id_name", "table_id", "name", unique=True),
+    )
 
     id: Mapped[UuidPk]
     org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
@@ -318,6 +371,61 @@ class CatalogColumn(Base):
     nullable: Mapped[bool] = mapped_column(nullable=False)
     is_pk: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
     description: Mapped[str | None] = mapped_column(Text)
+
+    null_frac: Mapped[float | None]
+    distinct_est: Mapped[int | None] = mapped_column(BigInteger)
+    min_val: Mapped[str | None] = mapped_column(Text)
+    max_val: Mapped[str | None] = mapped_column(Text)
+    top_values: Mapped[list[dict[str, object]] | None] = mapped_column(JSONB)
+    semantic_role: Mapped[str | None] = mapped_column(String(20))
+    sensitivity: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'none'")
+    )
+    #: How many rows the profile was computed from. Without it, "12% null" is a
+    #: number with no idea how much it is worth.
+    sample_rows: Mapped[int | None]
+
+
+class ColumnPolicy(Base):
+    """What an Admin decided may be done with one column's values.
+
+    Keyed by *name* rather than by a catalog row, and never written by
+    discovery. A refresh that reset somebody's masking decision would be a leak
+    caused by a routine operation, which is exactly the kind of failure nobody
+    would think to look for (DECISIONS D-013).
+    """
+
+    __tablename__ = "column_policies"
+    __table_args__ = (
+        CheckConstraint(
+            "policy IN ({})".format(", ".join(f"'{policy}'" for policy in COLUMN_POLICIES)),
+            name="policy_valid",
+        ),
+        Index(
+            "uq_column_policies_column",
+            "data_source_id",
+            "schema_name",
+            "table_name",
+            "column_name",
+            unique=True,
+        ),
+    )
+
+    id: Mapped[UuidPk]
+    org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    data_source_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=False
+    )
+    schema_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    table_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    column_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    policy: Mapped[str] = mapped_column(String(20), nullable=False)
+    mask_type: Mapped[str | None] = mapped_column(String(20))
+    reason: Mapped[str | None] = mapped_column(Text)
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    decided_at: Mapped[CreatedAt]
 
 
 class CatalogRelationship(Base):
@@ -403,6 +511,7 @@ TENANT_TABLES: dict[str, str] = {
     "invitations": "org_id",
     "audit_log": "org_id",
     "data_sources": "org_id",
+    "column_policies": "org_id",
     "catalog_snapshots": "org_id",
     "catalog_tables": "org_id",
     "catalog_columns": "org_id",
