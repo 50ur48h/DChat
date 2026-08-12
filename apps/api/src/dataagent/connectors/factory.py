@@ -11,16 +11,16 @@ from __future__ import annotations
 from dataagent.config import Settings, get_settings
 from dataagent.connectors.base import Connector, ConnectorError
 from dataagent.connectors.postgres import PostgresConnector
+from dataagent.connectors.sqlserver import SqlServerConnector
 
 __all__ = ["SUPPORTED_ENGINES", "connector_for", "require_supported"]
 
 #: Engines this build can talk to.
-SUPPORTED_ENGINES: frozenset[str] = frozenset({"pg"})
+SUPPORTED_ENGINES: frozenset[str] = frozenset({"pg", "mssql"})
 
 #: And what to say about the ones it cannot, so the answer names a work package
 #: rather than being a shrug.
 _NOT_YET: dict[str, str] = {
-    "mssql": "The SQL Server connector arrives in WP3.3.",
     "mysql": "MySQL is a V1.1 connector (architecture Part 5.1).",
 }
 
@@ -60,6 +60,20 @@ def connector_for(
     """
     require_supported(engine)
     resolved = settings if settings is not None else get_settings()
+
+    if engine == "mssql":
+        # No CA file: Microsoft's driver trusts the system store and offers no
+        # per-connection bundle, so TLS_CA_FILE is a Postgres-only override
+        # today (B-015). Passing it would suggest otherwise.
+        return SqlServerConnector(
+            host=host,
+            port=port,
+            database=database,
+            username=username,
+            password=password,
+            tls_mode=tls_mode,
+        )
+
     return PostgresConnector(
         host=host,
         port=port,

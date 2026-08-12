@@ -67,7 +67,7 @@ test: test.api test.web                  ## Run all tests
 # ---------------------------------------------------------------------------
 # Local stack
 # ---------------------------------------------------------------------------
-.PHONY: up up.mssql down down.hard logs ps seed
+.PHONY: up up.mssql down down.hard logs ps seed seed.mssql
 up: .env ## Start the local stack (platform-pg, seed-pizza-pg, api, web)
 	$(COMPOSE) up -d --build
 	@printf '\n  web  http://localhost:3000\n  api  http://localhost:8000/healthz\n\n'
@@ -90,6 +90,9 @@ ps: ## Show stack status
 
 seed: .env ## (Re)build the pizza demo dataset in seed-pizza-pg
 	uv run ops/seed/seed_pizza.py
+
+seed.mssql: .env ## (Re)build the pizza demo dataset in the mssql container
+	$(SHELL) ops/scripts/seed_mssql.sh
 
 .PHONY: db.setup migrate migrate.down migration
 db.setup: .env ## Migrate, then give dataagent_app its local login

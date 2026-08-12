@@ -216,11 +216,11 @@ class PostgresConnector:
     # -- introspection -----------------------------------------------------
 
     async def list_schemas(self) -> list[str]:
-        frame = await self.execute(introspection.schemas(), _METADATA_LIMITS)
+        frame = await self.execute(introspection.pg_schemas(), _METADATA_LIMITS)
         return [str(row[0]) for row in frame.rows]
 
     async def list_tables(self, schemas: Sequence[str]) -> list[TableRef]:
-        frame = await self.execute(introspection.tables(schemas), _METADATA_LIMITS)
+        frame = await self.execute(introspection.pg_tables(schemas), _METADATA_LIMITS)
         return [
             TableRef(
                 schema=str(row[0]),
@@ -232,7 +232,7 @@ class PostgresConnector:
         ]
 
     async def list_columns(self, schemas: Sequence[str]) -> list[ColumnInfo]:
-        frame = await self.execute(introspection.columns(schemas), _METADATA_LIMITS)
+        frame = await self.execute(introspection.pg_columns(schemas), _METADATA_LIMITS)
         return [
             ColumnInfo(
                 schema=str(row[0]),
@@ -248,7 +248,7 @@ class PostgresConnector:
         ]
 
     async def list_foreign_keys(self, schemas: Sequence[str]) -> list[ForeignKey]:
-        frame = await self.execute(introspection.foreign_keys(schemas), _METADATA_LIMITS)
+        frame = await self.execute(introspection.pg_foreign_keys(schemas), _METADATA_LIMITS)
         return [
             ForeignKey(
                 constraint_name=str(row[0]),
@@ -289,7 +289,7 @@ class PostgresConnector:
         tls_note = () if tls is None else (f"TLS: {tls.detail}",)
 
         try:
-            frame = await self.execute(introspection.readonly_evidence(schemas), ExecLimits(1))
+            frame = await self.execute(introspection.pg_readonly_evidence(schemas), ExecLimits(1))
             facts = dict(zip(frame.columns, frame.rows[0], strict=True))
         except (ConnectorError, IndexError, ValueError) as error:
             return Health(
@@ -338,7 +338,7 @@ class PostgresConnector:
         is reported as unknown, never as encrypted.
         """
         try:
-            frame = await self.execute(introspection.tls_status(), ExecLimits(1))
+            frame = await self.execute(introspection.pg_tls_status(), ExecLimits(1))
             facts = dict(zip(frame.columns, frame.rows[0], strict=True))
         except (ConnectorError, IndexError, ValueError):
             return None
@@ -388,7 +388,7 @@ class PostgresConnector:
             transaction = connection.transaction()
             await transaction.start()
             try:
-                await connection.execute(introspection.write_probe_sql())
+                await connection.execute(introspection.pg_write_probe_sql())
             except asyncpg.InsufficientPrivilegeError:
                 return True, "CREATE TABLE was refused: permission denied"
             except asyncpg.PostgresError as error:

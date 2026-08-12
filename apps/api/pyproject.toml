@@ -11,6 +11,10 @@ dependencies = [
     "pydantic-settings>=2.6.0",
     "sqlalchemy[asyncio]>=2.0.36",
     "asyncpg>=0.30",
+    # SQL Server, through unixODBC and Microsoft's msodbcsql18 driver, which the
+    # image installs (architecture Part 3). Synchronous by nature, so every call
+    # goes through asyncio.to_thread behind the same async connector protocol.
+    "pyodbc>=5.2",
     "alembic>=1.14",
     "pyjwt[crypto]>=2.10",
     "httpx>=0.28",

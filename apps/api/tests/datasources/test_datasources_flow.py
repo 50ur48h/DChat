@@ -673,18 +673,17 @@ async def test_a_verification_failure_never_quotes_the_credential(
     assert customer_database.reader_username not in result["detail"]
 
 
-async def test_an_engine_without_a_connector_says_when_it_arrives(api: Api) -> None:
-    """Registered today, unusable until WP3.3 — and the message says so.
-
-    The engine is checked before the address is probed and before the credential
-    is read, so this answers without touching the network at all.
-    """
+async def test_a_sql_server_source_reaches_its_connector(api: Api) -> None:
+    """Until WP3.3 this answered "no connector for mssql yet". Now the engine is
+    supported, so the same registration gets as far as the network and fails
+    there — which is what proves the factory is wired, without needing a SQL
+    Server to be running for this test."""
     org_id = await _org(api, "alice", "Acme")
     _, created = await api.call(
         "POST",
         f"/v1/orgs/{org_id}/data-sources",
         who="alice",
-        body=REGISTRATION | {"engine": "mssql"},
+        body=REGISTRATION | {"engine": "mssql", "host": "no-such-host.invalid", "port": 1433},
     )
 
     _, result = await api.call(
@@ -692,7 +691,9 @@ async def test_an_engine_without_a_connector_says_when_it_arrives(api: Api) -> N
     )
 
     assert result["readonly_verified"] is False
-    assert "WP3.3" in result["detail"]
+    assert result["reachable"] is False
+    assert "no connector" not in result["detail"]
+    assert "no-such-host.invalid" not in result["detail"]
 
 
 async def test_an_unreachable_address_is_reported_without_leaking_it(api: Api) -> None:
@@ -739,9 +740,17 @@ def test_the_routes_and_the_database_agree_on_which_engines_exist() -> None:
 
 def test_every_engine_the_api_accepts_is_either_supported_or_names_its_work_package() -> None:
     """Registering an engine with no connector yet is allowed — silently failing
-    to explain why is not."""
+    to explain why is not. As of WP3.3 both accepted engines have one, so the
+    second half of the rule is asserted against MySQL, which is the next engine
+    somebody will try (architecture Part 5.1 lists it; V1.1 delivers it)."""
     for engine in DATA_SOURCE_ENGINES:
         if engine in SUPPORTED_ENGINES:
             continue
-        with pytest.raises(ConnectorError, match=r"WP|V1\.1"):
+        with pytest.raises(ConnectorError, match=r"WP|V1\.1"):  # pragma: no cover - none left
             require_supported(engine)
+
+    with pytest.raises(ConnectorError, match=r"V1\.1"):
+        require_supported("mysql")
+
+    with pytest.raises(ConnectorError, match="Unknown engine"):
+        require_supported("oracle")
