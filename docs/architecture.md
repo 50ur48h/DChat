@@ -679,14 +679,17 @@ org_memberships(org_id, user_id, role admin|contributor|reader, invited_by, PK(o
 invitations(id, org_id, email, role, token_hash, expires_at, accepted_at)
 data_sources(id, org_id, name, engine pg|mssql|mysql, host_display, status, settings jsonb,
              secret_ref, created_by, created_at)
-catalog_snapshots(id, org_id, data_source_id, version, status, captured_at, object_count)
+catalog_snapshots(id, org_id, data_source_id, version, status building|active|failed|superseded,
+                  captured_at, completed_at, object_count, error)
 catalog_tables(id, org_id, snapshot_id, schema_name, table_name, kind table|view,
-               row_estimate, description, card_text, embedding vector(1536), flags jsonb)
-catalog_columns(id, org_id, table_id, name, data_type, nullable, is_pk, fk_ref,
-                null_frac, distinct_est, min_val, max_val, top_values jsonb,
+               structural_hash, row_estimate, description, card_text, embedding vector(1536),
+               flags jsonb)
+catalog_columns(id, org_id, table_id, name, ordinal, data_type, nullable, is_pk, fk_ref,
+                description, null_frac, distinct_est, min_val, max_val, top_values jsonb,
                 semantic_role measure|dimension|time|id|other,
                 sensitivity none|suspected|confirmed, policy allow|mask|deny, mask_type)
-catalog_relationships(id, org_id, data_source_id, from_table, from_cols, to_table, to_cols,
+catalog_relationships(id, org_id, snapshot_id, constraint_name,
+                      from_schema, from_table, from_cols, to_schema, to_table, to_cols,
                       kind declared|inferred, confidence)
 knowledge_documents(id, org_id, title, blob_path, mime, status, created_by, created_at)
 knowledge_chunks(id, org_id, document_id, seq, text, headings, embedding vector(1536), tsv tsvector)

@@ -648,9 +648,9 @@ Format per WP: **Branch → Build → Tests → Accept** (accept = commands/chec
 > **USER INPUT (optional now):** embedding key (`EMBEDDINGS_PROVIDER/ENDPOINT/KEY/MODEL`). Without it, card search runs lexical-only (tsvector) and WP4.3 leaves embedding backfill as a flagged, idempotent job for later — no blocking.
 
 ### WP4.1 — Discovery pipeline — `p4.1-discovery`
-- Revision 0004: `catalog_schemas, catalog_tables, catalog_columns, catalog_relationships, discovery_runs` per arch 10.1 (+ RLS + proof extension).
-- `catalog/discovery.py`: full crawl via connector introspection → upsert catalog rows; structural hash per table so unchanged tables are skipped (incremental); `discovery_runs` records timing/counts/errors; concurrency-limited; per-table timeout.
-- Routes: `POST /v1/data-sources/{id}/refresh` (Contributor+; async task in-process, status pollable), `GET /v1/data-sources/{id}/catalog` browse (tables → columns → FKs).
+- Revision **0007**: `catalog_snapshots, catalog_tables, catalog_columns, catalog_relationships` per arch 10.1 (+ RLS + proof extension). **Superseded by DECISIONS D-012** on two points: `catalog_snapshots` is also the run record, so there is no `discovery_runs`; and there is no `catalog_schemas` until something is stored *about* a schema.
+- `catalog/discovery.py`: full crawl via connector introspection; structural hash per table, and a crawl whose hashes all match writes **nothing at all** — no new snapshot, no rows — so incrementality is a row-level property rather than a claim. A change builds a new snapshot and supersedes the previous one, which is kept for runs still reading it.
+- Routes: `POST /v1/orgs/{org}/data-sources/{id}/refresh` (Contributor+), `GET /v1/orgs/{org}/data-sources/{id}/catalog` browse (tables → columns → FKs). Org-scoped, like every other route since WP2.2. The metadata pass is seconds, so it runs inline; WP4.2's profiling is the work that needs a background runner and a pollable status.
 - **Tests:** golden catalog snapshot of the pizza DB (deterministic seed makes this stable); re-run with no schema change touches zero rows (incremental proof); FK graph includes `orders→stores/customers` and **no path `orders↔menu_items`** (assert! Phase 8 depends on it).
 
 ### WP4.2 — Profiler + sensitivity — `p4.2-profiler-sensitivity`

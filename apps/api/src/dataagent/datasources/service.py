@@ -36,7 +36,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from dataagent.config import get_settings
-from dataagent.connectors.base import ConnectorError, Health
+from dataagent.connectors.base import Connector, ConnectorError, Health
 from dataagent.connectors.factory import connector_for, require_supported
 from dataagent.connectors.probe import check_reachable
 from dataagent.connectors.tls import TLS_MODES, TlsPolicyError, resolve_tls_mode
@@ -50,6 +50,7 @@ from dataagent.tenancy.session import org_session
 __all__ = [
     "DataSourceView",
     "NotFoundError",
+    "connector_for_view",
     "create_data_source",
     "credentials_ref",
     "delete_data_source",
@@ -535,15 +536,7 @@ async def _verify(view: DataSourceView, store: SecretsProvider) -> Health:
         )
 
     try:
-        connector = connector_for(
-            engine=view.engine,
-            host=view.host,
-            port=view.port,
-            database=view.database,
-            username=credentials.get("username", ""),
-            password=credentials.get("password", ""),
-            tls_mode=view.tls_mode,
-        )
+        connector = _connector(view, credentials)
     except ConnectorError as error:
         return Health(
             reachable=True, readonly_verified=False, detail=str(error), checked_at=checked_at
@@ -554,3 +547,34 @@ async def _verify(view: DataSourceView, store: SecretsProvider) -> Health:
     finally:
         # Whatever happened, the session on the customer's server ends here.
         await connector.aclose()
+
+
+def _connector(view: DataSourceView, credentials: dict[str, str]) -> Connector:
+    return connector_for(
+        engine=view.engine,
+        host=view.host,
+        port=view.port,
+        database=view.database,
+        username=credentials.get("username", ""),
+        password=credentials.get("password", ""),
+        tls_mode=view.tls_mode,
+    )
+
+
+async def connector_for_view(
+    view: DataSourceView, provider: SecretsProvider | None = None
+) -> Connector:
+    """An open-able connector for a registered data source.
+
+    The one way anything outside this module gets one, because it is the one
+    place that reads the credential: the caller passes a ``DataSourceView``,
+    which has no password on it and never will, and receives a connector that
+    does. Callers own closing it.
+
+    Raises ``ConnectorError`` for an engine with no connector, and
+    ``SecretNotFoundError`` / ``SecretDecryptionError`` when the credential
+    cannot be read — both of which say what is wrong without saying what it was.
+    """
+    require_supported(view.engine)
+    store = provider if provider is not None else get_secrets_provider()
+    return _connector(view, await store.get(view.secret_ref))

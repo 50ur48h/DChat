@@ -4,6 +4,41 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-012 — The snapshot is the unit of catalog consistency, and of incrementality
+Date: 2026-08-12 · Phase: 4 · PR: #21
+Context: Plan §6 WP4.1 lists `catalog_schemas … catalog_relationships,
+discovery_runs`; architecture Part 10.1 lists `catalog_snapshots … ` with no
+schemas table and no runs table, and Part 5.2 wants both *versioned snapshots*
+("running agents keep their snapshot for run consistency") and *incremental
+refresh* ("re-discover only changed objects"). Taken literally the two pull
+apart: a snapshot per crawl copies every row each time, which makes the plan's
+own acceptance test — "re-run with no schema change touches zero rows" —
+impossible.
+Options: (a) one mutable catalog per data source, dropping snapshot consistency;
+(b) a new snapshot every crawl, dropping row-level incrementality; (c) a new
+snapshot only when something actually changed.
+Decision: (c), plus two smaller alignments with the architecture.
+  * **`catalog_snapshots` is also the run record.** It carries `status`
+    (building|active|failed|superseded), `captured_at`, `completed_at`,
+    `object_count` and `error`, so a failed crawl is a snapshot that never went
+    active rather than a row in a second table. `discovery_runs` is not built.
+  * **`catalog_schemas` is not built.** A schema is a column on `catalog_tables`
+    until something is stored *about* a schema, which nothing yet is.
+  * **A crawl that finds no change creates nothing.** Every table gets a
+    `structural_hash` over its columns and keys; if every hash matches the active
+    snapshot, the crawl records that it checked and exits, leaving the snapshot
+    active and untouched. Only a real change builds a new snapshot, copying
+    unchanged tables forward — so the expensive work Phase 4.2 and 4.3 add
+    (profiling, cards, embeddings) is inherited rather than repeated.
+  * **`catalog_relationships` hangs off `snapshot_id`, not `data_source_id`.**
+    Otherwise a new snapshot's edges would collide with the previous one's, and
+    the FK graph an agent reasons about would not be pinned to the catalog it
+    was reasoning about.
+Consequences: "what did the agent see" is answerable for any past run, and the
+common refresh is cheap and provably so — `test_a_refresh_that_finds_no_change_writes_nothing`
+asserts it at the row level. Architecture Part 10.1 updated to match; plan §6
+WP4.1's table list is superseded on this point.
+
 ## D-011 — Encryption to a customer database is policy, not per-source freedom
 Date: 2026-08-12 · Phase: 3 · PR: #18 · Requested by the owner (B-013)
 Context: WP3.2 connected with `ssl="prefer"`: TLS when the server offers it,

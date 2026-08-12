@@ -1,12 +1,9 @@
 # STATUS — data-agent build
 
-Current position: Phase 3 complete but for the gate. Next: the Phase 3 GATE, then
-                  Phase 4 / WP4.1
+Current position: Phase 3 signed off. Phase 4 in progress: WP4.1 done.
+                  Next: WP4.2
 Merge policy: ASK
-Blocked on user: the **Phase 3 gate demo**, which is a browser flow and yours to
-                 run — the manual test script is in the WP3.4 PR. Both fixtures
-                 must be up: `make up && make seed`, then
-                 `make up.mssql && make seed.mssql`
+Blocked on user: nothing
 Last updated: 2026-08-12 by Claude Code
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
@@ -70,12 +67,24 @@ Last updated: 2026-08-12 by Claude Code
       browser. WP3.3 keeps its work and hands the gate marker to WP3.4.
       Also closed **B-008**: a Reader is no longer offered controls the API will
       refuse, here and on the members screen
-- [ ] GATE: both seed DBs registered **from the browser**; creds never echoed;
+- [x] GATE: both seed DBs registered **from the browser**; creds never echoed;
       read-only verified; a wrong password fails with a sanitized message;
       a Reader sees no admin controls; user sign-off
+      — signed off 2026-08-12. Both demo databases registered through the screen
+      and left `verified` in `data_sources`: `seed-pizza-pg:5432/pizza` and
+      `mssql:1433/pizza`, each connecting as `pizza_readonly`. The wrong-password
+      source was registered, failed with a sanitized message, and removed again.
+      Run as the Gmail account, which had to be promoted to Admin directly in the
+      database first — see **B-017**
 
 ## Phase 4 — Discovery & catalog (M4)
-- [ ] WP4.1 Schema discovery → catalog tables + refresh + incremental hash
+- [x] WP4.1 Schema discovery → catalog tables + refresh + incremental hash
+      — revision 0007 and four tenant tables; **DECISIONS D-012** settles what a
+      snapshot is, and a refresh that finds no change writes nothing at all,
+      which `test_a_refresh_that_finds_no_change_writes_nothing` asserts by
+      counting rows. Verified against both live seeded databases: 6 tables /
+      33 columns / 4 joins from PostgreSQL in 0.14s, 7 / 36 / 4 from SQL Server
+      in 0.22s, and **no `orders → menu_items` edge on either**
 - [ ] WP4.2 Profiler (budgets/timeouts) + sensitivity classifier + auto-mask
 - [ ] WP4.3 Table cards + search + catalog APIs/UI + column policy  ← gate PR
 - [ ] GATE: pizza DB discovered ≤2 min; email auto-masked; user sign-off
@@ -131,35 +140,37 @@ Last updated: 2026-08-12 by Claude Code
 
 ## Next step
 
-**The Phase 3 gate, and it is yours to run** — the numbered script is in the
-WP3.4 PR. In short: both fixtures up (`make up && make seed`, then
-`make up.mssql && make seed.mssql`), sign in, register both demo databases from
-the browser with their `pizza_readonly` logins, watch both report read-only
-verified, then register one with a wrong password and read the sanitized
-failure. Finally sign in as a Reader and confirm the screen offers nothing.
+Phase 4 / **WP4.2 — Profiler + sensitivity** (`p4.2-profiler-sensitivity`). Read
+plan §6 Phase 4 and architecture Part 5.2. It brings:
 
-Once you sign it off, the gate checkbox flips in the first Phase 4 PR — the same
-convention as every previous phase.
+- `catalog/profiler.py`: per-column statistics on a *sample* — null fraction,
+  distinct estimate, min/max, top-k only when distinct ≤ 50 — under a budget
+  that is real: row-sampling caps, a per-query statement timeout, and a
+  per-source wall clock (default 5 minutes). Partial results are a normal
+  outcome and are recorded as partial. Profiling must never hurt a production
+  database, which is the whole reason the budget exists before the feature does.
+- `catalog/classify.py`: name patterns plus value-shape regexes on the sample →
+  `column_policies`, with **mask as the automatic default** for anything
+  detected. Samples stored in the catalog are masked *at write time*, so a raw
+  email never reaches the platform database at all (arch M4 security).
+- `PATCH /v1/catalog/columns/{id}/policy` (Admin, audited).
 
-Then Phase 4 / **WP4.1 — Discovery pipeline** (`p4.1-discovery`). Read plan §6
-Phase 4 and architecture Part 5.2–5.3, 10.1. What it inherits from Phase 3:
+What WP4.1 leaves for it, deliberately:
 
-- Two connectors behind one protocol, both able to describe a database:
-  `list_schemas`, `list_tables`, `list_columns`, `list_foreign_keys`. The
-  discovery crawl is those four calls plus persistence — it should not need to
-  know which engine it is talking to.
-- The pizza fixture's shape is load-bearing for its tests: the FK graph must
-  include `orders → stores` and `orders → customers`, and must contain **no**
-  path from `orders` to `menu_items`. Phase 8's honest refusal depends on that
-  absence, and the SQL Server fixture has the same hole on purpose.
-- `Caps` already states what varies per engine, so a `catalog_access` or
-  `max_identifier_length` question has an answer to read rather than infer.
-- Every new tenant table needs its RLS policy, its `TENANT_TABLES` line, and an
-  extension of the rls_proof suite, in the same PR — see the note below.
+- The columns it fills are **not** in revision 0007. `null_frac`,
+  `distinct_est`, `min_val`, `max_val`, `top_values`, `semantic_role`,
+  `sensitivity`, `policy` and `mask_type` arrive in the revision that has code
+  to write them, which is this one.
+- `structural_hash` already answers "has this table changed", so re-profiling
+  can be skipped for a table whose hash matched. That is the payoff D-012 was
+  designed for, and WP4.2 is the first work package big enough to feel it.
+- Profiling reads *data*, not just the catalog, so unlike discovery it must go
+  through `ExecLimits` on every query and respect the read-only session. The
+  connector already imposes both; the budget on top of them is new.
 
 **USER INPUT (optional, not blocking):** an embeddings key for WP4.3's card
-search. Without it search runs lexical-only and embedding backfill is left as a
-flagged idempotent job (plan §6 Phase 4).
+search — `EMBEDDINGS_PROVIDER/ENDPOINT/KEY/MODEL`. Without it, search runs
+lexical-only and embedding backfill is left as a flagged idempotent job.
 
 ## Notes
 
@@ -221,6 +232,13 @@ flagged idempotent job (plan §6 Phase 4).
 - **UI follows docs/design.md.** Tokens live in `apps/web/src/app/globals.css`;
   primitives in `src/components/ui/`. A raw hex value anywhere else is a bug,
   and adding a component library needs a DECISIONS entry first.
+
+- **A catalog is a snapshot, and a snapshot is only made when something
+  changed** (D-012). One active snapshot per data source, enforced by a partial
+  unique index rather than by remembering; the previous one is superseded and
+  kept, because a run that started against it is entitled to finish against it.
+  A crawl whose `structural_hash` values all match writes no rows at all — which
+  is what makes the nightly refresh WP4.2 will want cheap enough to have.
 
 - **Every new tenant table, in every later phase, must be added to
   `TENANT_TABLES` and given an RLS policy in the same PR.** This is not left

@@ -11,7 +11,8 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Generator, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -124,9 +125,9 @@ def database_url() -> URL:
     return url
 
 
-@pytest.fixture
-def temp_database(database_url: URL) -> Iterator[URL]:
-    """An empty database, dropped when the test finishes."""
+@contextmanager
+def _temporary_database(database_url: URL) -> Generator[URL]:
+    """An empty database on the configured server, dropped afterwards."""
     name = f"dataagent_test_{uuid.uuid4().hex[:12]}"
     admin_url = database_url.set(database=MAINTENANCE_DATABASE)
 
@@ -145,6 +146,13 @@ def temp_database(database_url: URL) -> Iterator[URL]:
         # FORCE detaches any connection the test left behind, so one failing test
         # cannot leave an undroppable database and break every run after it.
         asyncio.run(_run(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)'))
+
+
+@pytest.fixture
+def temp_database(database_url: URL) -> Iterator[URL]:
+    """An empty database, dropped when the test finishes."""
+    with _temporary_database(database_url) as url:
+        yield url
 
 
 @pytest.fixture
@@ -179,8 +187,28 @@ def customer_database(temp_database: URL) -> CustomerDatabase:
     Separate from ``migrated_database``: that one is the platform's own schema,
     this one is somebody else's database that a connector must describe without
     knowing anything about it in advance.
+
+    Both live in the same temporary database, which is fine for a connector test
+    that reads named tables. Anything that *enumerates* what is there wants
+    ``isolated_customer_database`` instead.
     """
     return asyncio.run(customer_db.build(temp_database))
+
+
+@pytest.fixture
+def isolated_customer_database(database_url: URL) -> Iterator[CustomerDatabase]:
+    """A customer database in a database of its own.
+
+    ``customer_database`` shares one temporary database with the platform schema,
+    so a crawl that lists every table finds ``organizations`` and
+    ``catalog_tables`` alongside the customer's. That is an artefact of the
+    fixture and not of the product — no real deployment puts its own schema
+    inside a customer's database — and it would make every catalog assertion
+    both wrong and brittle. This fixture is the one to use whenever a test cares
+    about *what is in* a customer's database rather than about one table in it.
+    """
+    with _temporary_database(database_url) as url:
+        yield asyncio.run(customer_db.build(url))
 
 
 @pytest.fixture
