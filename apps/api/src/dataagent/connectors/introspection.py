@@ -27,6 +27,7 @@ __all__ = [
     "readonly_evidence",
     "schemas",
     "tables",
+    "tls_status",
     "write_probe_sql",
 ]
 
@@ -137,6 +138,17 @@ SELECT current_user AS role_name,
              OR has_table_privilege(c.oid, 'TRUNCATE'))) AS writable_tables
 """
 
+#: Whether *this* connection is encrypted, according to the server rather than
+#: according to the driver we configured (B-013). Restricted to our own backend,
+#: which every role may see regardless of privileges.
+_TLS_STATUS = """
+SELECT s.ssl AS encrypted,
+       s.version AS tls_version,
+       s.cipher AS cipher
+FROM pg_stat_ssl s
+WHERE s.pid = pg_backend_pid()
+"""
+
 #: A fixed name, so the probe below needs no interpolation of any kind. It is
 #: created inside a transaction that is always rolled back, and in practice it
 #: is never created at all — that is the point of running it.
@@ -168,6 +180,11 @@ def foreign_keys(in_schemas: Sequence[str]) -> ValidatedQuery:
 
 def readonly_evidence(in_schemas: Sequence[str]) -> ValidatedQuery:
     return _query(_READONLY_EVIDENCE, [list(in_schemas)])
+
+
+def tls_status() -> ValidatedQuery:
+    """Ask the server whether it is talking to us in the clear."""
+    return _query(_TLS_STATUS)
 
 
 def write_probe_sql() -> str:

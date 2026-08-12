@@ -8,6 +8,7 @@ somewhere deeper with an attribute error.
 
 from __future__ import annotations
 
+from dataagent.config import Settings, get_settings
 from dataagent.connectors.base import Connector, ConnectorError
 from dataagent.connectors.postgres import PostgresConnector
 
@@ -48,13 +49,23 @@ def connector_for(
     database: str,
     username: str,
     password: str,
+    tls_mode: str,
+    settings: Settings | None = None,
 ) -> Connector:
-    """Build the connector for one data source's stored settings."""
+    """Build the connector for one data source's stored settings.
+
+    ``tls_mode`` comes from the data-source row, where the policy in
+    ``connectors.tls`` put it. The CA bundle to check certificates against is
+    deployment-wide rather than per source, so it is read here (B-013).
+    """
     require_supported(engine)
+    resolved = settings if settings is not None else get_settings()
     return PostgresConnector(
         host=host,
         port=port,
         database=database,
         username=username,
         password=password,
+        tls_mode=tls_mode,
+        tls_ca_file=resolved.tls_ca_file,
     )

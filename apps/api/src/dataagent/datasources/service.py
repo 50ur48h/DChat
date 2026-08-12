@@ -17,6 +17,13 @@ operation leaves behind:
 
 Reads of ``data_sources`` go through ``org_session``, so row-level security is in
 force even if a filter is ever forgotten.
+
+The TLS mode (B-013) lives in ``settings`` beside host and port, because that is
+what it is: the non-secret half of how to connect, which architecture Part 10.1
+already gives that column for. Rows written before the setting existed carry no
+mode, and ``_tls_mode`` answers for them from the policy rather than assuming the
+weakest option — so an old row pointing at a remote host is tightened on read,
+not grandfathered.
 """
 
 from __future__ import annotations
@@ -28,9 +35,11 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from dataagent.config import get_settings
 from dataagent.connectors.base import ConnectorError, Health
 from dataagent.connectors.factory import connector_for, require_supported
 from dataagent.connectors.probe import check_reachable
+from dataagent.connectors.tls import TLS_MODES, TlsPolicyError, resolve_tls_mode
 from dataagent.db.models import DataSource
 from dataagent.orgs.service import ConflictError, audit
 from dataagent.secrets.base import SecretNotFoundError, SecretsProvider
@@ -95,6 +104,8 @@ class DataSourceView:
     status: str
     secret_ref: str
     username_last4: str
+    #: How much encryption this source's connections are opened with (B-013).
+    tls_mode: str
     readonly_verified: bool
     last_verified_at: datetime | None
     created_by: uuid.UUID | None
@@ -112,7 +123,7 @@ def _display(host: str, port: int, database: str) -> str:
 
 
 def _connection_settings(
-    host: str, port: int, database: str, username_last4: str
+    host: str, port: int, database: str, username_last4: str, tls_mode: str
 ) -> dict[str, object]:
     return {
         "host": host,
@@ -121,7 +132,22 @@ def _connection_settings(
         # Not the username: the last of it, so a screen can identify the account
         # without this table becoming half a credential.
         "username_last4": username_last4,
+        "tls_mode": tls_mode,
     }
+
+
+def _tls_mode(settings: dict[str, object], host: str) -> str:
+    """The mode a row connects with — stored, or decided by policy for old rows.
+
+    Falling back to the policy rather than to ``prefer`` matters: this is the
+    read path, so a row registered before B-013 that points at a remote host
+    starts requiring TLS from the next connection onward instead of keeping the
+    plaintext behaviour it happened to be created with.
+    """
+    stored = settings.get("tls_mode")
+    if isinstance(stored, str) and stored in TLS_MODES:
+        return stored
+    return resolve_tls_mode(host=host, requested=None, settings=get_settings())
 
 
 def _hint(username: str) -> str:
@@ -144,17 +170,19 @@ def _port(settings: dict[str, object]) -> int:
 
 def _view(row: DataSource) -> DataSourceView:
     settings = row.settings
+    host = _field(settings, "host")
     return DataSourceView(
         id=row.id,
         name=row.name,
         engine=row.engine,
-        host=_field(settings, "host"),
+        host=host,
         port=_port(settings),
         database=_field(settings, "database"),
         host_display=row.host_display,
         status=row.status,
         secret_ref=row.secret_ref,
         username_last4=_field(settings, "username_last4"),
+        tls_mode=_tls_mode(settings, host),
         readonly_verified=row.readonly_verified,
         last_verified_at=row.last_verified_at,
         created_by=row.created_by,
@@ -178,10 +206,19 @@ async def create_data_source(
     database: str,
     username: str,
     password: str,
+    tls_mode: str | None = None,
     provider: SecretsProvider | None = None,
 ) -> DataSourceView:
-    """Store the credentials, then record where the database is."""
+    """Store the credentials, then record where the database is.
+
+    Raises ``TlsPolicyError`` before anything is written if the requested
+    encryption is weaker than this address is allowed to use.
+    """
     store = provider if provider is not None else get_secrets_provider()
+
+    # First, and before the secret exists: a registration this deployment will
+    # not permit should leave no trace of the credential it was offered.
+    mode = resolve_tls_mode(host=host, requested=tls_mode, settings=get_settings())
 
     data_source_id = uuid.uuid4()
     secret_ref = credentials_ref(org_id, data_source_id)
@@ -198,7 +235,7 @@ async def create_data_source(
                 engine=engine,
                 host_display=host_display,
                 status=STATUS_REGISTERED,
-                settings=_connection_settings(host, port, database, _hint(username)),
+                settings=_connection_settings(host, port, database, _hint(username), mode),
                 secret_ref=secret_ref,
                 created_by=actor_user_id,
             )
@@ -213,9 +250,15 @@ async def create_data_source(
                 action="datasource.created",
                 object_type="data_source",
                 object_id=str(data_source_id),
-                # host_display and the engine, never the credential. Audit rows
-                # are read by admins and shipped to log aggregators.
-                details={"name": name, "engine": engine, "host_display": host_display},
+                # host_display, the engine and how encrypted the connection is —
+                # never the credential. Audit rows are read by admins and shipped
+                # to log aggregators.
+                details={
+                    "name": name,
+                    "engine": engine,
+                    "host_display": host_display,
+                    "tls_mode": mode,
+                },
             )
             return _view(row)
     except IntegrityError as error:
@@ -257,9 +300,10 @@ async def update_data_source(
     database: str | None = None,
     username: str | None = None,
     password: str | None = None,
+    tls_mode: str | None = None,
     provider: SecretsProvider | None = None,
 ) -> DataSourceView:
-    """Rename, re-address, or rotate credentials.
+    """Rename, re-address, rotate credentials, or change the TLS mode.
 
     Credential work happens inside the transaction that records it: if the secret
     store refuses, the row does not move either, and the caller is told about one
@@ -289,6 +333,11 @@ async def update_data_source(
         if row.host_display != _display(next_host, next_port, next_database):
             changed.append("address")
 
+        current_mode = _tls_mode(settings, _field(settings, "host"))
+        next_tls_mode = _next_tls_mode(host=next_host, requested=tls_mode, current=current_mode)
+        if next_tls_mode != current_mode:
+            changed.append("tls")
+
         hint = _field(settings, "username_last4")
         if username is not None or password is not None:
             existing = await store.get(row.secret_ref)
@@ -303,7 +352,9 @@ async def update_data_source(
             hint = _hint(next_username)
             changed.append("credentials")
 
-        row.settings = _connection_settings(next_host, next_port, next_database, hint)
+        row.settings = _connection_settings(
+            next_host, next_port, next_database, hint, next_tls_mode
+        )
         row.host_display = _display(next_host, next_port, next_database)
 
         if changed:
@@ -326,6 +377,24 @@ async def update_data_source(
             )
 
         return _view(row)
+
+
+def _next_tls_mode(*, host: str, requested: str | None, current: str) -> str:
+    """The mode after an update, which an address change can force upward.
+
+    An explicit request is judged on its merits and refused if it is a downgrade
+    the new address may not have. Without one, the stored mode is kept — unless
+    the source has just been moved somewhere that mode is no longer allowed, in
+    which case it is tightened to the policy default rather than failing a
+    rename. Tightening is the only automatic direction there is.
+    """
+    settings = get_settings()
+    if requested is not None:
+        return resolve_tls_mode(host=host, requested=requested, settings=settings)
+    try:
+        return resolve_tls_mode(host=host, requested=current, settings=settings)
+    except TlsPolicyError:
+        return resolve_tls_mode(host=host, requested=None, settings=settings)
 
 
 async def delete_data_source(
@@ -416,6 +485,10 @@ async def test_data_source(
                 "status": status,
                 "host_display": view.host_display,
                 "detail": health.detail,
+                # What was asked for, and what the far end actually did — the
+                # second is the one worth having a record of (B-013).
+                "tls_mode": view.tls_mode,
+                "tls_encrypted": health.tls.encrypted if health.tls is not None else None,
             },
         )
 
@@ -469,6 +542,7 @@ async def _verify(view: DataSourceView, store: SecretsProvider) -> Health:
             database=view.database,
             username=credentials.get("username", ""),
             password=credentials.get("password", ""),
+            tls_mode=view.tls_mode,
         )
     except ConnectorError as error:
         return Health(

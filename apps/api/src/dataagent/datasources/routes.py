@@ -22,6 +22,8 @@ from pydantic import BaseModel, Field, SecretStr
 
 from dataagent.auth.context import RequestContext
 from dataagent.auth.guards import require_admin, require_member
+from dataagent.config import TlsMode
+from dataagent.connectors.tls import TlsPolicyError
 from dataagent.datasources import service
 from dataagent.datasources.service import DataSourceView, NotFoundError
 from dataagent.orgs.service import ConflictError
@@ -32,6 +34,16 @@ router = APIRouter(prefix="/v1", tags=["data sources"])
 #: as a Literal so an unknown engine is a 422 with a list of what is accepted,
 #: rather than a 500 from a CHECK constraint at the far end.
 Engine = Literal["pg", "mssql"]
+
+TLS_MODE_FIELD = Field(
+    default=None,
+    description=(
+        "How much encryption this connection needs. Omit and the deployment's "
+        "policy decides: TLS is required for any address that is not on the "
+        "server itself. An optional mode ('disable', 'prefer') for a remote "
+        "address is refused."
+    ),
+)
 
 DataSourceId = Annotated[uuid.UUID, Path(description="Data source within this organization")]
 
@@ -50,10 +62,11 @@ class CreateDataSourceIn(BaseModel):
     database: str = Field(min_length=1, max_length=128)
     username: str = Field(min_length=1, max_length=128)
     password: SecretStr = Field(min_length=1, max_length=1024)
+    tls_mode: TlsMode | None = TLS_MODE_FIELD
 
 
 class UpdateDataSourceIn(BaseModel):
-    """Every field optional: this is a rename, a re-address, or a rotation."""
+    """Every field optional: a rename, a re-address, a rotation, or a TLS change."""
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
     host: str | None = Field(default=None, min_length=1, max_length=255)
@@ -61,6 +74,7 @@ class UpdateDataSourceIn(BaseModel):
     database: str | None = Field(default=None, min_length=1, max_length=128)
     username: str | None = Field(default=None, min_length=1, max_length=128)
     password: SecretStr | None = Field(default=None, min_length=1, max_length=1024)
+    tls_mode: TlsMode | None = TLS_MODE_FIELD
 
 
 class DataSourceOut(BaseModel):
@@ -81,6 +95,13 @@ class DataSourceOut(BaseModel):
     username_last4: str = Field(
         description="The last four characters of the connecting username, and no more."
     )
+    tls_mode: str = Field(
+        description=(
+            "The encryption this source connects with: disable | prefer | require | "
+            "verify-ca | verify-full. 'require' encrypts without checking the "
+            "server's certificate; only the verify modes do that."
+        )
+    )
     readonly_verified: bool = Field(
         description=(
             "True only when this service has proven the credentials cannot write. "
@@ -99,6 +120,19 @@ class TestResultOut(BaseModel):
     detail: str = Field(description="Sanitized: connection strings and addresses are stripped.")
     checked_at: datetime
     server_version: str | None = None
+    tls_mode: str | None = Field(
+        default=None, description="The encryption this check was made with."
+    )
+    tls_encrypted: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the server says this connection was actually encrypted. Null "
+            "when the check never got far enough to ask."
+        ),
+    )
+    tls_detail: str | None = Field(
+        default=None, description="Protocol and cipher, and what was not verified."
+    )
     evidence: list[str] = Field(
         default_factory=list,
         description=("What each check found — privileges and role membership, never a credential."),
@@ -117,6 +151,7 @@ def _out(view: DataSourceView) -> DataSourceOut:
         status=view.status,
         secret_ref=view.secret_ref,
         username_last4=view.username_last4,
+        tls_mode=view.tls_mode,
         readonly_verified=view.readonly_verified,
         last_verified_at=view.last_verified_at,
         created_by=view.created_by,
@@ -128,6 +163,15 @@ def _not_found() -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_404_NOT_FOUND, detail="No such data source in this organization"
     )
+
+
+def _refused(error: TlsPolicyError) -> HTTPException:
+    """A TLS mode this address may not use is the caller's mistake to fix.
+
+    422 rather than 400: it is the same class of answer pydantic gives for a
+    field it will not accept, and the message names the modes that would work.
+    """
+    return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error))
 
 
 @router.get(
@@ -161,9 +205,12 @@ async def create_data_source(
             database=body.database,
             username=body.username,
             password=body.password.get_secret_value(),
+            tls_mode=body.tls_mode,
         )
     except ConflictError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    except TlsPolicyError as error:
+        raise _refused(error) from error
     return _out(view)
 
 
@@ -202,9 +249,12 @@ async def update_data_source(
             database=body.database,
             username=body.username,
             password=body.password.get_secret_value() if body.password is not None else None,
+            tls_mode=body.tls_mode,
         )
     except NotFoundError as error:
         raise _not_found() from error
+    except TlsPolicyError as error:
+        raise _refused(error) from error
     return _out(view)
 
 
@@ -255,5 +305,8 @@ async def test_data_source(
         detail=health.detail,
         checked_at=health.checked_at,
         server_version=health.server_version,
+        tls_mode=health.tls.mode if health.tls is not None else None,
+        tls_encrypted=health.tls.encrypted if health.tls is not None else None,
+        tls_detail=health.tls.detail if health.tls is not None else None,
         evidence=list(health.evidence),
     )

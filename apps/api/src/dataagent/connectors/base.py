@@ -48,6 +48,7 @@ __all__ = [
     "PolicyGrant",
     "ResultFrame",
     "TableRef",
+    "TlsStatus",
     "ValidatedQuery",
 ]
 
@@ -168,6 +169,23 @@ class Caps:
 
 
 @dataclass(frozen=True, slots=True)
+class TlsStatus:
+    """What was asked for, and what the *server* says actually happened.
+
+    Both halves are here because they can disagree, and the disagreement is the
+    interesting part: ``prefer`` against a database that serves no certificate is
+    a plaintext connection that no error ever mentions (B-013).
+    """
+
+    #: The policy this connection was opened with.
+    mode: str
+    #: Not our opinion — read back from the engine's own view of this session.
+    encrypted: bool
+    #: One line, safe to show: protocol and cipher, and what was *not* checked.
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
 class Health:
     """The answer to "can we use this data source, and is it safe to?"
 
@@ -184,6 +202,11 @@ class Health:
     #: Each check that ran, and what it found. Safe to show an admin: it names
     #: privileges and roles, never credentials.
     evidence: tuple[str, ...] = ()
+    #: None when the check never got far enough to know. Deliberately separate
+    #: from ``readonly_verified``: a plaintext connection to a genuinely
+    #: read-only account is a real risk *and* a real verification, and collapsing
+    #: the two would report one of them wrongly.
+    tls: TlsStatus | None = None
 
 
 @dataclass(frozen=True, slots=True)

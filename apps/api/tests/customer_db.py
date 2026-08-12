@@ -24,6 +24,11 @@ from dataagent.connectors.postgres import PostgresConnector
 READER_ROLE = "dataagent_connector_reader"
 READER_LOGIN = "connector-test-only"
 
+#: This server is on the test machine and serves no certificate, so it is exactly
+#: the case the policy calls local (B-013). Tests that care about the mode itself
+#: pass their own.
+LOCAL_TLS_MODE = "prefer"
+
 SCHEMA = """
 CREATE TABLE regions (
     id   integer PRIMARY KEY,
@@ -77,22 +82,24 @@ class CustomerDatabase:
     def database(self) -> str:
         return self.url.database or "postgres"
 
-    def reader(self) -> PostgresConnector:
+    def reader(self, tls_mode: str = LOCAL_TLS_MODE) -> PostgresConnector:
         return PostgresConnector(
             host=self.host,
             port=self.port,
             database=self.database,
             username=self.reader_username,
             password=self.reader_password,
+            tls_mode=tls_mode,
         )
 
-    def owner(self) -> PostgresConnector:
+    def owner(self, tls_mode: str = LOCAL_TLS_MODE) -> PostgresConnector:
         return PostgresConnector(
             host=self.host,
             port=self.port,
             database=self.database,
             username=self.url.username or "postgres",
             password=self.url.password or "",
+            tls_mode=tls_mode,
         )
 
 
