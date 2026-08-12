@@ -1,10 +1,10 @@
 # STATUS — data-agent build
 
-Current position: Phase 2 / WP2.3 (gate PR open — awaiting the browser demo
-                 and sign-off)
+Current position: Phase 2 complete. Next: Phase 3 / WP3.1
 Merge policy: ASK
-Blocked on user: the Phase 2 gate demo in a browser, then sign-off
-Last updated: 2026-08-11 by Claude Code
+Blocked on user: nothing. WP3.1 needs no user input — LOCAL_SECRETS_KEY is
+                 generated, not asked for (plan §3.2)
+Last updated: 2026-08-12 by Claude Code
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
 - [x] WP0.1 Repo, docs, tracking files, branch protection
@@ -31,7 +31,11 @@ Last updated: 2026-08-11 by Claude Code
       separately reviewable, which matters more than usual in a security phase
 - [x] WP2.2 Orgs/users/invitations APIs + bootstrap + audit events
 - [x] WP2.3 Web auth (MSAL) + /me + invite UI + role matrix tests ← gate PR
-- [ ] GATE: signup→org→invite Reader; Reader 403 audited; user sign-off
+- [x] GATE: signup→org→invite Reader; Reader 403 audited; user sign-off
+      — signed off 2026-08-12 on a real Entra External ID tenant: sign-in,
+      org creation, invite link, single-use redemption all confirmed in the
+      browser. The audited-403 step was not exercised on the demo org; it is
+      covered by tests and tracked as B-010.
 
 ## Phase 3 — Data source connectors (M3)
 - [ ] WP3.1 SecretsProvider (local backend) + datasources CRUD + sanitizer
@@ -93,6 +97,27 @@ Last updated: 2026-08-11 by Claude Code
 - [ ] GATE: arch Part 14 acceptance; nightly evals on; user sign-off
 
 ---
+
+## Next step
+
+Phase 3 / **WP3.1 — SecretsProvider + datasources CRUD + sanitizer**
+(`p3.1-secrets-datasources`). Read plan §6 Phase 3 and architecture Part 5.1
+and 7.3 first. It brings:
+
+- `secrets/` — the protocol, a Fernet-encrypted local backend (**D-001**, already
+  pre-approved), and a factory that refuses the local backend when `ENV=prod`.
+- `datasources/` — CRUD plus `POST /v1/data-sources/{id}/test`. Credentials go to
+  the SecretsProvider; only a `secret_ref` reaches the platform DB, and no
+  response model has a field that could carry a credential.
+- `connectors/sanitizer.py` — scrubs DSNs, passwords and hosts from every
+  connector error before it can reach a log or a response.
+
+`data_sources` is a new tenant table, so revision 0004 needs its RLS policy, a
+line in `TENANT_TABLES`, and the rls_proof suite extended — all in the same PR,
+which `test_no_tenant_table_can_be_added_without_protecting_it` will enforce.
+
+**Close B-009 in that PR too** if it is still open: it is a Phase 2 defect and
+`users.email` should not hold a fabricated address while Phase 3 builds on top.
 
 ## Notes
 

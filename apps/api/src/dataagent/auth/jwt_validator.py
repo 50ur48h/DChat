@@ -18,6 +18,7 @@ which half of the forgery worked.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from typing import Any
 
@@ -25,6 +26,8 @@ import jwt
 
 from dataagent.auth.jwks import JwksCache
 from dataagent.auth.principal import Principal, TokenError
+
+logger = logging.getLogger(__name__)
 
 ALGORITHMS = ["RS256"]
 
@@ -111,4 +114,14 @@ class TokenValidator:
         # is present beats showing somebody their opaque subject id.
         email = _first_string(claims, "email", "preferred_username", "upn")
         name = _first_string(claims, "name", "given_name")
+        if email is None:
+            # Names only, never values: a token's claim *values* are personal
+            # data and some are secrets. Which claims a provider sends is
+            # configuration, and it is the thing you need to know when someone
+            # shows up in the UI as their opaque subject id.
+            logger.warning(
+                "token carried no email-like claim; claims present: %s",
+                ", ".join(sorted(claims)),
+            )
+
         return Principal(subject=subject, email=email, name=name)
