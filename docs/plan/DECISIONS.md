@@ -43,6 +43,22 @@ does not exist yet; the protection that matters in that window (no direct pushes
 no force-push, no branch deletion) is live from commit one. Plan §4.5 updated to
 say the same thing so the document does not lie.
 
+## D-010 — One API, more than one audience value
+Date: 2026-08-12 · Phase: 2 · PR: #13
+Context: The first real Entra sign-in failed every call with `bad_audience`.
+Signature and issuer verified; only `aud` disagreed. Entra issues a **v2** access
+token whose audience is the resource's client-ID GUID, while its `api://` URI is
+what a **v1** token carries. Both name the same app registration, and which one
+arrives is a property of the tenant, not of our code.
+Options: (a) document the correct spelling and let each environment guess;
+(b) accept every value that names this one registration.
+Decision: (b). `OIDC_AUDIENCE` takes a comma-separated list and
+`resolve_audiences()` hands all of them to the validator.
+Consequences: token version stops being something an operator has to know. This
+is not a widening — a token naming any other resource is still refused, and
+`test_a_third_partys_audience_is_still_refused` exists so the list cannot quietly
+become "accept anything".
+
 ## D-009 — The expected issuer is discovered, not configured
 Date: 2026-08-11 · Phase: 2 · PR: WP2.3
 Context: Plan §3.2 and arch Part 6.1 treat the issuer as a value the operator
