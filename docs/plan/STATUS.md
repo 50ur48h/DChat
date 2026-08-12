@@ -34,8 +34,9 @@ Last updated: 2026-08-12 by Claude Code
 - [x] GATE: signup→org→invite Reader; Reader 403 audited; user sign-off
       — signed off 2026-08-12 on a real Entra External ID tenant: sign-in,
       org creation, invite link, single-use redemption all confirmed in the
-      browser. The audited-403 step was not exercised on the demo org; it is
-      covered by tests and tracked as B-010.
+      browser, and the audited 403 confirmed on the demo org: a Reader's
+      attempt on an Admin route recorded as auth.denied / insufficient_role
+      in that organization's own audit_log (B-010 closed).
 
 ## Phase 3 — Data source connectors (M3)
 - [ ] WP3.1 SecretsProvider (local backend) + datasources CRUD + sanitizer
