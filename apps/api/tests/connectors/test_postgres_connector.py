@@ -46,7 +46,7 @@ def _forge(sql: str) -> ValidatedQuery:
 
 async def test_capabilities_state_engine_truth_rather_than_guessing_it() -> None:
     caps = PostgresConnector(
-        host="h", port=5432, database="d", username="u", password=UNUSED_LOGIN
+        host="h", port=5432, database="d", username="u", password=UNUSED_LOGIN, tls_mode="require"
     ).capabilities()
 
     assert caps.dialect == "postgres"
@@ -234,6 +234,38 @@ async def test_the_owner_probe_reports_that_it_could_write(
 
 
 # ---------------------------------------------------------------------------
+# Encryption (B-013)
+# ---------------------------------------------------------------------------
+
+
+async def test_a_verification_says_whether_the_connection_was_encrypted(
+    customer_database: CustomerDatabase,
+) -> None:
+    """The compose and CI databases serve no certificate, so this is the
+    uncomfortable answer — which is the one that has to be visible."""
+    async with customer_database.reader() as connector:
+        health = await connector.test_connection()
+
+    assert health.tls is not None
+    assert health.tls.mode == "prefer"
+    assert health.tls.encrypted is False
+    assert "NOT encrypted" in health.tls.detail
+    assert any(note.startswith("TLS: ") for note in health.evidence)
+
+
+async def test_requiring_tls_from_a_server_without_it_fails_rather_than_falling_back(
+    customer_database: CustomerDatabase,
+) -> None:
+    """The whole point of the setting: 'require' must not degrade to plaintext."""
+    async with customer_database.reader(tls_mode="require") as connector:
+        health = await connector.test_connection()
+
+    assert health.reachable is False
+    assert health.readonly_verified is False
+    assert health.tls is None, "a connection that never opened cannot report a cipher"
+
+
+# ---------------------------------------------------------------------------
 # Failure paths
 # ---------------------------------------------------------------------------
 
@@ -247,6 +279,7 @@ async def test_a_wrong_password_fails_without_quoting_the_credential(
         database=customer_database.database,
         username=customer_database.reader_username,
         password=WRONG_LOGIN,
+        tls_mode="prefer",
     )
 
     async with connector:
@@ -267,6 +300,7 @@ async def test_a_database_that_does_not_exist_is_reported_not_guessed(
         database="no_such_database_here",
         username=customer_database.reader_username,
         password=customer_database.reader_password,
+        tls_mode="prefer",
     )
 
     async with connector:

@@ -77,6 +77,15 @@ services:
       SECRETS_BACKEND: ${SECRETS_BACKEND:-local}
       LOCAL_SECRETS_KEY: ${LOCAL_SECRETS_KEY:-}
       LOCAL_SECRETS_PATH: /app/ops/.secrets/secrets.json
+      # Encryption to customer databases (B-013). Any address that is not on this
+      # machine must use TLS; these two names are databases *in this network*,
+      # serving no certificate that any name could match, so they are declared
+      # local here — in the file that creates them — rather than in application
+      # defaults that would follow the image into a deployment.
+      TLS_LOCAL_HOSTS: ${TLS_LOCAL_HOSTS:-seed-pizza-pg,mssql}
+      TLS_MODE: ${TLS_MODE:-require}
+      TLS_MODE_LOCAL: ${TLS_MODE_LOCAL:-prefer}
+      TLS_CA_FILE: ${TLS_CA_FILE:-}
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:

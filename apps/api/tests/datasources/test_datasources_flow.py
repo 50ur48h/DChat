@@ -26,6 +26,7 @@ from dataagent.auth.principal import Principal, TokenError
 from dataagent.config import Settings
 from dataagent.connectors.base import ConnectorError
 from dataagent.connectors.factory import SUPPORTED_ENGINES, require_supported
+from dataagent.datasources import service as datasource_service
 from dataagent.datasources.routes import Engine
 from dataagent.datasources.service import create_data_source, credentials_ref
 from dataagent.db import engine as engine_module
@@ -82,6 +83,14 @@ class Api:
         return response.status_code, payload
 
 
+#: The TLS policy these tests assert against, stated rather than inherited: the
+#: service reads process-wide settings, and a developer's .env must not be able
+#: to change what this file proves (B-013).
+TLS_POLICY = Settings(
+    env="ci", build_env="dev", tls_mode="require", tls_mode_local="prefer", tls_local_hosts=()
+)
+
+
 @pytest.fixture
 async def api(
     app_database: URL,
@@ -95,6 +104,7 @@ async def api(
 
     monkeypatch.setattr(engine_module, "get_engine", lambda: owner)
     monkeypatch.setattr(session_module, "_session_factory", lambda: factory)
+    monkeypatch.setattr(datasource_service, "get_settings", lambda: TLS_POLICY)
 
     app = create_app(settings=Settings(auth_mode="dev", env="ci", build_env="dev"))
     app.state.token_validator = _SubjectAsToken()
@@ -225,6 +235,141 @@ async def test_an_unknown_engine_is_refused_with_the_list_of_known_ones(api: Api
     )
 
     assert status == 422
+
+
+# ---------------------------------------------------------------------------
+# Encryption in transit (B-013)
+# ---------------------------------------------------------------------------
+
+
+async def test_a_source_that_is_not_on_this_machine_requires_tls(api: Api) -> None:
+    """Nobody asked for a mode, so the policy answered — and it answered safely."""
+    org_id = await _org(api, "alice", "Acme")
+
+    _, created = await api.call(
+        "POST", f"/v1/orgs/{org_id}/data-sources", who="alice", body=REGISTRATION
+    )
+
+    assert created["tls_mode"] == "require"
+
+
+async def test_a_local_source_may_go_unencrypted(api: Api) -> None:
+    org_id = await _org(api, "alice", "Acme")
+
+    _, created = await api.call(
+        "POST",
+        f"/v1/orgs/{org_id}/data-sources",
+        who="alice",
+        body=REGISTRATION | {"host": "127.0.0.1", "port": 6543},
+    )
+
+    assert created["tls_mode"] == "prefer"
+
+
+async def test_a_remote_source_may_not_ask_for_plaintext(
+    api: Api, secrets_provider: LocalSecretsProvider
+) -> None:
+    """Refused before the credential is written, not after."""
+    org_id = await _org(api, "alice", "Acme")
+    before = _entries(secrets_provider)
+
+    status, body = await api.call(
+        "POST",
+        f"/v1/orgs/{org_id}/data-sources",
+        who="alice",
+        body=REGISTRATION | {"host": "db.example.com", "tls_mode": "prefer"},
+    )
+
+    assert status == 422
+    assert "not one" in body["detail"]
+    assert "require" in body["detail"], "a refusal must name what would work"
+    assert _entries(secrets_provider) == before, "a refused registration stored a credential"
+
+
+async def test_asking_for_more_encryption_is_always_allowed(api: Api) -> None:
+    org_id = await _org(api, "alice", "Acme")
+
+    _, created = await api.call(
+        "POST",
+        f"/v1/orgs/{org_id}/data-sources",
+        who="alice",
+        body=REGISTRATION | {"host": "127.0.0.1", "tls_mode": "verify-full"},
+    )
+
+    assert created["tls_mode"] == "verify-full"
+
+
+async def test_moving_a_local_source_to_a_remote_address_tightens_its_tls(api: Api) -> None:
+    """A rename must not fail because of a mode that used to be fine, and the
+    source must not keep travelling in plaintext either. Tightening is the only
+    automatic direction there is."""
+    org_id = await _org(api, "alice", "Acme")
+    _, created = await api.call(
+        "POST",
+        f"/v1/orgs/{org_id}/data-sources",
+        who="alice",
+        body=REGISTRATION | {"host": "localhost", "port": 6543},
+    )
+    assert created["tls_mode"] == "prefer"
+
+    _, updated = await api.call(
+        "PATCH",
+        f"/v1/orgs/{org_id}/data-sources/{created['id']}",
+        who="alice",
+        body={"host": "db.example.com"},
+    )
+
+    assert updated["tls_mode"] == "require"
+    assert updated["readonly_verified"] is False
+
+
+async def test_the_tls_mode_cannot_be_loosened_by_an_update(api: Api) -> None:
+    org_id = await _org(api, "alice", "Acme")
+    _, created = await api.call(
+        "POST", f"/v1/orgs/{org_id}/data-sources", who="alice", body=REGISTRATION
+    )
+
+    status, _ = await api.call(
+        "PATCH",
+        f"/v1/orgs/{org_id}/data-sources/{created['id']}",
+        who="alice",
+        body={"tls_mode": "disable"},
+    )
+
+    assert status == 422
+
+
+async def test_the_audit_trail_records_which_mode_was_used(api: Api, app_database: URL) -> None:
+    org_id = await _org(api, "alice", "Acme")
+    await api.call("POST", f"/v1/orgs/{org_id}/data-sources", who="alice", body=REGISTRATION)
+
+    details = (
+        await _rows(
+            app_database,
+            org_id,
+            "SELECT details::text FROM audit_log WHERE action = 'datasource.created'",
+        )
+    )[0][0]
+
+    assert '"tls_mode": "require"' in details
+
+
+async def test_a_test_result_reports_what_the_server_actually_did(
+    api: Api, customer_database: CustomerDatabase
+) -> None:
+    """The local fixture serves no certificate, so this is a plaintext
+    connection — said out loud, on the result an admin reads."""
+    org_id = await _org(api, "alice", "Acme")
+    created = await _register_customer_database(api, org_id, customer_database)
+
+    _, result = await api.call(
+        "POST", f"/v1/orgs/{org_id}/data-sources/{created['id']}/test", who="alice"
+    )
+
+    assert result["readonly_verified"] is True
+    assert result["tls_mode"] == "prefer"
+    assert result["tls_encrypted"] is False
+    assert "NOT encrypted" in result["tls_detail"]
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 # STATUS — data-agent build
 
-Current position: Phase 3 in progress. WP3.1–3.2 done. Next: WP3.3
+Current position: Phase 3 in progress. WP3.1–3.2 and B-013 done. Next: WP3.3
 Merge policy: ASK
 Blocked on user: nothing. WP3.3 pulls the SQL Server image (~1.5 GB) on first
                  `make up.mssql`; nothing else is needed
@@ -49,6 +49,11 @@ Last updated: 2026-08-12 by Claude Code
       demo database can be registered with credentials that genuinely cannot
       write), and defined `ValidatedQuery` with its grant, four phases before
       the DAL that will hold it
+- [x] **B-013** TLS to a customer database is a setting with a safe default
+      — pulled forward from Phase 12 by the owner on 2026-08-12. Not a work
+      package: a backlog item taken between WP3.2 and WP3.3 so the SQL Server
+      connector is written against the settled policy instead of retrofitted.
+      See DECISIONS **D-011**; the residue (per-source CA material) is **B-015**
 - [ ] WP3.3 SQL Server connector + compose profile + dialect tests
 - [ ] WP3.4 Data sources screen (register, test, rotate, remove)     ← gate PR
       — added 2026-08-12 from **B-012**, accepted by the owner: the phase's exit
@@ -146,6 +151,13 @@ What WP3.2 leaves for it, deliberately:
 - The read-only *shape* of verification is settled and should not be
   re-invented: never ask a read-only session to prove the credentials are
   read-only, because it proves only that the session setting works.
+- The TLS policy is settled too (B-013, D-011). The connector receives a
+  `tls_mode` and does not choose one, so WP3.3's job is the ODBC mapping —
+  `Encrypt` and `TrustServerCertificate` — plus reading back what was actually
+  negotiated (`sys.dm_exec_connections.encrypt_option`) into the same
+  `TlsStatus`. Note that the compose SQL Server *does* serve a self-signed
+  certificate, so unlike Postgres its local connection will really be encrypted
+  and unverified; the evidence line must say so rather than round it up.
 
 Then **WP3.4** (`p3.4-datasources-ui`) closes the phase with the browser screen
 and the gate demo — see the Phase 3 checklist above and plan §6 WP3.4.
@@ -159,6 +171,16 @@ and the gate demo — see the Phase 3 checklist above and plan §6 WP3.4.
   can configure our own driver, which is why the probe opens its own connection.
   A rotation or a change of address retires the verification — a green tick must
   describe the credentials the row holds now.
+
+- **Encryption to a customer database is decided by its address, not by the
+  connector.** `TLS_MODE` (which accepts only modes that encrypt) covers every
+  host that is not loopback or listed in `TLS_LOCAL_HOSTS`; compose declares its
+  own two databases local because they serve no certificate that any name could
+  match. A data source may tighten its mode and never loosen it, in prod nothing
+  counts as local, and a test reports what the *server* says happened — the
+  local stack answers "prefer — this connection is NOT encrypted", which is the
+  truth and is meant to be visible. `require` encrypts without checking the
+  certificate; only the verify modes authenticate the far end (D-011).
 
 - **Customer credentials have exactly one home.** They go to the
   `SecretsProvider` and nowhere else: the platform database holds a

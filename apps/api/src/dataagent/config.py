@@ -18,6 +18,17 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 Environment = Literal["local", "ci", "dev", "prod"]
 SecretsBackend = Literal["local", "keyvault"]
 
+#: How much encryption a connection to a *customer's* database must have, spelled
+#: the way libpq spells it so the words mean what an operator already thinks they
+#: mean. ``allow`` is deliberately absent: "try plaintext first, then TLS" is a
+#: mode nobody wants and everybody misreads.
+TlsMode = Literal["disable", "prefer", "require", "verify-ca", "verify-full"]
+
+#: The subset that guarantees encryption. The distinction is not decoration:
+#: ``disable`` and ``prefer`` both permit a plaintext connection, and ``prefer``
+#: does it silently, which is the failure mode B-013 was raised about.
+EncryptedTlsMode = Literal["require", "verify-ca", "verify-full"]
+
 #: Where the local backend keeps its encrypted file, relative to the repository
 #: root. Gitignored, and every value inside it is encrypted regardless.
 LOCAL_SECRETS_RELATIVE_PATH = Path("ops") / ".secrets" / "secrets.json"
@@ -162,6 +173,46 @@ class Settings(BaseSettings):
         ),
     )
 
+    #: Typed as the *encrypted* subset on purpose: there is no supported way to
+    #: configure this deployment to talk to a remote database in plaintext. A
+    #: `.env` that tries fails at startup, naming the field, rather than quietly
+    #: sending credentials over somebody else's network.
+    tls_mode: EncryptedTlsMode = Field(
+        default="require",
+        description=(
+            "TLS a data source uses when its host is not on this machine. "
+            "'require' encrypts without checking the certificate; 'verify-ca' and "
+            "'verify-full' also validate it, and are what a managed cloud database "
+            "should use once its CA is configured."
+        ),
+    )
+    tls_mode_local: TlsMode = Field(
+        default="prefer",
+        description=(
+            "TLS for a data source on this machine — loopback, or a host named in "
+            "TLS_LOCAL_HOSTS. 'prefer' is the default because the compose "
+            "databases serve no certificate; it is ignored entirely when ENV or "
+            "BUILD_ENV is prod, where nothing counts as local."
+        ),
+    )
+    tls_local_hosts: Annotated[tuple[str, ...], NoDecode] = Field(
+        default=(),
+        description=(
+            "Extra hostnames that count as local, comma-separated. Loopback "
+            "addresses and 'localhost' always do; this exists for container "
+            "networks, where the pizza database answers to 'seed-pizza-pg' and "
+            "there is no certificate for that name anywhere."
+        ),
+    )
+    tls_ca_file: Path | None = Field(
+        default=None,
+        description=(
+            "PEM bundle to validate customer database certificates against, for "
+            "the verify-* modes. Unset means the system trust store, which is "
+            "correct for managed cloud databases and wrong for a private CA."
+        ),
+    )
+
     # NoDecode: without it pydantic-settings JSON-decodes any complex-typed env
     # var, so the natural `CORS_ORIGINS=http://a,http://b` would be a boot error.
     cors_origins: Annotated[tuple[str, ...], NoDecode] = Field(
@@ -182,16 +233,26 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator("cors_origins", mode="before")
+    @field_validator("cors_origins", "tls_local_hosts", mode="before")
     @classmethod
-    def _split_origins(cls, value: object) -> object:
+    def _split_list(cls, value: object) -> object:
         """Accept ``CORS_ORIGINS=http://a,http://b`` as well as a JSON array."""
         if not isinstance(value, str):
             return value
         text = value.strip()
         if text.startswith("["):
             return json.loads(text)
-        return tuple(origin.strip() for origin in text.split(",") if origin.strip())
+        return tuple(item.strip() for item in text.split(",") if item.strip())
+
+    @property
+    def is_production(self) -> bool:
+        """A production *build* or a production *environment* — either counts.
+
+        Both halves matter: a dev image deployed to prod and a prod image with a
+        careless ENV are the same mistake seen from opposite ends, and every
+        weaker-mode-for-convenience switch in this file is refused for both.
+        """
+        return self.build_env == "prod" or self.env == "prod"
 
     def resolve_audiences(self) -> list[str]:
         """Every audience value that identifies *this* API.
@@ -221,7 +282,7 @@ class Settings(BaseSettings):
         service that boots and *then* fails open is indistinguishable from one
         that works until someone looks.
         """
-        if self.auth_mode == "dev" and (self.build_env == "prod" or self.env == "prod"):
+        if self.auth_mode == "dev" and self.is_production:
             raise RuntimeError(
                 "AUTH_MODE=dev is not permitted in a production build or environment: "
                 "it would accept tokens this process minted for itself."
@@ -235,7 +296,7 @@ class Settings(BaseSettings):
         customer credentials. Checked at startup for the same reason as the auth
         assertion above: a process that boots and then fails open looks healthy.
         """
-        if self.secrets_backend == "local" and (self.build_env == "prod" or self.env == "prod"):
+        if self.secrets_backend == "local" and self.is_production:
             raise RuntimeError(
                 "SECRETS_BACKEND=local is not permitted in a production build or "
                 "environment: it keeps customer credentials in a file whose key "

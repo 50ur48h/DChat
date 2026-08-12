@@ -9,6 +9,8 @@
   execution, and read-only verification that asks the engine rather than itself.
 * ``factory`` — which connector speaks to which engine, and what to say about
   the engines this build cannot speak yet (SQL Server: WP3.3).
+* ``tls`` — how much encryption a connection must have, and which addresses are
+  allowed to do without it (B-013).
 * ``sanitizer`` / ``probe`` — the error scrubber every failure passes through,
   and a transport-level reachability check that needs no credentials.
 """

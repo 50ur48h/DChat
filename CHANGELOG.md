@@ -10,6 +10,10 @@ under "Unreleased", only for changes a user would notice.
 ## [Unreleased]
 
 ### Security
+- Connections to a customer's database are encrypted unless the database is on
+  the server itself. A data source may ask for stricter TLS and never for
+  weaker; each one shows the mode it uses, and testing it reports whether the
+  server actually encrypted the connection rather than assuming it did.
 - Database credentials for a registered data source are encrypted and kept
   outside the platform database, which holds only a reference to them. No API
   response has a field that could carry one, and connector errors are scrubbed

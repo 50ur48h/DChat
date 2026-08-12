@@ -4,6 +4,31 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-011 — Encryption to a customer database is policy, not per-source freedom
+Date: 2026-08-12 · Phase: 3 · PR: #18 · Requested by the owner (B-013)
+Context: WP3.2 connected with `ssl="prefer"`: TLS when the server offers it,
+plaintext when it does not, and no way to tell which happened. Correct for a
+compose container with no certificate, wrong for a managed database over a
+network the customer does not control, and invisible in both cases. B-013 filed
+it for Phase 12; the owner pulled it forward and asked for a setting with a safe
+default, and for the mode to be shown rather than assumed.
+Options: (a) one global mode; (b) a free per-source field; (c) a policy that
+decides by address, which a source may tighten but not loosen.
+Decision: (c). `TLS_MODE` (typed as the *encrypted* subset, so no configuration
+can turn encryption off for a remote address) applies to every host that is not
+loopback or named in `TLS_LOCAL_HOSTS`; `TLS_MODE_LOCAL` applies to the ones that
+are. In prod nothing is local, whatever the list says. A source may name any
+stricter mode; an optional one for a remote address is a 422 at registration.
+The mode lives in `data_sources.settings` — the non-secret half of a connection,
+which architecture Part 10.1 already gives that column for — so no schema change
+and no deviation. Rows written before this default to the policy on read, so an
+old remote row tightens rather than being grandfathered.
+Consequences: the demo stack still works (compose declares its two databases
+local); a remote source that cannot do TLS now fails loudly instead of leaking
+quietly. `require` is documented everywhere as *encrypted, not authenticated* —
+only the verify modes check the certificate, and a test result says which. What
+remains open is per-source certificate material for a private CA: B-015.
+
 ## D-001 — Local secrets backend before Key Vault (pre-approved)
 Date: 2026-08-10 · Phase: 3 · PR: #16
 Context: Arch M3 lists Key Vault as a dependency, but Azure arrives in Phase 12.

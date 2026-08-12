@@ -1,6 +1,6 @@
 """The PostgreSQL connector (architecture Part 5.1, plan WP3.2).
 
-Three properties are structural here rather than remembered:
+Four properties are structural here rather than remembered:
 
 **Read-only sessions.** Every connection this class opens for reading sets
 ``default_transaction_read_only = on``, and every execution runs inside a
@@ -16,6 +16,11 @@ that fetches an unbounded result.
 one becomes a ``ConnectorError`` carrying a scrubbed message, with the original
 deliberately *not* chained: ``raise ... from error`` keeps the driver's text in
 ``__cause__``, and the next traceback printed anywhere would put a DSN in a log.
+
+**Declared encryption.** ``tls_mode`` is a required constructor argument with no
+default, decided by the policy in ``connectors.tls``, and a verification asks the
+server — not the driver — whether the session ended up encrypted (B-013). The
+answer is reported even when it is the one nobody wants to see.
 
 The read-only *verification* deserves its own paragraph, because it is easy to
 write a version that proves nothing. Asking a read-only session to write and
@@ -38,6 +43,7 @@ import time
 from collections.abc import Sequence
 from contextlib import suppress
 from datetime import UTC, datetime
+from pathlib import Path
 from types import TracebackType
 from typing import Any, Self, cast
 
@@ -53,9 +59,11 @@ from dataagent.connectors.base import (
     Health,
     ResultFrame,
     TableRef,
+    TlsStatus,
     ValidatedQuery,
 )
 from dataagent.connectors.sanitizer import sanitize_exception
+from dataagent.connectors.tls import ssl_parameter, tls_detail
 
 __all__ = ["POSTGRES_CAPS", "PostgresConnector"]
 
@@ -101,6 +109,8 @@ class PostgresConnector:
         database: str,
         username: str,
         password: str,
+        tls_mode: str,
+        tls_ca_file: Path | None = None,
         connect_timeout_seconds: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
     ) -> None:
         self._host = host
@@ -108,6 +118,11 @@ class PostgresConnector:
         self._database = database
         self._username = username
         self._password = password
+        # Required, with no default: how much encryption a customer's credentials
+        # travel under is not a decision this class gets to make quietly. The
+        # policy that answers it is `connectors.tls.resolve_tls_mode` (B-013).
+        self._tls_mode = tls_mode
+        self._tls_ca_file = tls_ca_file
         self._connect_timeout = connect_timeout_seconds
         self._connection: AsyncpgConnection | None = None
 
@@ -156,10 +171,11 @@ class PostgresConnector:
                 database=self._database,
                 timeout=self._connect_timeout,
                 server_settings=settings,
-                # Negotiated, not demanded: a managed cloud database requires TLS
-                # and gets it, a local container does not offer it and still
-                # works. Demanding verified TLS everywhere is B-013.
-                ssl="prefer",
+                # Whatever the policy decided for this data source. A mode the
+                # server cannot satisfy fails the connection here, which is the
+                # behaviour worth having: better a refusal an admin can read than
+                # a silent fallback to plaintext.
+                ssl=ssl_parameter(self._tls_mode, self._tls_ca_file),
             )
         except Exception as error:
             raise self._fail(error) from None
@@ -267,6 +283,11 @@ class PostgresConnector:
                 checked_at=checked_at,
             )
 
+        # Asked before the privilege questions, because it describes the channel
+        # every later answer travelled over.
+        tls = await self._tls_status()
+        tls_note = () if tls is None else (f"TLS: {tls.detail}",)
+
         try:
             frame = await self.execute(introspection.readonly_evidence(schemas), ExecLimits(1))
             facts = dict(zip(frame.columns, frame.rows[0], strict=True))
@@ -279,11 +300,13 @@ class PostgresConnector:
                     f"are read-only: {error}"
                 ),
                 checked_at=checked_at,
+                evidence=tls_note,
+                tls=tls,
             )
 
         writable = _write_privileges(facts)
         probe_refused, probe_note = await self._write_probe()
-        evidence = (*writable, probe_note, *self._role_note(facts))
+        evidence = (*tls_note, *writable, probe_note, *self._role_note(facts))
 
         verified = not writable and probe_refused
         # The role's *name* is not repeated back. It is half a credential, and
@@ -303,6 +326,33 @@ class PostgresConnector:
             checked_at=checked_at,
             server_version=_version(facts),
             evidence=evidence,
+            tls=tls,
+        )
+
+    async def _tls_status(self) -> TlsStatus | None:
+        """Whether this session is encrypted, according to the server (B-013).
+
+        The driver knows what it *asked* for; only the engine knows what it got,
+        and with ``prefer`` those differ silently whenever the server serves no
+        certificate. An engine that will not answer leaves this unknown — which
+        is reported as unknown, never as encrypted.
+        """
+        try:
+            frame = await self.execute(introspection.tls_status(), ExecLimits(1))
+            facts = dict(zip(frame.columns, frame.rows[0], strict=True))
+        except (ConnectorError, IndexError, ValueError):
+            return None
+
+        encrypted = facts.get("encrypted") is True
+        return TlsStatus(
+            mode=self._tls_mode,
+            encrypted=encrypted,
+            detail=tls_detail(
+                mode=self._tls_mode,
+                encrypted=encrypted,
+                version=_optional(facts.get("tls_version")),
+                cipher=_optional(facts.get("cipher")),
+            ),
         )
 
     def _role_note(self, facts: dict[str, object]) -> tuple[str, ...]:

@@ -56,6 +56,13 @@ encrypts customer database credentials with it and keeps the ciphertext in
 key is generated, never chosen, and production refuses this backend outright in
 favour of Key Vault ([DECISIONS](docs/plan/DECISIONS.md) D-001).
 
+Connections to a customer's database are encrypted unless its address is on this
+machine. The demo databases run in the compose network and serve no certificate,
+so compose names them in `TLS_LOCAL_HOSTS` and they connect with `prefer`;
+anything else gets `TLS_MODE`, which cannot be set to a mode that allows
+plaintext. Each data source reports the mode it uses, and a connection test says
+whether the server actually encrypted it (D-011).
+
 | Service | Where | What it is |
 |---|---|---|
 | web | http://localhost:3000 | Next.js app |
