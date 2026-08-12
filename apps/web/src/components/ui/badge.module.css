@@ -1,0 +1,18 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-full);
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.mint { background: var(--accent-mint-soft); color: var(--accent-mint-strong); }
+.sky { background: var(--accent-sky-soft); color: var(--accent-sky-strong); }
+.lilac { background: var(--accent-lilac-soft); color: var(--accent-lilac-strong); }
+.peach { background: var(--accent-peach-soft); color: var(--accent-peach-strong); }
+.rose { background: var(--accent-rose-soft); color: var(--accent-rose-strong); }
+.neutral { background: var(--surface-sunken); color: var(--fg-muted); }

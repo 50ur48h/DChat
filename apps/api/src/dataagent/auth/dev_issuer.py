@@ -90,7 +90,7 @@ class DevIssuer:
 def build_dev_issuer(settings: Settings) -> DevIssuer:
     """Construct the issuer, refusing anything that is not clearly development."""
     guard_development_only(settings)
-    return DevIssuer(issuer=settings.dev_issuer_url, audience=settings.oidc_audience)
+    return DevIssuer(issuer=settings.dev_issuer_url, audience=settings.resolve_audiences()[0])
 
 
 def guard_development_only(settings: Settings) -> None:

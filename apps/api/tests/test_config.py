@@ -101,3 +101,13 @@ def test_the_app_boots_with_no_identity_provider_configured() -> None:
     app = create_app(settings=Settings(env="ci", build_env="dev", auth_mode="entra"))
 
     assert app.state.token_validator is None
+
+
+def test_audiences_split_on_commas() -> None:
+    settings = Settings(oidc_audience="api://abc, abc")
+
+    assert settings.resolve_audiences() == ["api://abc", "abc"]
+
+
+def test_a_single_audience_still_works() -> None:
+    assert Settings(oidc_audience="dataagent-api").resolve_audiences() == ["dataagent-api"]

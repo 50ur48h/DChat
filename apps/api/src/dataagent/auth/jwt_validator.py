@@ -18,6 +18,7 @@ which half of the forgery worked.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import jwt
@@ -31,8 +32,16 @@ ALGORITHMS = ["RS256"]
 LEEWAY_SECONDS = 30
 
 
+def _first_string(claims: dict[str, Any], *names: str) -> str | None:
+    for name in names:
+        value = claims.get(name)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
 class TokenValidator:
-    def __init__(self, issuer: str | None, audience: str, jwks: JwksCache) -> None:
+    def __init__(self, issuer: str | None, audience: str | Sequence[str], jwks: JwksCache) -> None:
         """``issuer`` pins the expected issuer; None means "trust discovery".
 
         Trusting discovery is the better default. A Microsoft Entra external
@@ -97,10 +106,9 @@ class TokenValidator:
         if not isinstance(subject, str) or not subject:
             raise TokenError("missing_claim", "Token has no usable subject")
 
-        email = claims.get("email")
-        name = claims.get("name")
-        return Principal(
-            subject=subject,
-            email=email if isinstance(email, str) else None,
-            name=name if isinstance(name, str) else None,
-        )
+        # Entra populates one of these depending on tenant type and which
+        # optional claims the API registration asks for. Taking the first that
+        # is present beats showing somebody their opaque subject id.
+        email = _first_string(claims, "email", "preferred_username", "upn")
+        name = _first_string(claims, "name", "given_name")
+        return Principal(subject=subject, email=email, name=name)

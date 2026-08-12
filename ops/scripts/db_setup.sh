@@ -1,14 +1,18 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 #
 # Prepare the local platform database: run migrations as the owner, then give
 # dataagent_app a login so the API can connect as an unprivileged role.
 #
 # Local development only. In Azure (Phase 12) the role's credential comes from
 # Key Vault and this script has no equivalent.
+#
+# POSIX sh, not bash: on Windows a bare `bash` resolves to WSL's bash, which
+# cannot see the Docker CLI or this drive the same way. The Makefile runs this
+# with $(SHELL), which is the shell it already verified.
 
-set -euo pipefail
+set -eu
 
-if [[ ! -f .env ]]; then
+if [ ! -f .env ]; then
   echo "No .env found. Run 'make env' first." >&2
   exit 1
 fi

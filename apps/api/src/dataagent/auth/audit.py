@@ -35,9 +35,11 @@ def log_unauthenticated(*, reason: str, route: str | None, method: str | None) -
     Writing this to a tenant's audit_log would mean an unauthenticated request
     could choose whose audit log to fill.
     """
+    # In the message, not in `extra`: the default formatter drops extras, so a
+    # reason recorded there is invisible exactly when it is needed. It names the
+    # failed check, never anything from the token.
     logger.warning(
-        "rejected an unauthenticated request",
-        extra={"reason": reason, "route": route, "method": method},
+        "rejected an unauthenticated request: reason=%s %s %s", reason, method or "-", route or "-"
     )
 
 

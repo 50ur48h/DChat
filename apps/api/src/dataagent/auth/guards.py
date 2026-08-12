@@ -76,7 +76,7 @@ def _validator(request: Request) -> TokenValidator:
     authority = settings.resolve_authority()
     built = TokenValidator(
         issuer=settings.oidc_issuer,
-        audience=settings.oidc_audience,
+        audience=settings.resolve_audiences(),
         jwks=JwksCache(issuer=authority),
     )
     request.app.state.token_validator = built
@@ -93,6 +93,8 @@ async def current_principal(
 
     if credentials is None or not credentials.credentials:
         audit.log_unauthenticated(reason="missing_bearer", route=route, method=method)
+        # Distinct from a rejected token: one is a client that never attached
+        # a credential, the other is a credential we refused.
         raise _unauthorized()
 
     try:

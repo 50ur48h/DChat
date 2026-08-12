@@ -244,3 +244,57 @@ async def test_a_pinned_issuer_still_wins_when_it_disagrees() -> None:
         await validator.validate(_mint())
 
     assert caught.value.code == "bad_issuer"
+
+
+async def test_either_name_for_the_same_api_is_accepted() -> None:
+    """Entra spells one registration two ways depending on token version.
+
+    A v2 access token carries the resource's client-ID GUID as `aud`; a v1 token
+    carries its api:// URI. Both identify the same app registration, so both are
+    accepted — this is one resource under two names, not two resources.
+    """
+    guid = "4ce7996e-0000-0000-0000-000000000000"
+    validator = TokenValidator(
+        issuer=None,
+        audience=[f"api://{guid}", guid],
+        jwks=_StubJwks(_jwks(_TRUSTED_KEY)),
+    )
+
+    for spelling in (f"api://{guid}", guid):
+        principal = await validator.validate(_mint(aud=spelling))
+        assert principal.subject == "user-123"
+
+
+async def test_a_third_partys_audience_is_still_refused() -> None:
+    """Listing two names must not become "accept anything"."""
+    guid = "4ce7996e-0000-0000-0000-000000000000"
+    validator = TokenValidator(
+        issuer=None,
+        audience=[f"api://{guid}", guid],
+        jwks=_StubJwks(_jwks(_TRUSTED_KEY)),
+    )
+
+    with pytest.raises(TokenError) as caught:
+        await validator.validate(_mint(aud="00000003-0000-0000-c000-000000000000"))
+
+    assert caught.value.code == "bad_audience"
+
+
+async def test_identity_falls_back_to_whatever_claim_the_provider_sent() -> None:
+    """Entra populates email, preferred_username or upn depending on the tenant.
+
+    Regression: with only `email` consulted, a real Entra sign-in showed the
+    person their opaque subject id at `@unknown.invalid`.
+    """
+    principal = await _validator().validate(
+        _mint(email=None, name=None, preferred_username="person@contoso.com", given_name="Person")
+    )
+
+    assert principal.email == "person@contoso.com"
+    assert principal.name == "Person"
+
+
+async def test_email_still_wins_when_it_is_present() -> None:
+    principal = await _validator().validate(_mint(preferred_username="other@contoso.com"))
+
+    assert principal.email == "person@example.com"

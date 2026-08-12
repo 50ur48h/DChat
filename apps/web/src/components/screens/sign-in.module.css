@@ -1,0 +1,26 @@
+.intro {
+  color: var(--fg-muted);
+  margin-bottom: var(--space-4);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 360px;
+}
+
+.problems {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.error {
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 20px;
+}

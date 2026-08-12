@@ -1,10 +1,9 @@
 # STATUS — data-agent build
 
-Current position: Phase 2 / WP2.3 (partial — API side complete and verified
-                 against the real tenant; web sign-in UI remains)
+Current position: Phase 2 / WP2.3 (gate PR open — awaiting the browser demo
+                 and sign-off)
 Merge policy: ASK
-Blocked on user: review + merge. Entra values received and working; the
-                 remaining work is the browser half, not a dependency
+Blocked on user: the Phase 2 gate demo in a browser, then sign-off
 Last updated: 2026-08-11 by Claude Code
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
@@ -31,13 +30,7 @@ Last updated: 2026-08-11 by Claude Code
       — WP2.1 split in two (plan §1.1): authentication and authorization are
       separately reviewable, which matters more than usual in a security phase
 - [x] WP2.2 Orgs/users/invitations APIs + bootstrap + audit events
-- [~] WP2.3 Web auth (MSAL) + /me + invite UI + role matrix tests ← gate PR
-      DONE: role-matrix integration test + committed snapshot + a coverage
-      guard that fails when an org-scoped route has no entry.
-      DONE: entra mode wired and verified against the real tenant — the
-      issuer is read from the discovery document, not configured (D-009).
-      REMAINS: MSAL browser provider, dev-mode toggle, /me page, members +
-      invite screens, and the browser gate demo.
+- [x] WP2.3 Web auth (MSAL) + /me + invite UI + role matrix tests ← gate PR
 - [ ] GATE: signup→org→invite Reader; Reader 403 audited; user sign-off
 
 ## Phase 3 — Data source connectors (M3)
@@ -102,6 +95,10 @@ Last updated: 2026-08-11 by Claude Code
 ---
 
 ## Notes
+
+- **UI follows docs/design.md.** Tokens live in `apps/web/src/app/globals.css`;
+  primitives in `src/components/ui/`. A raw hex value anywhere else is a bug,
+  and adding a component library needs a DECISIONS entry first.
 
 - **Every new tenant table, in every later phase, must be added to
   `TENANT_TABLES` and given an RLS policy in the same PR.** This is not left
