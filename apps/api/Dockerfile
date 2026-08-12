@@ -46,6 +46,11 @@ ARG GIT_SHA=unknown
 ENV BUILD_ENV=dev \
     GIT_SHA=${GIT_SHA}
 
+# Before the dependency layer, so editing a script or a source file does not
+# reinstall a driver from the network.
+COPY docker/install-odbc.sh /tmp/install-odbc.sh
+RUN sh /tmp/install-odbc.sh && rm /tmp/install-odbc.sh
+
 COPY --from=deps-dev /app/.venv /app/.venv
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
@@ -84,6 +89,11 @@ ENV BUILD_ENV=prod \
 
 RUN groupadd --system --gid 1001 app \
     && useradd --system --uid 1001 --gid app --no-create-home app
+
+# The same driver install as the dev target, from the same script. Runs before
+# the application layers so it is cached across source changes.
+COPY docker/install-odbc.sh /tmp/install-odbc.sh
+RUN sh /tmp/install-odbc.sh && rm /tmp/install-odbc.sh
 
 WORKDIR /app
 COPY --from=build --chown=app:app /app/.venv /app/.venv

@@ -27,6 +27,7 @@ jobs:
     outputs:
       api: ${{ steps.filter.outputs.api }}
       web: ${{ steps.filter.outputs.web }}
+      connectors: ${{ steps.filter.outputs.connectors }}
     steps:
       - uses: actions/checkout@v4
       - id: filter
@@ -41,6 +42,13 @@ jobs:
             web:
               - 'apps/web/**'
               - 'Makefile'
+              - '.github/workflows/ci.yml'
+            connectors:
+              - 'apps/api/src/dataagent/connectors/**'
+              - 'apps/api/src/dataagent/dal/**'
+              - 'apps/api/tests/connectors/**'
+              - 'ops/seed/seed_pizza_mssql.sql'
+              - 'ops/scripts/seed_mssql.sh'
               - '.github/workflows/ci.yml'
 
   hygiene:
@@ -112,6 +120,72 @@ jobs:
       - name: Nothing to do
         if: env.RUN != 'true'
         run: echo "No changes under apps/api or ops — skipping."
+
+  # The second dialect, against a real SQL Server (WP3.3).
+  #
+  # Unlike `api` and `web` this job carries a job-level `if`, and the difference
+  # is deliberate rather than a lapse from D-007: those two are *required* status
+  # checks, so they must always report, while this one is not — a job that never
+  # runs simply never reports, and nothing waits on it. Gating the steps instead
+  # would start a 1.5 GB service container on every docs-only PR to then skip
+  # everything inside it.
+  mssql:
+    needs: changes
+    if: needs.changes.outputs.connectors == 'true'
+    runs-on: ubuntu-latest
+    env:
+      # A throwaway for a container that lives for one job and listens on
+      # localhost. It still has to satisfy SQL Server's password policy.
+      MSSQL_SA_PASSWORD: Ci_only_password_1
+      MSSQL_PIZZA_READONLY_PASSWORD: Ci_only_readonly_1
+      MSSQL_HOST: localhost
+      MSSQL_PORT: "1433"
+      MSSQL_DB: pizza
+      MSSQL_PIZZA_READONLY_USER: pizza_readonly
+      # The connector suite skips when no server is reachable, which is right on
+      # a laptop and wrong here: this job exists to run it.
+      REQUIRE_MSSQL: "1"
+      # Postgres fixtures are not part of this job, so the shared conftest must
+      # be allowed to skip them rather than failing on a missing DATABASE_URL.
+      REQUIRE_DB: "0"
+    services:
+      mssql:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_PID: Developer
+          MSSQL_SA_PASSWORD: Ci_only_password_1
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P Ci_only_password_1 -C -Q 'SELECT 1'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+          --health-start-period 60s
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+      # The same script the image uses, so the driver install is exercised on
+      # every connector change rather than only when an image is rebuilt.
+      - name: Install the SQL Server ODBC driver
+        run: sudo KEEP_BUILD_TOOLS=1 sh apps/api/docker/install-odbc.sh
+      - name: Install
+        run: uv sync --locked --directory apps/api
+      # -i so the redirected file becomes the container's stdin; sqlcmd reads
+      # from it when given neither -Q nor -i of its own.
+      - name: Seed the SQL Server fixture
+        run: |
+          docker exec -i \
+            -e RO_PASSWORD="$MSSQL_PIZZA_READONLY_PASSWORD" \
+            "${{ job.services.mssql.id }}" \
+            sh -c 'exec /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -b -v ReadonlyPassword="$RO_PASSWORD"' \
+            < ops/seed/seed_pizza_mssql.sql
+      - name: Connector tests (may not skip here)
+        run: uv run --directory apps/api pytest tests/connectors -q
 
   web:
     needs: changes

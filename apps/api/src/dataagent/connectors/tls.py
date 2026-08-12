@@ -48,6 +48,7 @@ __all__ = [
     "TlsPolicyError",
     "describe_verification",
     "is_local_host",
+    "odbc_parameters",
     "resolve_tls_mode",
     "ssl_parameter",
     "tls_detail",
@@ -158,6 +159,32 @@ def ssl_parameter(mode: str, ca_file: Path | None = None) -> str | ssl.SSLContex
     # requires the certificate to name the host we asked for.
     context.check_hostname = mode == "verify-full"
     return context
+
+
+def odbc_parameters(mode: str) -> dict[str, str]:
+    """The same ladder, in Microsoft's ODBC driver's vocabulary (WP3.3).
+
+    Three things are worth knowing about the mapping:
+
+    * ``prefer`` asks for encryption. SQL Server has offered TLS since 2005 and
+      generates a self-signed certificate when none is configured, so "encrypt if
+      the server can" is satisfied by asking — and what we *report* afterwards is
+      what actually happened, not what was asked for.
+    * ``verify-ca`` is stricter here than its name promises. ``msodbcsql18`` has
+      no chain-only mode: turning certificate validation on also checks the host
+      name, so this behaves as ``verify-full``. Saying so is better than pretending
+      to offer a distinction the driver does not have.
+    * ``TLS_CA_FILE`` does not apply. The driver trusts the system store, so a
+      private CA has to be installed in the image rather than pointed at — B-015.
+    """
+    if mode not in TLS_MODES:
+        raise TlsPolicyError(f"Unknown TLS mode {mode!r}. Choose one of: {', '.join(TLS_MODES)}.")
+    if mode == "disable":
+        return {"encrypt": "no"}
+    return {
+        "encrypt": "yes",
+        "trustservercertificate": "no" if mode in VERIFYING_TLS_MODES else "yes",
+    }
 
 
 def tls_detail(

@@ -69,6 +69,7 @@ whether the server actually encrypted it (D-011).
 | api | http://localhost:8000/healthz | FastAPI service |
 | platform-pg | localhost:5432 | the platform's own database (pgvector, row-level security) |
 | seed-pizza-pg | localhost:6543 | stands in for a *customer's* database |
+| mssql | localhost:1433 | a second customer database, on demand — see below |
 
 `seed-pizza-pg` holds a generated 18-month pizza-chain dataset. It is a fixture
 with deliberate properties — no `order_items` table, so item-level questions are
@@ -76,6 +77,18 @@ genuinely unanswerable, and a ~12% revenue decline in the final eight weeks that
 comes entirely from one store's delivery orders. Both exist to exercise the
 agent's honesty and its research loop later on; `ops/seed/seed_pizza.py`
 documents them and checks them on every run.
+
+The SQL Server container stays out of `make up` because its image is ~1.5 GB and
+it idles on about 2 GB of memory:
+
+```bash
+make up.mssql    # start it (the pull takes a while the first time)
+make seed.mssql  # the same schema in T-SQL, with a smaller dataset
+```
+
+It exists so a second dialect is exercised end to end rather than assumed to
+work — the same tables, the same missing join, and its own read-only login. The
+agent's questions and the evals are asked of the PostgreSQL dataset.
 
 ### Prerequisites
 

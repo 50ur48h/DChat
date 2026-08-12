@@ -1,9 +1,10 @@
 # STATUS — data-agent build
 
-Current position: Phase 3 in progress. WP3.1–3.2 and B-013 done. Next: WP3.3
+Current position: Phase 3 in progress. WP3.1–3.3 and B-013 done. Next: WP3.4
 Merge policy: ASK
-Blocked on user: nothing. WP3.3 pulls the SQL Server image (~1.5 GB) on first
-                 `make up.mssql`; nothing else is needed
+Blocked on user: nothing. The Phase 3 gate (WP3.4) is a browser demo and needs
+                 both seed databases up: `make up && make seed`, then
+                 `make up.mssql && make seed.mssql`
 Last updated: 2026-08-12 by Claude Code
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
@@ -54,7 +55,12 @@ Last updated: 2026-08-12 by Claude Code
       package: a backlog item taken between WP3.2 and WP3.3 so the SQL Server
       connector is written against the settled policy instead of retrofitted.
       See DECISIONS **D-011**; the residue (per-source CA material) is **B-015**
-- [ ] WP3.3 SQL Server connector + compose profile + dialect tests
+- [x] WP3.3 SQL Server connector + compose profile + dialect tests
+      — pyodbc behind the same async protocol, `sys.*` introspection, and the
+      same two-part read-only verification. Both dialects' templates live in one
+      `introspection` module so `SANCTIONED_VALIDATORS` stays at two names.
+      Raised **B-016**: the `api` job has no SQL Server, so it measures this
+      connector at 27% and the total at 88% — harmless until §4.4's ratchet
 - [ ] WP3.4 Data sources screen (register, test, rotate, remove)     ← gate PR
       — added 2026-08-12 from **B-012**, accepted by the owner: the phase's exit
       criterion said "registered via the API", which meant a curl command for
@@ -121,46 +127,42 @@ Last updated: 2026-08-12 by Claude Code
 
 ## Next step
 
-Phase 3 / **WP3.3 — SQL Server connector** (`p3.3-mssql-connector`). Read plan
-§6 Phase 3 and architecture Part 3, 5.1. It brings:
+Phase 3 / **WP3.4 — Data sources screen** (`p3.4-datasources-ui`), the **gate
+PR**. Read plan §6 Phase 3 WP3.4, docs/design.md, and architecture Part 10.2.
+It brings:
 
-- pyodbc + msodbcsql18 in the API image, wrapped in `asyncio.to_thread` behind
-  the same async protocol WP3.2 defined; the driver install goes in the
-  Dockerfile and is the reason this WP touches the image at all.
-- `connectors/sqlserver.py`: introspection from the `sys.*` views, capabilities
-  declaring dialect `tsql` and `limit_syntax="top"`, and the same two-part
-  read-only verification — privilege introspection (`HAS_PERMS_BY_NAME`, the
-  `db_datawriter`/`db_owner` role memberships) plus one attempted write inside a
-  rolled-back transaction, on a connection that is **not** read-only.
-- Compose `mssql` profile (already present) + `ops/seed/seed_pizza_mssql.sql`,
-  same schema and still no `order_items`; a smaller row count is fine.
-- A path-filtered CI job with an mssql service, because that image is heavy.
+- An Admin-only screen at `/orgs/{orgId}/data-sources` built from the existing
+  primitives in `src/components/ui/` and the tokens in `globals.css` — list,
+  register, test, rotate credentials, remove. A raw hex value anywhere else is
+  a bug, and a component library needs a DECISIONS entry first.
+- The one place in the product where a customer credential is typed:
+  `type="password"`, never echoed back from a response, never in a URL, never
+  in state that outlives the submit. The response has no field that could carry
+  one, and `test_no_response_model_exposes_a_credential` keeps it that way.
+- Honest results. `readonly_verified`, `status`, `last_verified_at`, the
+  sanitized failure message, and — separately from all of those — `tls_mode`
+  with `tls_encrypted` and `tls_detail`. "Encrypted" and "verified" are
+  different claims and the screen must not merge them: the Postgres demo is
+  unencrypted, the SQL Server one is encrypted and unverified, and both are
+  true.
+- **B-008** closes here: a Reader must not be offered Register, Test, Rotate or
+  Remove at all, and the members screen gets the same treatment.
 
-What WP3.2 leaves for it, deliberately:
+What Phase 3 has already settled, and WP3.4 should not re-open:
 
-- `connectors/factory.py` refuses `mssql` today with a message naming this work
-  package. Adding the connector means adding one entry to `SUPPORTED_ENGINES`
-  and removing one line from `_NOT_YET`.
-- The `Connector` protocol is complete for what exists: `capabilities`,
-  `test_connection`, the three `list_*` calls, `execute` and `aclose`. Arch 5.1
-  also lists `sample`, `profile` and `explain`; those arrive with the profiler
-  in Phase 4 and the DAL in Phase 5, each with the caller that needs it.
-- `Caps.statement_timeout_mechanism` exists precisely because SQL Server does
-  not have `SET statement_timeout`: it needs the driver's query timeout instead.
-  WP3.3 is the first code to read that field rather than assume Postgres.
-- The read-only *shape* of verification is settled and should not be
-  re-invented: never ask a read-only session to prove the credentials are
-  read-only, because it proves only that the session setting works.
-- The TLS policy is settled too (B-013, D-011). The connector receives a
-  `tls_mode` and does not choose one, so WP3.3's job is the ODBC mapping —
-  `Encrypt` and `TrustServerCertificate` — plus reading back what was actually
-  negotiated (`sys.dm_exec_connections.encrypt_option`) into the same
-  `TlsStatus`. Note that the compose SQL Server *does* serve a self-signed
-  certificate, so unlike Postgres its local connection will really be encrypted
-  and unverified; the evidence line must say so rather than round it up.
+- The API is complete for this screen. `GET/POST/PATCH/DELETE
+  /v1/orgs/{org}/data-sources` and `POST .../{id}/test` all exist, all audited,
+  all Admin-only except listing. If the screen wants a field the API does not
+  return, the answer is usually that it should not show it.
+- `readonly_verified` is earned, not assumed, on both engines; a rotation or a
+  re-address retires it. The screen reports that state, it does not compute it.
+- TLS mode is policy (B-013, D-011): the form may offer to *tighten* it and
+  must not offer `prefer` or `disable` for a remote host — the API answers 422
+  and the message names the modes that would work.
 
-Then **WP3.4** (`p3.4-datasources-ui`) closes the phase with the browser screen
-and the gate demo — see the Phase 3 checklist above and plan §6 WP3.4.
+For the gate demo itself, both fixtures must be up: `make up && make seed` for
+Postgres, then `make up.mssql && make seed.mssql` for SQL Server. Register each
+with its read-only login (`pizza_readonly` on both), never with `pizza` or `sa`.
 
 ## Notes
 
@@ -181,6 +183,18 @@ and the gate demo — see the Phase 3 checklist above and plan §6 WP3.4.
   local stack answers "prefer — this connection is NOT encrypted", which is the
   truth and is meant to be visible. `require` encrypts without checking the
   certificate; only the verify modes authenticate the far end (D-011).
+
+- **The two engines are not symmetric, and the difference is in the code.**
+  Postgres has `default_transaction_read_only`, so a write is refused by the
+  session before privileges are consulted. SQL Server has no equivalent —
+  `ApplicationIntent=ReadOnly` is about availability groups and ODBC's access
+  mode is advisory — so `connectors/sqlserver.py` never commits instead:
+  `autocommit` is off and every execution ends in a rollback in a `finally`.
+  A write that reached it would be undone rather than refused, which is weaker,
+  and is why `readonly_verified` carries more weight on that engine. The same
+  asymmetry shows up in TLS: `sys.dm_exec_connections` needs VIEW SERVER STATE,
+  which a read-only login does not have, so its encryption is reported by the
+  driver and labelled as such rather than passed off as the server's word.
 
 - **Customer credentials have exactly one home.** They go to the
   `SecretsProvider` and nowhere else: the platform database holds a

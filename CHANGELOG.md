@@ -33,6 +33,9 @@ under "Unreleased", only for changes a user would notice.
   reports whether they can write. A data source counts as verified only when the
   database itself says the account cannot write, and rotating a credential or
   changing an address retires that verification until it is checked again.
+- SQL Server databases can be registered and verified the same way, against the
+  same standard of proof. `make up.mssql && make seed.mssql` builds a demo one
+  to try it against.
 - `make seed` creates a read-only login for the demo database, so it can be
   registered the way a real one should be.
 - A web app you can actually use: sign in, see who you are and which
