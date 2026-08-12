@@ -38,6 +38,13 @@ under "Unreleased", only for changes a user would notice.
   to try it against.
 - `make seed` creates a read-only login for the demo database, so it can be
   registered the way a real one should be.
+- A screen for data sources: register a database, test it, rotate its password
+  and remove it, without a terminal. Each one shows the account it connects as,
+  whether its credentials have been proven read-only, and how much encryption
+  the connection uses — three separate facts, because they are.
+- People are no longer shown buttons their role does not permit. A Reader sees
+  the members and the data sources, and one line explaining what only an Admin
+  can do, instead of controls that answer with an error.
 - A web app you can actually use: sign in, see who you are and which
   organizations you belong to, create one, invite people with a role, and
   manage members. Sign-in works against Microsoft Entra External ID, or

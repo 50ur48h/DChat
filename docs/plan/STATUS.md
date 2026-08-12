@@ -1,9 +1,11 @@
 # STATUS — data-agent build
 
-Current position: Phase 3 in progress. WP3.1–3.3 and B-013 done. Next: WP3.4
+Current position: Phase 3 complete but for the gate. Next: the Phase 3 GATE, then
+                  Phase 4 / WP4.1
 Merge policy: ASK
-Blocked on user: nothing. The Phase 3 gate (WP3.4) is a browser demo and needs
-                 both seed databases up: `make up && make seed`, then
+Blocked on user: the **Phase 3 gate demo**, which is a browser flow and yours to
+                 run — the manual test script is in the WP3.4 PR. Both fixtures
+                 must be up: `make up && make seed`, then
                  `make up.mssql && make seed.mssql`
 Last updated: 2026-08-12 by Claude Code
 
@@ -61,11 +63,13 @@ Last updated: 2026-08-12 by Claude Code
       `introspection` module so `SANCTIONED_VALIDATORS` stays at two names.
       Raised **B-016**: the `api` job has no SQL Server, so it measures this
       connector at 27% and the total at 88% — harmless until §4.4's ratchet
-- [ ] WP3.4 Data sources screen (register, test, rotate, remove)     ← gate PR
+- [x] WP3.4 Data sources screen (register, test, rotate, remove)     ← gate PR
       — added 2026-08-12 from **B-012**, accepted by the owner: the phase's exit
       criterion said "registered via the API", which meant a curl command for
       the first thing a new organization must do. The gate demo is now in the
       browser. WP3.3 keeps its work and hands the gate marker to WP3.4.
+      Also closed **B-008**: a Reader is no longer offered controls the API will
+      refuse, here and on the members screen
 - [ ] GATE: both seed DBs registered **from the browser**; creds never echoed;
       read-only verified; a wrong password fails with a sanitized message;
       a Reader sees no admin controls; user sign-off
@@ -127,42 +131,35 @@ Last updated: 2026-08-12 by Claude Code
 
 ## Next step
 
-Phase 3 / **WP3.4 — Data sources screen** (`p3.4-datasources-ui`), the **gate
-PR**. Read plan §6 Phase 3 WP3.4, docs/design.md, and architecture Part 10.2.
-It brings:
+**The Phase 3 gate, and it is yours to run** — the numbered script is in the
+WP3.4 PR. In short: both fixtures up (`make up && make seed`, then
+`make up.mssql && make seed.mssql`), sign in, register both demo databases from
+the browser with their `pizza_readonly` logins, watch both report read-only
+verified, then register one with a wrong password and read the sanitized
+failure. Finally sign in as a Reader and confirm the screen offers nothing.
 
-- An Admin-only screen at `/orgs/{orgId}/data-sources` built from the existing
-  primitives in `src/components/ui/` and the tokens in `globals.css` — list,
-  register, test, rotate credentials, remove. A raw hex value anywhere else is
-  a bug, and a component library needs a DECISIONS entry first.
-- The one place in the product where a customer credential is typed:
-  `type="password"`, never echoed back from a response, never in a URL, never
-  in state that outlives the submit. The response has no field that could carry
-  one, and `test_no_response_model_exposes_a_credential` keeps it that way.
-- Honest results. `readonly_verified`, `status`, `last_verified_at`, the
-  sanitized failure message, and — separately from all of those — `tls_mode`
-  with `tls_encrypted` and `tls_detail`. "Encrypted" and "verified" are
-  different claims and the screen must not merge them: the Postgres demo is
-  unencrypted, the SQL Server one is encrypted and unverified, and both are
-  true.
-- **B-008** closes here: a Reader must not be offered Register, Test, Rotate or
-  Remove at all, and the members screen gets the same treatment.
+Once you sign it off, the gate checkbox flips in the first Phase 4 PR — the same
+convention as every previous phase.
 
-What Phase 3 has already settled, and WP3.4 should not re-open:
+Then Phase 4 / **WP4.1 — Discovery pipeline** (`p4.1-discovery`). Read plan §6
+Phase 4 and architecture Part 5.2–5.3, 10.1. What it inherits from Phase 3:
 
-- The API is complete for this screen. `GET/POST/PATCH/DELETE
-  /v1/orgs/{org}/data-sources` and `POST .../{id}/test` all exist, all audited,
-  all Admin-only except listing. If the screen wants a field the API does not
-  return, the answer is usually that it should not show it.
-- `readonly_verified` is earned, not assumed, on both engines; a rotation or a
-  re-address retires it. The screen reports that state, it does not compute it.
-- TLS mode is policy (B-013, D-011): the form may offer to *tighten* it and
-  must not offer `prefer` or `disable` for a remote host — the API answers 422
-  and the message names the modes that would work.
+- Two connectors behind one protocol, both able to describe a database:
+  `list_schemas`, `list_tables`, `list_columns`, `list_foreign_keys`. The
+  discovery crawl is those four calls plus persistence — it should not need to
+  know which engine it is talking to.
+- The pizza fixture's shape is load-bearing for its tests: the FK graph must
+  include `orders → stores` and `orders → customers`, and must contain **no**
+  path from `orders` to `menu_items`. Phase 8's honest refusal depends on that
+  absence, and the SQL Server fixture has the same hole on purpose.
+- `Caps` already states what varies per engine, so a `catalog_access` or
+  `max_identifier_length` question has an answer to read rather than infer.
+- Every new tenant table needs its RLS policy, its `TENANT_TABLES` line, and an
+  extension of the rls_proof suite, in the same PR — see the note below.
 
-For the gate demo itself, both fixtures must be up: `make up && make seed` for
-Postgres, then `make up.mssql && make seed.mssql` for SQL Server. Register each
-with its read-only login (`pizza_readonly` on both), never with `pizza` or `sa`.
+**USER INPUT (optional, not blocking):** an embeddings key for WP4.3's card
+search. Without it search runs lexical-only and embedding backfill is left as a
+flagged idempotent job (plan §6 Phase 4).
 
 ## Notes
 
@@ -203,6 +200,23 @@ with its read-only login (`pizza_readonly` on both), never with `pizza` or `sa`.
   backend is a Fernet-encrypted file under `ops/.secrets/` (D-001) whose key
   comes from `LOCAL_SECRETS_KEY` — `make secrets.key` prints one, and a
   production build refuses to start with this backend at all.
+
+- **A control nobody may use is worse than no control** (B-008, closed in
+  WP3.4). Screens read the caller's role from `/v1/me` and hide what the API
+  would refuse, failing closed while the role is unknown. This decides what to
+  *render* and is not a permission check: the guard is server-side, and it still
+  refuses and audits regardless of what the browser believes.
+
+- **`ops/scripts/set_role.sh` is an operator escape hatch, not a feature.**
+  Roles change through the API, which audits every one and refuses to let the
+  last Admin demote themselves. This script edits `org_memberships` directly,
+  for the case the API cannot help with: nobody who can sign in holds Admin —
+  an identity-provider problem, not an authorization one. Added 2026-08-12 when
+  the Entra External ID account that created the demo org (`sourabh@rereed.com`)
+  stopped being findable at sign-in and the Phase 3 gate had no Admin. It writes
+  its own `member.role_changed` row with a **null actor**, because "someone
+  edited the database" is the honest description. If it is ever reached for
+  anything but a locked-out tenant, that is a missing product feature.
 
 - **UI follows docs/design.md.** Tokens live in `apps/web/src/app/globals.css`;
   primitives in `src/components/ui/`. A raw hex value anywhere else is a bug,

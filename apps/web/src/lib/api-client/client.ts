@@ -10,15 +10,20 @@
 
 import {
   isAccepted,
+  isDataSource,
   isHealth,
   isInvitation,
   isMe,
   isMember,
+  isTestResult,
   type Accepted,
+  type DataSource,
   type Health,
   type Invitation,
   type Me,
   type Member,
+  type NewDataSource,
+  type TestResult,
 } from "./types";
 
 /** A failed API call, carrying enough to render an honest message. */
@@ -111,6 +116,15 @@ export interface Api {
   acceptInvitation(token: string): Promise<Accepted>;
   changeRole(orgId: string, userId: string, role: string): Promise<void>;
   removeMember(orgId: string, userId: string): Promise<void>;
+  dataSources(orgId: string): Promise<DataSource[]>;
+  registerDataSource(orgId: string, source: NewDataSource): Promise<DataSource>;
+  rotateCredentials(
+    orgId: string,
+    dataSourceId: string,
+    credentials: { username?: string | undefined; password: string },
+  ): Promise<DataSource>;
+  testDataSource(orgId: string, dataSourceId: string): Promise<TestResult>;
+  removeDataSource(orgId: string, dataSourceId: string): Promise<void>;
 }
 
 /** Binds the API to a session's token getter. */
@@ -151,6 +165,43 @@ export function createApi(getToken: () => Promise<string | null>): Api {
     },
     async removeMember(orgId, userId) {
       await call(`/v1/orgs/${orgId}/members/${userId}`, { method: "DELETE" });
+    },
+    async dataSources(orgId) {
+      const payload = await call(`/v1/orgs/${orgId}/data-sources`);
+      if (!Array.isArray(payload) || !payload.every(isDataSource)) {
+        throw new ApiError("The API's data sources response did not match the expected shape", 200);
+      }
+      return payload;
+    },
+    // The credential travels in a POST body and nowhere else — never a query
+    // string, which would put it in browser history, in a referrer header, and
+    // in every access log between here and the API.
+    async registerDataSource(orgId, source) {
+      return narrow(
+        await call(`/v1/orgs/${orgId}/data-sources`, { method: "POST", body: source }),
+        isDataSource,
+        "data source",
+      );
+    },
+    async rotateCredentials(orgId, dataSourceId, credentials) {
+      return narrow(
+        await call(`/v1/orgs/${orgId}/data-sources/${dataSourceId}`, {
+          method: "PATCH",
+          body: credentials,
+        }),
+        isDataSource,
+        "data source",
+      );
+    },
+    async testDataSource(orgId, dataSourceId) {
+      return narrow(
+        await call(`/v1/orgs/${orgId}/data-sources/${dataSourceId}/test`, { method: "POST" }),
+        isTestResult,
+        "connection test",
+      );
+    },
+    async removeDataSource(orgId, dataSourceId) {
+      await call(`/v1/orgs/${orgId}/data-sources/${dataSourceId}`, { method: "DELETE" });
     },
   };
 }
