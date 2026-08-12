@@ -46,6 +46,20 @@ COMMENT ON COLUMN shops.name IS 'Trading name.';
 
 CREATE VIEW busy_shops AS SELECT id, name FROM shops;
 
+-- Nothing references this table and nothing it references, on purpose. The pizza
+-- fixture has the same hole between orders and menu_items, and Phase 8's honest
+-- refusal depends on the catalog recording an absence faithfully rather than
+-- inventing a plausible join. Asserted here because this fixture runs in CI on
+-- every commit, where the seeded pizza database does not.
+CREATE TABLE products (
+    id       integer PRIMARY KEY,
+    name     text NOT NULL,
+    price    numeric(6, 2) NOT NULL
+);
+COMMENT ON TABLE products IS 'Deliberately unrelated to shops.';
+
+INSERT INTO products (id, name, price) VALUES (1, 'Margherita', 12.50), (2, 'Cola', 3.00);
+
 INSERT INTO regions (id, name) VALUES (1, 'North'), (2, 'South');
 INSERT INTO shops (id, region_id, name, opened_on) VALUES
     (1, 1, 'Harbour', '2020-01-01'),

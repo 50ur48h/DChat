@@ -19,6 +19,11 @@
     "contributor": "allow",
     "reader": "allow"
   },
+  "GET /v1/orgs/{org_id}/data-sources/{data_source_id}/catalog": {
+    "admin": "allow",
+    "contributor": "allow",
+    "reader": "allow"
+  },
   "GET /v1/orgs/{org_id}/members": {
     "admin": "allow",
     "contributor": "allow",
@@ -37,6 +42,11 @@
   "POST /v1/orgs/{org_id}/data-sources": {
     "admin": "allow",
     "contributor": "deny(403)",
+    "reader": "deny(403)"
+  },
+  "POST /v1/orgs/{org_id}/data-sources/{data_source_id}/refresh": {
+    "admin": "allow",
+    "contributor": "allow",
     "reader": "deny(403)"
   },
   "POST /v1/orgs/{org_id}/data-sources/{data_source_id}/test": {

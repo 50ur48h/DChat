@@ -85,6 +85,13 @@ PROBES: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
     # answers "not reachable" in microseconds. The matrix cares that the route
     # answered at all, not what it found.
     ("POST", "/v1/orgs/{org_id}/data-sources/{data_source_id}/test", None),
+    # Reading a catalog is member work; building one reaches out to a customer's
+    # database, so it is Contributor-or-Admin. The probe's data source is never
+    # verified read-only, so a refresh declines before it opens a socket — which
+    # is a 200 with `changed: false`, and exactly what the matrix wants to see:
+    # the route answered, and the decision was about the role.
+    ("GET", "/v1/orgs/{org_id}/data-sources/{data_source_id}/catalog", None),
+    ("POST", "/v1/orgs/{org_id}/data-sources/{data_source_id}/refresh", None),
     ("DELETE", "/v1/orgs/{org_id}/data-sources/{data_source_id}", None),
 )
 
@@ -168,6 +175,17 @@ async def matrix_app(
                 '"username_last4": "obe"}',
                 "r": f"ds/{org_id}/{data_source_id}/credentials",
             },
+        )
+        # An empty catalog, written directly rather than discovered: without one
+        # the browse probe answers 404 for every role, and the matrix would
+        # record "deny(404)" three times — which reads like nobody may see a
+        # catalog, when what it means is that there was not one to see.
+        await connection.execute(
+            text(
+                "INSERT INTO catalog_snapshots (org_id, data_source_id, version, status) "
+                "VALUES (:o, :d, 1, 'active')"
+            ),
+            {"o": org_id, "d": data_source_id},
         )
 
     app = create_app(settings=Settings(auth_mode="dev", env="ci", build_env="dev"))

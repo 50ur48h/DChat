@@ -61,6 +61,12 @@ class SeededOrgs:
     a: uuid.UUID
     b: uuid.UUID
     user_id: uuid.UUID
+    #: Org B's catalog chain, by id. The forged inserts need real parents: a
+    #: made-up snapshot id would be refused by the foreign key and the test
+    #: would pass while proving nothing about the policy.
+    b_data_source: uuid.UUID
+    b_snapshot: uuid.UUID
+    b_table: uuid.UUID
 
 
 async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
@@ -74,6 +80,7 @@ async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
     the way in.
     """
     org_a, org_b, user_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    catalog: dict[str, uuid.UUID] = {}
     engine = create_async_engine(owner_url)
     try:
         async with engine.begin() as connection:
@@ -112,26 +119,86 @@ async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
                     text("INSERT INTO audit_log (org_id, action) VALUES (:org, 'org.created')"),
                     {"org": org_id},
                 )
+                data_source_id = (
+                    await connection.execute(
+                        text(
+                            "INSERT INTO data_sources "
+                            "(org_id, name, engine, host_display, secret_ref) VALUES "
+                            "(:org, :name, 'pg', 'db.example:5432/pizza', :ref) RETURNING id"
+                        ),
+                        {
+                            "org": org_id,
+                            "name": f"{name} source",
+                            "ref": f"ds/{org_id}/x/credentials",
+                        },
+                    )
+                ).scalar_one()
+
+                # The catalog chain (WP4.1): a snapshot, one table in it, one
+                # column of that table, and one relationship. Each hangs off the
+                # one above by id, so this is also a small proof that the
+                # foreign keys and the policies agree about what a tenant owns.
+                snapshot_id = (
+                    await connection.execute(
+                        text(
+                            "INSERT INTO catalog_snapshots "
+                            "(org_id, data_source_id, version, status) VALUES "
+                            "(:org, :ds, 1, 'active') RETURNING id"
+                        ),
+                        {"org": org_id, "ds": data_source_id},
+                    )
+                ).scalar_one()
+                table_id = (
+                    await connection.execute(
+                        text(
+                            "INSERT INTO catalog_tables "
+                            "(org_id, snapshot_id, schema_name, table_name, kind, "
+                            "structural_hash) VALUES "
+                            "(:org, :snap, 'public', 'orders', 'table', :hash) RETURNING id"
+                        ),
+                        {"org": org_id, "snap": snapshot_id, "hash": uuid.uuid4().hex},
+                    )
+                ).scalar_one()
                 await connection.execute(
                     text(
-                        "INSERT INTO data_sources "
-                        "(org_id, name, engine, host_display, secret_ref) VALUES "
-                        "(:org, :name, 'pg', 'db.example:5432/pizza', :ref)"
+                        "INSERT INTO catalog_columns "
+                        "(org_id, table_id, name, ordinal, data_type, nullable) VALUES "
+                        "(:org, :table, 'id', 1, 'integer', false)"
                     ),
-                    {"org": org_id, "name": f"{name} source", "ref": f"ds/{org_id}/x/credentials"},
+                    {"org": org_id, "table": table_id},
                 )
+                await connection.execute(
+                    text(
+                        "INSERT INTO catalog_relationships "
+                        "(org_id, snapshot_id, constraint_name, from_schema, from_table, "
+                        "from_columns, to_schema, to_table, to_columns) VALUES "
+                        "(:org, :snap, 'fk_orders_store', 'public', 'orders', "
+                        "ARRAY['store_id'], 'public', 'stores', ARRAY['id'])"
+                    ),
+                    {"org": org_id, "snap": snapshot_id},
+                )
+                if org_id == org_b:
+                    catalog.update(data_source=data_source_id, snapshot=snapshot_id, table=table_id)
     finally:
         await engine.dispose()
-    return SeededOrgs(a=org_a, b=org_b, user_id=user_id)
+    return SeededOrgs(
+        a=org_a,
+        b=org_b,
+        user_id=user_id,
+        b_data_source=catalog["data_source"],
+        b_snapshot=catalog["snapshot"],
+        b_table=catalog["table"],
+    )
 
 
-def _forged_insert(table: str, other_org: uuid.UUID, user_id: uuid.UUID) -> str:
+def _forged_insert(table: str, seeded: SeededOrgs) -> str:
     """A row that belongs to somebody else, written as SQL for one table.
 
     ``organizations`` is scoped by its own ``id``, so "somebody else's row" there
     means any organization that is not the one this session is scoped to — which
     is also why bootstrap must set ``app.org_id`` to the new id before inserting.
     """
+    other_org, user_id = seeded.b, seeded.user_id
     statements = {
         "organizations": f"INSERT INTO organizations (id, name) VALUES ('{other_org}', 'forged')",
         "org_memberships": (
@@ -148,6 +215,30 @@ def _forged_insert(table: str, other_org: uuid.UUID, user_id: uuid.UUID) -> str:
             "INSERT INTO data_sources (org_id, name, engine, host_display, secret_ref) VALUES "
             f"('{other_org}', 'forged', 'pg', 'db.example:5432/pizza', "
             f"'ds/{other_org}/forged/credentials')"
+        ),
+        # The catalog chain names real parents belonging to the other
+        # organization, so nothing here can be refused by a foreign key and pass
+        # for the wrong reason: the only thing standing in the way is the policy.
+        "catalog_snapshots": (
+            "INSERT INTO catalog_snapshots (org_id, data_source_id, version, status) VALUES "
+            f"('{other_org}', '{seeded.b_data_source}', 99, 'building')"
+        ),
+        "catalog_tables": (
+            "INSERT INTO catalog_tables "
+            "(org_id, snapshot_id, schema_name, table_name, kind, structural_hash) VALUES "
+            f"('{other_org}', '{seeded.b_snapshot}', 'public', 'forged', 'table', "
+            f"'{uuid.uuid4().hex}')"
+        ),
+        "catalog_columns": (
+            "INSERT INTO catalog_columns (org_id, table_id, name, ordinal, data_type, nullable) "
+            f"VALUES ('{other_org}', '{seeded.b_table}', 'forged', 1, 'text', true)"
+        ),
+        "catalog_relationships": (
+            "INSERT INTO catalog_relationships "
+            "(org_id, snapshot_id, constraint_name, from_schema, from_table, from_columns, "
+            "to_schema, to_table, to_columns) VALUES "
+            f"('{other_org}', '{seeded.b_snapshot}', 'forged', 'public', 'a', ARRAY['x'], "
+            "'public', 'b', ARRAY['y'])"
         ),
     }
     return statements[table]
@@ -392,7 +483,7 @@ async def test_insert_under_another_org_is_rejected_on_every_tenant_table(
     for table in TENANT_TABLES:
         await _expect_failure(
             app_database,
-            _forged_insert(table, seeded.b, seeded.user_id),
+            _forged_insert(table, seeded),
             org_id=seeded.a,
             match="row-level security",
         )

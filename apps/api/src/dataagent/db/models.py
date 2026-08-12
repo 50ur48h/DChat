@@ -12,13 +12,16 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import (
+    ARRAY,
     BigInteger,
     CheckConstraint,
     ForeignKey,
     Identity,
     Index,
+    Numeric,
     String,
     Text,
     text,
@@ -36,9 +39,16 @@ from dataagent.db.security_events import SecurityEvent
 __all__ = [
     "DATA_SOURCE_ENGINES",
     "DATA_SOURCE_STATUSES",
+    "RELATIONSHIP_KINDS",
+    "SNAPSHOT_STATUSES",
+    "TABLE_KINDS",
     "TENANT_TABLES",
     "AuditLog",
     "Base",
+    "CatalogColumn",
+    "CatalogRelationship",
+    "CatalogSnapshot",
+    "CatalogTable",
     "DataSource",
     "Invitation",
     "OrgMembership",
@@ -58,6 +68,18 @@ DATA_SOURCE_ENGINES: tuple[str, ...] = ("pg", "mssql")
 #: the address is recorded. WP3.2's connector moves a row to ``verified`` (it
 #: connected *and* proved the credentials cannot write) or to ``error``.
 DATA_SOURCE_STATUSES: tuple[str, ...] = ("registered", "verified", "error")
+
+#: A snapshot is built, then becomes the one active catalog for its data source,
+#: or fails and stays visible as a failure. The previous active one is
+#: ``superseded`` — kept, not deleted, because a run that is still going may be
+#: reasoning about it (architecture Part 5.2).
+SNAPSHOT_STATUSES: tuple[str, ...] = ("building", "active", "failed", "superseded")
+
+TABLE_KINDS: tuple[str, ...] = ("table", "view")
+
+#: ``declared`` is a foreign key the engine enforces. ``inferred`` arrives with
+#: the profiler in WP4.2, which can score a guess; WP4.1 never guesses.
+RELATIONSHIP_KINDS: tuple[str, ...] = ("declared", "inferred")
 
 
 class Organization(Base):
@@ -198,6 +220,147 @@ class DataSource(Base):
     created_at: Mapped[CreatedAt]
 
 
+class CatalogSnapshot(Base):
+    """One crawl of one customer database (architecture Part 5.2, 10.1).
+
+    The unit of consistency *and* of change (DECISIONS D-012). A run reasons
+    about one snapshot from beginning to end, so a refresh underneath it cannot
+    move the ground; and a crawl that finds every ``structural_hash`` unchanged
+    creates no snapshot at all, so the common refresh costs nothing.
+
+    It is also the run record: a crawl that fails leaves a snapshot that never
+    reached ``active``, carrying a sanitized ``error``, rather than a row in a
+    second table that would have to be joined to learn the same thing.
+    """
+
+    __tablename__ = "catalog_snapshots"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ({})".format(", ".join(f"'{s}'" for s in SNAPSHOT_STATUSES)),
+            name="status_valid",
+        ),
+        Index(
+            "uq_catalog_snapshots_data_source_id_version",
+            "data_source_id",
+            "version",
+            unique=True,
+        ),
+        # "Which catalog is current" must have exactly one answer, so the
+        # database holds us to it rather than the code remembering to.
+        Index(
+            "uq_catalog_snapshots_one_active",
+            "data_source_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
+    )
+
+    id: Mapped[UuidPk]
+    org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    data_source_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'building'")
+    )
+    captured_at: Mapped[CreatedAt]
+    completed_at: Mapped[datetime | None]
+    object_count: Mapped[int] = mapped_column(nullable=False, server_default=text("0"))
+    error: Mapped[str | None] = mapped_column(Text)
+
+
+class CatalogTable(Base):
+    """A table or view as one snapshot found it."""
+
+    __tablename__ = "catalog_tables"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ({})".format(", ".join(f"'{k}'" for k in TABLE_KINDS)), name="kind_valid"
+        ),
+        Index(
+            "uq_catalog_tables_snapshot_id_schema_name_table_name",
+            "snapshot_id",
+            "schema_name",
+            "table_name",
+            unique=True,
+        ),
+    )
+
+    id: Mapped[UuidPk]
+    org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("catalog_snapshots.id", ondelete="CASCADE"), nullable=False
+    )
+    schema_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    table_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    #: sha256 over this table's shape. Two crawls that agree on it agree about
+    #: everything WP4.1 stores, which is what makes a refresh cheap.
+    structural_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+
+
+class CatalogColumn(Base):
+    """A column of a catalogued table. Profiles and policy arrive in WP4.2."""
+
+    __tablename__ = "catalog_columns"
+    __table_args__ = (Index("uq_catalog_columns_table_id_name", "table_id", "name", unique=True),)
+
+    id: Mapped[UuidPk]
+    org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    table_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("catalog_tables.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    ordinal: Mapped[int] = mapped_column(nullable=False)
+    data_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    nullable: Mapped[bool] = mapped_column(nullable=False)
+    is_pk: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    description: Mapped[str | None] = mapped_column(Text)
+
+
+class CatalogRelationship(Base):
+    """A join the engine declares (architecture Part 5.2).
+
+    Phase 8's honest refusal depends on this table being a faithful record of
+    what exists — including, in the pizza fixture, the absence of any path from
+    ``orders`` to ``menu_items``. Inferred edges arrive with the profiler that
+    can score them; everything here is ``declared`` and confidence 1.0.
+    """
+
+    __tablename__ = "catalog_relationships"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ({})".format(", ".join(f"'{k}'" for k in RELATIONSHIP_KINDS)),
+            name="kind_valid",
+        ),
+        Index(
+            "ix_catalog_relationships_snapshot_id_from_table",
+            "snapshot_id",
+            "from_schema",
+            "from_table",
+        ),
+    )
+
+    id: Mapped[UuidPk]
+    org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("catalog_snapshots.id", ondelete="CASCADE"), nullable=False
+    )
+    constraint_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    from_schema: Mapped[str] = mapped_column(String(255), nullable=False)
+    from_table: Mapped[str] = mapped_column(String(255), nullable=False)
+    from_columns: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
+    to_schema: Mapped[str] = mapped_column(String(255), nullable=False)
+    to_table: Mapped[str] = mapped_column(String(255), nullable=False)
+    to_columns: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'declared'"))
+    confidence: Mapped[Decimal] = mapped_column(
+        Numeric(precision=3, scale=2), nullable=False, server_default=text("1.0")
+    )
+
+
 class AuditLog(Base):
     """Append-only record of who did what (architecture Part 8.2).
 
@@ -240,4 +403,8 @@ TENANT_TABLES: dict[str, str] = {
     "invitations": "org_id",
     "audit_log": "org_id",
     "data_sources": "org_id",
+    "catalog_snapshots": "org_id",
+    "catalog_tables": "org_id",
+    "catalog_columns": "org_id",
+    "catalog_relationships": "org_id",
 }

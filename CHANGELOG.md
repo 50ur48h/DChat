@@ -26,6 +26,10 @@ under "Unreleased", only for changes a user would notice.
   cannot bypass it. The audit log is append-only by grant.
 
 ### Added
+- A registered database can be read into a catalog: its tables, views, columns
+  and the joins its engine declares. Refreshing again when nothing has changed
+  costs nothing and says so, and the previous catalog is kept rather than
+  replaced, so anything still reading it is undisturbed.
 - Register the databases an organization wants analysed: list, register, rename,
   rotate credentials, remove, and check that the address answers. Admin-only,
   except for listing, which any member may do.
