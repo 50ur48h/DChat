@@ -104,6 +104,10 @@ migrate.down: .env ## Roll back one revision
 migration: .env ## Autogenerate a revision: make migration m="add widgets"
 	$(UV_API) alembic revision --autogenerate -m "$(m)"
 
+.PHONY: secrets.key
+secrets.key: ## Print a fresh LOCAL_SECRETS_KEY line to paste into .env
+	@$(UV_API) python -c "from cryptography.fernet import Fernet; print('LOCAL_SECRETS_KEY=' + Fernet.generate_key().decode())"
+
 .PHONY: truths check.truths
 truths: ## Regenerate ops/seed/truths.json without touching the database
 	uv run ops/seed/seed_pizza.py --truths-only

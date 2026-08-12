@@ -112,6 +112,14 @@ async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
                     text("INSERT INTO audit_log (org_id, action) VALUES (:org, 'org.created')"),
                     {"org": org_id},
                 )
+                await connection.execute(
+                    text(
+                        "INSERT INTO data_sources "
+                        "(org_id, name, engine, host_display, secret_ref) VALUES "
+                        "(:org, :name, 'pg', 'db.example:5432/pizza', :ref)"
+                    ),
+                    {"org": org_id, "name": f"{name} source", "ref": f"ds/{org_id}/x/credentials"},
+                )
     finally:
         await engine.dispose()
     return SeededOrgs(a=org_a, b=org_b, user_id=user_id)
@@ -136,6 +144,11 @@ def _forged_insert(table: str, other_org: uuid.UUID, user_id: uuid.UUID) -> str:
             "now() + interval '7 days')"
         ),
         "audit_log": f"INSERT INTO audit_log (org_id, action) VALUES ('{other_org}', 'forged')",
+        "data_sources": (
+            "INSERT INTO data_sources (org_id, name, engine, host_display, secret_ref) VALUES "
+            f"('{other_org}', 'forged', 'pg', 'db.example:5432/pizza', "
+            f"'ds/{other_org}/forged/credentials')"
+        ),
     }
     return statements[table]
 
@@ -284,10 +297,14 @@ async def test_the_api_role_owns_no_tenant_table(app_database: URL) -> None:
 
 async def test_every_tenant_table_enables_and_forces_rls(app_database: URL) -> None:
     """FORCE is the half that people forget: without it the owner is exempt."""
+    # Built from TENANT_TABLES rather than written out: a hand-kept list here
+    # would go stale the first time a phase adds a table, and would do so
+    # silently — the loop below would simply not look at the new one.
+    named = ", ".join(f"'{table}'" for table in TENANT_TABLES)
     rows = await _rows(
         app_database,
         "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class "
-        "WHERE relname IN ('organizations', 'org_memberships', 'invitations', 'audit_log')",
+        f"WHERE relname IN ({named})",
     )
 
     state = {name: (enabled, forced) for name, enabled, forced in rows}

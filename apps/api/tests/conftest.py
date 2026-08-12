@@ -17,13 +17,16 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import URL, make_url, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from dataagent.config import Settings
+from dataagent.datasources import service as datasource_service
 from dataagent.main import create_app
+from dataagent.secrets.local import LocalSecretsProvider
 
 API_DIR = Path(__file__).resolve().parents[1]
 
@@ -44,6 +47,22 @@ def settings() -> Settings:
 @pytest.fixture
 def app(settings: Settings) -> FastAPI:
     return create_app(settings=settings)
+
+
+@pytest.fixture
+def secrets_provider(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> LocalSecretsProvider:
+    """A real local backend, isolated per test, wired into the data-source service.
+
+    The real implementation rather than a fake: this is the thing that actually
+    holds customer credentials, and a stand-in would be free to drift from it in
+    exactly the ways that matter. The key is generated per test and the file
+    lives under tmp_path, so nothing here can touch a developer's own store.
+    """
+    provider = LocalSecretsProvider(
+        key=Fernet.generate_key().decode(), path=tmp_path / "secrets" / "secrets.json"
+    )
+    monkeypatch.setattr(datasource_service, "get_secrets_provider", lambda: provider)
+    return provider
 
 
 @pytest.fixture

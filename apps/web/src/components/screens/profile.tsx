@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Row, Stack } from "@/components/ui/page";
 import { createApi, type Me } from "@/lib/api-client";
 import { useSession } from "@/lib/auth/session";
+import { emailIsUnknown, personLabel } from "@/lib/identity";
 
 import styles from "./profile.module.css";
 
@@ -73,7 +74,14 @@ export function Profile() {
         {me ? (
           <dl className={styles.identity}>
             <dt>Signed in as</dt>
-            <dd>{me.email}</dd>
+            <dd>
+              {personLabel(me, me.subject)}
+              {emailIsUnknown(me) && (
+                <span className={styles.note}>
+                  Your sign-in did not include an email address, so we do not have one.
+                </span>
+              )}
+            </dd>
             <dt>Subject</dt>
             <dd>
               <code>{me.subject}</code>

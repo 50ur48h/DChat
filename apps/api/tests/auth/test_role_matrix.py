@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,7 @@ from dataagent.auth.principal import Principal, TokenError
 from dataagent.config import Settings
 from dataagent.db import engine as engine_module
 from dataagent.main import create_app
+from dataagent.secrets.local import LocalSecretsProvider
 from dataagent.tenancy import session as session_module
 
 SNAPSHOT = Path(__file__).with_name("role_matrix.json")
@@ -50,6 +52,10 @@ NOT_ORG_SCOPED = {
 
 #: One representative request per org-scoped route. Bodies are valid, so a 4xx
 #: can only be an authorization decision and never a validation error.
+#:
+#: Order matters for the data-source probes: each probe runs as admin first, so a
+#: DELETE placed before them would leave the later ones probing a row that no
+#: longer exists, and a 404 would be recorded where the matrix means "allow".
 PROBES: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
     ("GET", "/v1/orgs/{org_id}/members", None),
     ("PATCH", "/v1/orgs/{org_id}/members/{user_id}", {"role": "reader"}),
@@ -59,6 +65,27 @@ PROBES: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
         "/v1/orgs/{org_id}/invitations",
         {"email": "invitee@example.com", "role": "reader"},
     ),
+    ("GET", "/v1/orgs/{org_id}/data-sources", None),
+    (
+        "POST",
+        "/v1/orgs/{org_id}/data-sources",
+        {
+            "name": "Probe",
+            "engine": "pg",
+            "host": "127.0.0.1",
+            "port": 5432,
+            "database": "probe",
+            "username": "probe_user",
+            "password": "probe-password",
+        },
+    ),
+    ("GET", "/v1/orgs/{org_id}/data-sources/{data_source_id}", None),
+    ("PATCH", "/v1/orgs/{org_id}/data-sources/{data_source_id}", {"name": "Probed"}),
+    # Port 1 on loopback: refused immediately on every platform, so the probe
+    # answers "not reachable" in microseconds. The matrix cares that the route
+    # answered at all, not what it found.
+    ("POST", "/v1/orgs/{org_id}/data-sources/{data_source_id}/test", None),
+    ("DELETE", "/v1/orgs/{org_id}/data-sources/{data_source_id}", None),
 )
 
 
@@ -72,10 +99,23 @@ class _SubjectAsToken(TokenValidator):
         return Principal(subject=token, email=f"{token}@example.com")
 
 
+@dataclass(frozen=True)
+class Matrix:
+    """One organization, a member of every role, and something to act upon."""
+
+    app: FastAPI
+    org_id: uuid.UUID
+    users: dict[str, uuid.UUID]
+    data_source_id: uuid.UUID
+
+
 @pytest.fixture
 async def matrix_app(
-    app_database: URL, migrated_database: URL, monkeypatch: pytest.MonkeyPatch
-) -> AsyncIterator[tuple[FastAPI, uuid.UUID, dict[str, uuid.UUID]]]:
+    app_database: URL,
+    migrated_database: URL,
+    secrets_provider: LocalSecretsProvider,
+    monkeypatch: pytest.MonkeyPatch,
+) -> AsyncIterator[Matrix]:
     """One organization holding a member of every role, plus a spare target."""
     owner = create_async_engine(migrated_database)
     app_engine = create_async_engine(app_database)
@@ -87,6 +127,7 @@ async def matrix_app(
     )
 
     org_id = uuid.uuid4()
+    data_source_id = uuid.uuid4()
     users: dict[str, uuid.UUID] = {}
     async with owner.begin() as connection:
         await connection.execute(
@@ -113,12 +154,27 @@ async def matrix_app(
                 text("INSERT INTO org_memberships (org_id, user_id, role) VALUES (:o, :u, :r)"),
                 {"o": org_id, "u": user_id, "r": role},
             )
+        # Port 1 is refused instantly, so the /test probe never waits on a socket.
+        await connection.execute(
+            text(
+                "INSERT INTO data_sources (id, org_id, name, engine, host_display, "
+                "settings, secret_ref) VALUES (:i, :o, 'Matrix source', 'pg', "
+                "'127.0.0.1:1/probe', :s, :r)"
+            ),
+            {
+                "i": data_source_id,
+                "o": org_id,
+                "s": '{"host": "127.0.0.1", "port": 1, "database": "probe", '
+                '"username_last4": "obe"}',
+                "r": f"ds/{org_id}/{data_source_id}/credentials",
+            },
+        )
 
     app = create_app(settings=Settings(auth_mode="dev", env="ci", build_env="dev"))
     app.state.token_validator = _SubjectAsToken()
 
     try:
-        yield app, org_id, users
+        yield Matrix(app=app, org_id=org_id, users=users, data_source_id=data_source_id)
     finally:
         await owner.dispose()
         await app_engine.dispose()
@@ -136,19 +192,19 @@ async def _probe(
     return response.status_code
 
 
-async def test_the_role_matrix_matches_its_snapshot(
-    matrix_app: tuple[FastAPI, uuid.UUID, dict[str, uuid.UUID]],
-) -> None:
+async def test_the_role_matrix_matches_its_snapshot(matrix_app: Matrix) -> None:
     """Observe who may do what, then compare with the committed record."""
-    app, org_id, users = matrix_app
-
     observed: dict[str, dict[str, str]] = {}
     for method, template, body in PROBES:
-        path = template.format(org_id=org_id, user_id=users["spare-admin"])
+        path = template.format(
+            org_id=matrix_app.org_id,
+            user_id=matrix_app.users["spare-admin"],
+            data_source_id=matrix_app.data_source_id,
+        )
         key = f"{method} {template}"
         observed[key] = {}
         for role in ROLES:
-            status = await _probe(app, method, path, role, body)
+            status = await _probe(matrix_app.app, method, path, role, body)
             observed[key][role] = "allow" if status < 400 else f"deny({status})"
 
     rendered = json.dumps(observed, indent=2, sort_keys=True) + "\n"
@@ -164,9 +220,7 @@ async def test_the_role_matrix_matches_its_snapshot(
     )
 
 
-async def test_the_snapshot_says_what_the_architecture_says(
-    matrix_app: tuple[FastAPI, uuid.UUID, dict[str, uuid.UUID]],
-) -> None:
+async def test_the_snapshot_says_what_the_architecture_says(matrix_app: Matrix) -> None:
     """A snapshot only proves stability. This proves it is the *right* matrix.
 
     Architecture Part 6.2: managing members and data sources is Admin-only;
@@ -174,15 +228,24 @@ async def test_the_snapshot_says_what_the_architecture_says(
     """
     recorded = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
 
-    assert recorded["GET /v1/orgs/{org_id}/members"] == {
-        "admin": "allow",
-        "contributor": "allow",
-        "reader": "allow",
-    }
+    for readable in (
+        "GET /v1/orgs/{org_id}/members",
+        "GET /v1/orgs/{org_id}/data-sources",
+        "GET /v1/orgs/{org_id}/data-sources/{data_source_id}",
+    ):
+        assert recorded[readable] == {
+            "admin": "allow",
+            "contributor": "allow",
+            "reader": "allow",
+        }
     for admin_only in (
         "PATCH /v1/orgs/{org_id}/members/{user_id}",
         "DELETE /v1/orgs/{org_id}/members/{user_id}",
         "POST /v1/orgs/{org_id}/invitations",
+        "POST /v1/orgs/{org_id}/data-sources",
+        "PATCH /v1/orgs/{org_id}/data-sources/{data_source_id}",
+        "DELETE /v1/orgs/{org_id}/data-sources/{data_source_id}",
+        "POST /v1/orgs/{org_id}/data-sources/{data_source_id}/test",
     ):
         assert recorded[admin_only]["admin"] == "allow"
         assert recorded[admin_only]["contributor"].startswith("deny")

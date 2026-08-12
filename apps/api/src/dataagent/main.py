@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from dataagent import health
 from dataagent.config import Settings, get_settings
+from dataagent.datasources import routes as datasource_routes
 from dataagent.invitations import routes as invitation_routes
 from dataagent.orgs import routes as orgs_routes
 
@@ -27,6 +28,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Before anything is mounted: a process that boots and then fails open is
     # indistinguishable from one that works until somebody looks.
     resolved.assert_auth_is_production_safe()
+    resolved.assert_secrets_backend_is_production_safe()
 
     app = FastAPI(
         title="data-agent API",
@@ -59,6 +61,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(orgs_routes.router)
     app.include_router(invitation_routes.router)
+    app.include_router(datasource_routes.router)
 
     if resolved.auth_mode == "dev":
         # Imported here, not at module scope: the prod image does not contain

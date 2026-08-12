@@ -40,14 +40,21 @@ the phases deliver them.
 ## Quickstart
 
 ```bash
-make up        # .env from .env.example, then platform Postgres + demo DB + api + web
-make db.setup  # migrate, and give the API's unprivileged role its login
-make seed      # build the pizza demo dataset (~72k orders, about 5 seconds)
+make up          # .env from .env.example, then platform Postgres + demo DB + api + web
+make db.setup    # migrate, and give the API's unprivileged role its login
+make seed        # build the pizza demo dataset (~72k orders, about 5 seconds)
+make secrets.key # print a LOCAL_SECRETS_KEY line for .env, then restart the api
 ```
 
 Then open <http://localhost:3000>: the page reports the API's health, version and
 build commit. `make down` stops everything and keeps the data; `make down.hard`
 throws the volumes away. `make logs` follows all services, `make ps` shows status.
+
+`LOCAL_SECRETS_KEY` is only needed once you register a data source: the API
+encrypts customer database credentials with it and keeps the ciphertext in
+`ops/.secrets/` — never in the platform database, and never in a response. The
+key is generated, never chosen, and production refuses this backend outright in
+favour of Key Vault ([DECISIONS](docs/plan/DECISIONS.md) D-001).
 
 | Service | Where | What it is |
 |---|---|---|

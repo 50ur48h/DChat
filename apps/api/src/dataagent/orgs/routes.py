@@ -29,14 +29,16 @@ class MembershipOut(BaseModel):
 class MeOut(BaseModel):
     subject: str
     user_id: uuid.UUID
-    email: str
+    #: Null when the identity provider sent no email claim (B-009). The subject
+    #: is the identity; this is a convenience that may legitimately be missing.
+    email: str | None
     name: str | None
     memberships: list[MembershipOut]
 
 
 class MemberOut(BaseModel):
     user_id: uuid.UUID
-    email: str
+    email: str | None
     name: str | None
     role: str
 

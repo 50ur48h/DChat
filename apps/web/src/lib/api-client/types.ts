@@ -20,14 +20,15 @@ export interface Membership {
 export interface Me {
   subject: string;
   user_id: string;
-  email: string;
+  /** Null when the identity provider sent no email claim (backlog B-009). */
+  email: string | null;
   name: string | null;
   memberships: Membership[];
 }
 
 export interface Member {
   user_id: string;
-  email: string;
+  email: string | null;
   name: string | null;
   role: string;
 }
@@ -42,6 +43,11 @@ export interface Invitation {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+/** A field the API may legitimately send as null — an absent identity claim. */
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === "string";
 }
 
 export function isHealth(value: unknown): value is Health {
@@ -67,7 +73,7 @@ export function isMe(value: unknown): value is Me {
     isRecord(value) &&
     typeof value.subject === "string" &&
     typeof value.user_id === "string" &&
-    typeof value.email === "string" &&
+    isNullableString(value.email) &&
     Array.isArray(value.memberships) &&
     value.memberships.every(isMembership)
   );
@@ -77,7 +83,7 @@ export function isMember(value: unknown): value is Member {
   return (
     isRecord(value) &&
     typeof value.user_id === "string" &&
-    typeof value.email === "string" &&
+    isNullableString(value.email) &&
     typeof value.role === "string"
   );
 }

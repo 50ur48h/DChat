@@ -90,4 +90,16 @@ describe("createApi", () => {
 
     await expect(createApi(async () => "t").members("o1")).rejects.toThrow("did not match");
   });
+
+  it("accepts a person whose identity provider sent no email (B-009)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ ...ME, email: null })));
+
+    await expect(createApi(async () => "t").me()).resolves.toMatchObject({ email: null });
+  });
+
+  it("still rejects an email that is neither a string nor null", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ ...ME, email: 42 })));
+
+    await expect(createApi(async () => "t").me()).rejects.toBeInstanceOf(ApiError);
+  });
 });
