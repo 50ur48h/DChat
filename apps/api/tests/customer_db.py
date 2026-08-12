@@ -60,6 +60,25 @@ COMMENT ON TABLE products IS 'Deliberately unrelated to shops.';
 
 INSERT INTO products (id, name, price) VALUES (1, 'Margherita', 12.50), (2, 'Cola', 3.00);
 
+-- Real-shaped personal data, which the pizza fixture also has in
+-- customers.email. The profiler must find it, mask it on the way into the
+-- catalog, and default its policy to `mask` before anyone has looked.
+-- `contact` is named to be unhelpful on purpose: it must be caught by the shape
+-- of its values, not by its name.
+CREATE TABLE people (
+    id      integer PRIMARY KEY,
+    email   text NOT NULL,
+    contact text,
+    city    text NOT NULL
+);
+COMMENT ON COLUMN people.email IS 'Contact email address (personal data).';
+
+INSERT INTO people (id, email, contact, city) VALUES
+    (1, 'ada@example.com',    'ada.lovelace@example.org',  'Wellington'),
+    (2, 'grace@example.com',  'grace.hopper@example.org',  'Auckland'),
+    (3, 'linus@example.com',  'linus.torvalds@example.org','Wellington'),
+    (4, 'edsger@example.com', NULL,                        'Christchurch');
+
 INSERT INTO regions (id, name) VALUES (1, 'North'), (2, 'South');
 INSERT INTO shops (id, region_id, name, opened_on) VALUES
     (1, 1, 'Harbour', '2020-01-01'),

@@ -175,6 +175,7 @@ async def test_a_first_refresh_describes_the_whole_database(
         ("public", "shops"),
         ("public", "busy_shops"),
         ("public", "products"),
+        ("public", "people"),
     }
     assert names[("public", "busy_shops")].kind == "view"
     assert names[("public", "regions")].kind == "table"

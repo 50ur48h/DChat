@@ -1,7 +1,7 @@
 # STATUS — data-agent build
 
-Current position: Phase 3 signed off. Phase 4 in progress: WP4.1 done.
-                  Next: WP4.2
+Current position: Phase 3 signed off. Phase 4 in progress: WP4.1–4.2 done.
+                  Next: WP4.3 (the Phase 4 gate)
 Merge policy: ASK
 Blocked on user: nothing
 Last updated: 2026-08-12 by Claude Code
@@ -85,7 +85,15 @@ Last updated: 2026-08-12 by Claude Code
       counting rows. Verified against both live seeded databases: 6 tables /
       33 columns / 4 joins from PostgreSQL in 0.14s, 7 / 36 / 4 from SQL Server
       in 0.22s, and **no `orders → menu_items` edge on either**
-- [ ] WP4.2 Profiler (budgets/timeouts) + sensitivity classifier + auto-mask
+- [x] WP4.2 Profiler (budgets/timeouts) + sensitivity classifier + auto-mask
+      — revision 0008; **DECISIONS D-013** splits a *profile* (belongs to a
+      snapshot) from a *policy* (belongs to a column by name, and survives every
+      refresh). Samples are masked on the way in, proved by a test that dumps
+      the whole platform database as text and greps it for the planted
+      addresses. Live: `customers.email`, `customers.phone`,
+      `customers.full_name` and `staff.full_name` auto-masked on both engines in
+      ~0.2s — and profiling the real database is what caught a classifier bug
+      that read every ISO date as a phone number
 - [ ] WP4.3 Table cards + search + catalog APIs/UI + column policy  ← gate PR
 - [ ] GATE: pizza DB discovered ≤2 min; email auto-masked; user sign-off
 
@@ -127,6 +135,8 @@ Last updated: 2026-08-12 by Claude Code
 ## Phase 11 — Charts + polish (M11)
 - [ ] WP11.1 Chart tool (validated Vega-Lite) + client renderer
 - [ ] WP11.2 History/catalog/members polish + Playwright smoke      ← gate PR
+      — carries **B-017**: recovery when an org has no Admin who can sign in
+      (owner's call 2026-08-12, moved forward from Phase 12)
 - [ ] GATE: trend question → rendered chart; smoke green; sign-off
 
 ## Phase 12 — Azure deploy + hardening (M12)  ⚠ human review on every PR
@@ -140,37 +150,40 @@ Last updated: 2026-08-12 by Claude Code
 
 ## Next step
 
-Phase 4 / **WP4.2 — Profiler + sensitivity** (`p4.2-profiler-sensitivity`). Read
-plan §6 Phase 4 and architecture Part 5.2. It brings:
+Phase 4 / **WP4.3 — Table cards, search and catalog UI** (`p4.3-cards-search`),
+the **gate PR**. Read plan §6 Phase 4 WP4.3, architecture Part 5.3, and
+docs/design.md. It brings:
 
-- `catalog/profiler.py`: per-column statistics on a *sample* — null fraction,
-  distinct estimate, min/max, top-k only when distinct ≤ 50 — under a budget
-  that is real: row-sampling caps, a per-query statement timeout, and a
-  per-source wall clock (default 5 minutes). Partial results are a normal
-  outcome and are recorded as partial. Profiling must never hurt a production
-  database, which is the whole reason the budget exists before the feature does.
-- `catalog/classify.py`: name patterns plus value-shape regexes on the sample →
-  `column_policies`, with **mask as the automatic default** for anything
-  detected. Samples stored in the catalog are masked *at write time*, so a raw
-  email never reaches the platform database at all (arch M4 security).
-- `PATCH /v1/catalog/columns/{id}/policy` (Admin, audited).
+- `catalog/cards.py`: a compact natural-language summary per table — the exact
+  text the agent will later consume — stored with a tsvector, and embeddings
+  when a key is configured (pgvector) or a queued flag when not.
+- `catalog/search.py` and `GET /v1/catalog/search?q=`: lexical
+  (`websearch_to_tsquery`) with an optional vector rerank.
+- Web: the catalog browser — tables, columns, sensitivity badges, and the policy
+  editor for an Admin — plus refresh and profile from the data sources screen.
+- **Accept/GATE (arch M4):** fresh `make seed` → register → refresh completes
+  ≤2 min; `customers.email` shows a `mask` policy automatically; searching
+  "revenue" returns the `orders` card first; user sign-off.
 
-What WP4.1 leaves for it, deliberately:
+What WP4.1 and WP4.2 leave for it:
 
-- The columns it fills are **not** in revision 0007. `null_frac`,
-  `distinct_est`, `min_val`, `max_val`, `top_values`, `semantic_role`,
-  `sensitivity`, `policy` and `mask_type` arrive in the revision that has code
-  to write them, which is this one.
-- `structural_hash` already answers "has this table changed", so re-profiling
-  can be skipped for a table whose hash matched. That is the payoff D-012 was
-  designed for, and WP4.2 is the first work package big enough to feel it.
-- Profiling reads *data*, not just the catalog, so unlike discovery it must go
-  through `ExecLimits` on every query and respect the read-only session. The
-  connector already imposes both; the budget on top of them is new.
+- A card is built from rows that already exist: table and column names, types,
+  keys, the FK graph, and the profile. Nothing in WP4.3 needs to talk to a
+  customer's database.
+- **Masked values are the only ones there are.** A card renders `top_values` and
+  min/max straight from `catalog_columns`, which is safe because those were
+  masked on the way in (D-013) — the card builder must not go looking for
+  unmasked originals to make a nicer summary.
+- The policy editor's route already exists and is audited:
+  `PATCH …/columns/{id}/policy`. The screen needs the column id, which the
+  catalog response now carries.
+- `sensitivity` and `policy` are different things and the UI must show both:
+  "the classifier suspects this" and "somebody decided this" are not the same
+  claim, and `policy_decided` distinguishes them.
 
-**USER INPUT (optional, not blocking):** an embeddings key for WP4.3's card
-search — `EMBEDDINGS_PROVIDER/ENDPOINT/KEY/MODEL`. Without it, search runs
-lexical-only and embedding backfill is left as a flagged idempotent job.
+**USER INPUT (optional, not blocking):** an embeddings key —
+`EMBEDDINGS_PROVIDER/ENDPOINT/KEY/MODEL`. Without it, card search runs
+lexical-only and embedding backfill is a flagged idempotent job for later.
 
 ## Notes
 
@@ -232,6 +245,14 @@ lexical-only and embedding backfill is left as a flagged idempotent job.
 - **UI follows docs/design.md.** Tokens live in `apps/web/src/app/globals.css`;
   primitives in `src/components/ui/`. A raw hex value anywhere else is a bug,
   and adding a component library needs a DECISIONS entry first.
+
+- **Masking happens on the way in, and a policy outlives the catalog** (D-013).
+  A sample that reaches `catalog_columns` is already masked, so there is no
+  unmasked original anywhere in the platform database to leak later. What an
+  Admin decided lives in `column_policies`, keyed by column *name*, and
+  discovery never touches it — a refresh that reset somebody's masking decision
+  would be a leak caused by a routine operation, with nothing failing to draw
+  attention to it.
 
 - **A catalog is a snapshot, and a snapshot is only made when something
   changed** (D-012). One active snapshot per data source, enforced by a partial

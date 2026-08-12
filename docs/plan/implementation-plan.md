@@ -242,6 +242,8 @@ Last updated: <date> by Claude Code
 ## Phase 11 — Charts + polish (M11)
 - [ ] WP11.1 Chart tool (validated Vega-Lite) + client renderer
 - [ ] WP11.2 History/catalog/members polish + Playwright smoke      ← gate PR
+      — carries **B-017**: recovery when an org has no Admin who can sign in
+      (owner's call 2026-08-12, moved forward from Phase 12)
 - [ ] GATE: trend question → rendered chart; smoke green; sign-off
 
 ## Phase 12 — Azure deploy + hardening (M12)  ⚠ human review on every PR
@@ -804,6 +806,7 @@ Format per WP: **Branch → Build → Tests → Accept** (accept = commands/chec
 
 ### WP11.2 — Polish + smoke — `p11.2-polish-smoke` *(gate PR)*
 - Conversation history list + rename/delete; catalog and members pages rounded out; empty/loading/error states; mobile-usable layout pass.
+- **B-017 — recovery when an organization has no Admin who can sign in.** Scheduled here by the owner on 2026-08-12, moved forward from Phase 12: it is a product gap rather than a demo inconvenience, and this is already the members work package. Decide between a break-glass platform-operator role (audited, and itself a privileged surface to defend) and an ownership-transfer an Admin arms in advance; the second needs no new privilege and is the better default. Whatever ships, `ops/scripts/set_role.sh` stops being the answer and says so in its own header.
 - Playwright: compose-based smoke — dev-issuer login → register seed source (idempotent) → ask July-orders → answer card visible → open trace. Wired into CI as `web-e2e` job (path-filtered, allowed ~5 min).
 - **Accept/GATE (arch M11):** "show me the revenue trend by month" → chart renders; Playwright green in CI; a non-developer can run the demo from README quickstart alone; sign-off.
 

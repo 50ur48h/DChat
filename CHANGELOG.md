@@ -26,6 +26,11 @@ under "Unreleased", only for changes a user would notice.
   cannot bypass it. The audit log is append-only by grant.
 
 ### Added
+- Columns are profiled from a bounded sample — how often they are empty, how
+  many distinct values, their range, and their commonest values — and anything
+  that looks like personal data is masked before it is stored and defaults to
+  masked for everyone. An Admin can override that per column, with a reason,
+  and the decision survives every later refresh.
 - A registered database can be read into a catalog: its tables, views, columns
   and the joins its engine declares. Refreshing again when nothing has changed
   costs nothing and says so, and the previous catalog is kept rather than

@@ -92,6 +92,14 @@ PROBES: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
     # the route answered, and the decision was about the role.
     ("GET", "/v1/orgs/{org_id}/data-sources/{data_source_id}/catalog", None),
     ("POST", "/v1/orgs/{org_id}/data-sources/{data_source_id}/refresh", None),
+    # Profiling reads a customer's rows, so it sits with refresh: Contributor or
+    # Admin. Deciding what may be seen is Admin alone.
+    ("POST", "/v1/orgs/{org_id}/data-sources/{data_source_id}/profile", None),
+    (
+        "PATCH",
+        "/v1/orgs/{org_id}/data-sources/{data_source_id}/columns/{column_id}/policy",
+        {"policy": "mask", "reason": "probe"},
+    ),
     ("DELETE", "/v1/orgs/{org_id}/data-sources/{data_source_id}", None),
 )
 
@@ -114,6 +122,7 @@ class Matrix:
     org_id: uuid.UUID
     users: dict[str, uuid.UUID]
     data_source_id: uuid.UUID
+    column_id: uuid.UUID
 
 
 @pytest.fixture
@@ -135,6 +144,7 @@ async def matrix_app(
 
     org_id = uuid.uuid4()
     data_source_id = uuid.uuid4()
+    column_id = uuid.uuid4()
     users: dict[str, uuid.UUID] = {}
     async with owner.begin() as connection:
         await connection.execute(
@@ -176,23 +186,46 @@ async def matrix_app(
                 "r": f"ds/{org_id}/{data_source_id}/credentials",
             },
         )
-        # An empty catalog, written directly rather than discovered: without one
-        # the browse probe answers 404 for every role, and the matrix would
-        # record "deny(404)" three times — which reads like nobody may see a
-        # catalog, when what it means is that there was not one to see.
+        # A catalog with one column in it, written directly rather than
+        # discovered: without one the browse probe answers 404 for every role and
+        # the matrix would record "deny(404)" three times — which reads like
+        # nobody may see a catalog, when what it means is that there was not one
+        # to see. The column is what the policy probe patches.
+        snapshot_id = uuid.uuid4()
+        table_id = uuid.uuid4()
         await connection.execute(
             text(
-                "INSERT INTO catalog_snapshots (org_id, data_source_id, version, status) "
-                "VALUES (:o, :d, 1, 'active')"
+                "INSERT INTO catalog_snapshots (id, org_id, data_source_id, version, status) "
+                "VALUES (:i, :o, :d, 1, 'active')"
             ),
-            {"o": org_id, "d": data_source_id},
+            {"i": snapshot_id, "o": org_id, "d": data_source_id},
+        )
+        await connection.execute(
+            text(
+                "INSERT INTO catalog_tables (id, org_id, snapshot_id, schema_name, table_name, "
+                "kind, structural_hash) VALUES (:i, :o, :s, 'public', 'probe', 'table', :h)"
+            ),
+            {"i": table_id, "o": org_id, "s": snapshot_id, "h": uuid.uuid4().hex},
+        )
+        await connection.execute(
+            text(
+                "INSERT INTO catalog_columns (id, org_id, table_id, name, ordinal, data_type, "
+                "nullable) VALUES (:i, :o, :t, 'probe_column', 1, 'text', true)"
+            ),
+            {"i": column_id, "o": org_id, "t": table_id},
         )
 
     app = create_app(settings=Settings(auth_mode="dev", env="ci", build_env="dev"))
     app.state.token_validator = _SubjectAsToken()
 
     try:
-        yield Matrix(app=app, org_id=org_id, users=users, data_source_id=data_source_id)
+        yield Matrix(
+            app=app,
+            org_id=org_id,
+            users=users,
+            data_source_id=data_source_id,
+            column_id=column_id,
+        )
     finally:
         await owner.dispose()
         await app_engine.dispose()
@@ -218,6 +251,7 @@ async def test_the_role_matrix_matches_its_snapshot(matrix_app: Matrix) -> None:
             org_id=matrix_app.org_id,
             user_id=matrix_app.users["spare-admin"],
             data_source_id=matrix_app.data_source_id,
+            column_id=matrix_app.column_id,
         )
         key = f"{method} {template}"
         observed[key] = {}

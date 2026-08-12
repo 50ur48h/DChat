@@ -107,7 +107,7 @@ async def test_refresh_then_browse(api: Api, isolated_customer_database: Custome
 
     assert status == 200
     assert refreshed["changed"] is True
-    assert refreshed["tables"] == 4
+    assert refreshed["tables"] == 5
     assert refreshed["snapshot"]["version"] == 1
     assert refreshed["snapshot"]["status"] == "active"
 
@@ -117,7 +117,7 @@ async def test_refresh_then_browse(api: Api, isolated_customer_database: Custome
 
     assert status == 200
     tables = {table["table_name"]: table for table in catalog["tables"]}
-    assert set(tables) == {"regions", "shops", "busy_shops", "products"}
+    assert set(tables) == {"regions", "shops", "busy_shops", "products", "people"}
     assert [column["name"] for column in tables["shops"]["columns"]] == [
         "id",
         "region_id",

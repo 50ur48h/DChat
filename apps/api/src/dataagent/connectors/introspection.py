@@ -1,8 +1,16 @@
 """The only SQL this product runs before the DAL exists.
 
-Every statement here is a constant. The only values that vary are bound
-parameters — schema names, passed to the driver as parameters and never
-interpolated — so there is no path from a request to the text of a query.
+Almost every statement here is a constant, and the values that vary are bound
+parameters — schema names, passed to the driver and never interpolated — so
+there is no path from a request to the text of a query.
+
+The exception is the sampling pair at the bottom of the file (WP4.2), which
+interpolates *identifiers*, because no dialect can bind one: `SELECT * FROM $1`
+is not a thing. Those two functions carry their own rules, written out where
+they are defined. They are the only place in this module where a statement is
+assembled, and keeping them here rather than in the profiler is deliberate: the
+quoting is then subject to the same review as everything else that may declare
+SQL runnable.
 
 That is why this module holds a ``PolicyGrant``: it is a validator in the sense
 that matters, by construction rather than by inspection. The DAL's real
@@ -23,9 +31,9 @@ keeps "every statement this product runs before Phase 5" a single thing to read.
 The two halves differ in one visible way. Postgres filters by schema in SQL with
 a bound array; T-SQL has no array parameter, and building an ``IN`` list would
 mean interpolating names into a statement, which nothing here will do. So the
-T-SQL templates take no parameters at all and the SQL Server connector filters
-in Python. Slightly more data crosses the wire, and no statement in this file
-has a value in it.
+T-SQL metadata templates take no parameters at all and the SQL Server connector
+filters in Python. Slightly more data crosses the wire, and no *name* is ever
+put into a metadata statement.
 """
 
 from __future__ import annotations
@@ -39,13 +47,19 @@ __all__ = [
     "pg_columns",
     "pg_foreign_keys",
     "pg_readonly_evidence",
+    "pg_row_estimates",
+    "pg_sample",
     "pg_schemas",
     "pg_tables",
     "pg_tls_status",
     "pg_write_probe_sql",
+    "quote_pg",
+    "quote_tsql",
     "tsql_columns",
     "tsql_foreign_keys",
     "tsql_readonly_evidence",
+    "tsql_row_estimates",
+    "tsql_sample",
     "tsql_schemas",
     "tsql_tables",
     "tsql_tls_status",
@@ -344,8 +358,8 @@ def _query(sql: str, parameters: Sequence[object] = ()) -> ValidatedQuery:
     return ValidatedQuery(_GRANT, sql=sql.strip(), dialect=POSTGRES, parameters=parameters)
 
 
-def _tsql(sql: str) -> ValidatedQuery:
-    return ValidatedQuery(_GRANT, sql=sql.strip(), dialect=TSQL)
+def _tsql(sql: str, parameters: Sequence[object] = ()) -> ValidatedQuery:
+    return ValidatedQuery(_GRANT, sql=sql.strip(), dialect=TSQL, parameters=parameters)
 
 
 def pg_schemas() -> ValidatedQuery:
@@ -416,3 +430,104 @@ def tsql_tls_status() -> ValidatedQuery:
 def tsql_write_probe_sql() -> str:
     """The T-SQL half of the experiment above, run and rolled back the same way."""
     return _TSQL_WRITE_PROBE
+
+
+# ---------------------------------------------------------------------------
+# Sampling, for the profiler (WP4.2)
+#
+# The one place in this module where a statement is not a constant, and the
+# reason is unavoidable: an identifier cannot be a bound parameter in any SQL
+# dialect. `SELECT * FROM $1` is not a thing.
+#
+# So the rules are tighter here than anywhere else, and they are three:
+#
+#   1. The identifiers come from the *engine's own catalog*, read by the
+#      templates above. They are not user input and never have been — the only
+#      thing a person chooses is which data source to profile.
+#   2. Every one is quoted by the function below, which doubles the closing
+#      quote character. That is the complete escaping rule for a quoted
+#      identifier in both dialects, and `test_a_hostile_identifier_is_quoted`
+#      holds it to that with names built to break out.
+#   3. Row limits stay bound parameters, because they can be.
+#
+# The alternative — reading pg_stats and DBCC SHOW_STATISTICS instead of
+# sampling — needs no identifiers at all, and was rejected: those are whatever
+# ANALYZE last left behind, they need privileges a read-only login does not
+# have on SQL Server, and architecture Part 5.2 asks for a sample.
+# ---------------------------------------------------------------------------
+
+
+def quote_pg(identifier: str) -> str:
+    """A PostgreSQL quoted identifier. Doubling `"` is the whole rule."""
+    escaped = identifier.replace('"', '""')
+    return f'"{escaped}"'
+
+
+def quote_tsql(identifier: str) -> str:
+    """A T-SQL delimited identifier. Brackets, and `]` doubled."""
+    escaped = identifier.replace("]", "]]")
+    return f"[{escaped}]"
+
+
+def pg_sample(schema: str, table: str, columns: Sequence[str], limit: int) -> ValidatedQuery:
+    """Up to ``limit`` rows of the named columns.
+
+    No ORDER BY: ordering a sample means sorting the table, which is the one
+    thing a bounded profile must not do to somebody's production database. The
+    consequence — that this is the *first* n rows rather than a random n — is
+    recorded honestly by the profiler rather than dressed up.
+    """
+    projection = ", ".join(quote_pg(column) for column in columns)
+    relation = f"{quote_pg(schema)}.{quote_pg(table)}"
+    return ValidatedQuery(
+        _GRANT,
+        sql=f"SELECT {projection} FROM {relation} LIMIT $1",  # noqa: S608 - quoted above
+        dialect=POSTGRES,
+        parameters=[limit],
+    )
+
+
+def tsql_sample(schema: str, table: str, columns: Sequence[str], limit: int) -> ValidatedQuery:
+    """The same sample, in the dialect that spells LIMIT as TOP."""
+    projection = ", ".join(quote_tsql(column) for column in columns)
+    relation = f"{quote_tsql(schema)}.{quote_tsql(table)}"
+    return ValidatedQuery(
+        _GRANT,
+        sql=f"SELECT TOP (?) {projection} FROM {relation}",  # noqa: S608 - quoted above
+        dialect=TSQL,
+        parameters=[limit],
+    )
+
+
+#: Row counts as the engine already estimates them — no scan, and no identifier
+#: interpolation, because these ask about every table at once and the profiler
+#: looks up the one it wants.
+_PG_ROW_ESTIMATES = """
+SELECT n.nspname AS schema_name,
+       c.relname AS table_name,
+       GREATEST(c.reltuples, 0)::bigint AS row_estimate
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relkind IN ('r', 'p', 'm')
+  AND n.nspname = ANY($1::text[])
+"""
+
+#: sys.partitions is visible to a login that may read the table, unlike
+#: dm_db_partition_stats, which needs VIEW DATABASE STATE.
+_TSQL_ROW_ESTIMATES = """
+SELECT SCHEMA_NAME(o.schema_id) AS schema_name,
+       o.name AS table_name,
+       SUM(p.rows) AS row_estimate
+FROM sys.objects o
+JOIN sys.partitions p ON p.object_id = o.object_id AND p.index_id IN (0, 1)
+WHERE o.type = 'U'
+GROUP BY SCHEMA_NAME(o.schema_id), o.name
+"""
+
+
+def pg_row_estimates(in_schemas: Sequence[str]) -> ValidatedQuery:
+    return _query(_PG_ROW_ESTIMATES, [list(in_schemas)])
+
+
+def tsql_row_estimates() -> ValidatedQuery:
+    return _tsql(_TSQL_ROW_ESTIMATES)
