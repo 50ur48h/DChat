@@ -12,9 +12,10 @@ runs it and ``masking`` bounds what comes back. Persisting the record of a run â
 from __future__ import annotations
 
 from dataagent.dal.errors import PolicyViolation, ViolationCode
-from dataagent.dal.executor import Execution, run
+from dataagent.dal.executor import Execution
 from dataagent.dal.masking import MaskedFrame
 from dataagent.dal.policy import SourcePolicy, source_policy
+from dataagent.dal.service import run
 from dataagent.dal.validator import ColumnRef, Projection, TableRef, Validated, validate
 
 __all__ = [

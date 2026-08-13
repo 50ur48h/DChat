@@ -27,7 +27,7 @@ from sqlalchemy import (
     Text,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from dataagent.db.base import ROLES, Base, CreatedAt, OrgId, UuidPk
@@ -42,6 +42,7 @@ __all__ = [
     "COLUMN_POLICIES",
     "DATA_SOURCE_ENGINES",
     "DATA_SOURCE_STATUSES",
+    "EXECUTION_STATUSES",
     "PROFILE_STATUSES",
     "RELATIONSHIP_KINDS",
     "SEMANTIC_ROLES",
@@ -60,6 +61,8 @@ __all__ = [
     "Invitation",
     "OrgMembership",
     "Organization",
+    "QueryExecution",
+    "ResultArtifact",
     "SecurityEvent",
     "User",
 ]
@@ -524,6 +527,109 @@ class AuditLog(Base):
     ts: Mapped[CreatedAt]
 
 
+#: What one execution ended as. ``refused`` is not an error: it is this service
+#: declining to send a statement, and it is the status the security questions
+#: are asked about.
+EXECUTION_STATUSES: tuple[str, ...] = ("ok", "error", "refused")
+
+
+class QueryExecution(Base):
+    """Every attempt to read a customer's database (architecture Part 8.2, 10.1).
+
+    Written for successes, for failures, and for statements this service refused
+    to send — the last of which is the row that answers "was anything trying to
+    get at what it should not", and the one it would be easiest to omit.
+
+    What is *not* here matters as much: no credential, no unmasked value, and no
+    result payload. ``sql_text`` is the canonical statement for anything that
+    ran and the submitted one for anything refused, and both are safe to store —
+    the first is this application's own generated text, and the second is what a
+    refusal message may already quote back (architecture Part 7.4).
+    """
+
+    __tablename__ = "query_executions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ({})".format(", ".join(f"'{s}'" for s in EXECUTION_STATUSES)),
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "(status = 'refused') = (violation_code IS NOT NULL)",
+            name="violation_code_matches_status",
+        ),
+        Index("ix_query_executions_org_id_created_at", "org_id", text("created_at DESC")),
+        Index("ix_query_executions_org_id_sql_hash", "org_id", "sql_hash"),
+    )
+
+    id: Mapped[UuidPk]
+    org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    #: SET NULL on delete: the record of what was read outlives the registration
+    #: of the thing it was read from.
+    data_source_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("data_sources.id", ondelete="SET NULL")
+    )
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    #: Phase 7 gives runs a table and this a foreign key.
+    run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    sql_text: Mapped[str] = mapped_column(Text, nullable=False)
+    sql_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    #: Fully qualified names, from the AST rather than from the text.
+    tables: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    columns: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    #: Set exactly when status is ``refused``, and enforced by a constraint: a
+    #: refusal that does not say what it refused is not a record of anything.
+    violation_code: Mapped[str | None] = mapped_column(String(40))
+    row_count: Mapped[int | None]
+    duration_ms: Mapped[int | None]
+    #: Sanitized before it arrives here, by the connector or by the validator.
+    error: Mapped[str | None] = mapped_column(Text)
+    sensitive_accessed: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    created_at: Mapped[CreatedAt]
+
+
+class ResultArtifact(Base):
+    """What a query returned, kept for as long as the customer allows.
+
+    The rows here have been through ``dal/masking.py``. There is no unmasked
+    copy of them anywhere in this database, which is the same rule catalog
+    samples follow (DECISIONS D-013) and for the same reason: a store that never
+    held the value cannot leak it later.
+    """
+
+    __tablename__ = "result_artifacts"
+    __table_args__ = (
+        Index("ix_result_artifacts_execution", "query_execution_id"),
+        Index("ix_result_artifacts_expires_at", "expires_at"),
+    )
+
+    id: Mapped[UuidPk]
+    org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    query_execution_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("query_executions.id", ondelete="CASCADE"), nullable=False
+    )
+    #: Shape, not content: column names, row count, which columns were masked.
+    summary: Mapped[dict[str, object]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    sample_rows: Mapped[list[list[object]]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    truncated: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    #: Where the full result lives in the configured store. None when the sample
+    #: is the whole result.
+    storage_ref: Mapped[str | None] = mapped_column(String(500))
+    #: Retention is a promise, so it is a column rather than a habit.
+    expires_at: Mapped[datetime] = mapped_column(nullable=False)
+    created_at: Mapped[CreatedAt]
+
+
 #: Every tenant-scoped table mapped to the column that identifies its tenant.
 #: ``organizations`` is the exception worth spelling out: it *is* the tenant, so
 #: its key is ``id``, not ``org_id`` — a policy written against ``org_id`` there
@@ -543,4 +649,6 @@ TENANT_TABLES: dict[str, str] = {
     "catalog_tables": "org_id",
     "catalog_columns": "org_id",
     "catalog_relationships": "org_id",
+    "query_executions": "org_id",
+    "result_artifacts": "org_id",
 }

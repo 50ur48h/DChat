@@ -31,7 +31,7 @@ from dataagent.dal.policy import source_policy
 from dataagent.dal.validator import Validated, validate
 from dataagent.datasources import service as datasources
 
-__all__ = ["Execution", "run"]
+__all__ = ["Execution", "execute"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,7 +76,7 @@ class Execution:
         return self.validated.touches_sensitive
 
 
-async def run(
+async def execute(
     *,
     org_id: uuid.UUID,
     data_source_id: uuid.UUID,
@@ -84,7 +84,12 @@ async def run(
     max_rows: int | None = None,
     connector: Connector | None = None,
 ) -> Execution:
-    """Validate, execute, mask. The one path from a statement to rows.
+    """Validate, execute, mask. The bounded read, with nothing written down.
+
+    ``dal.service.run`` is the entry point callers use; this is the layer under
+    it, and the difference is the record. Nothing above the DAL should reach
+    past ``run`` to get here — that would be a query with no audit row, which is
+    the one thing architecture 8.2 does not allow.
 
     Raises ``PolicyViolation`` when the statement is refused — before anything
     is connected to, so a rejected query costs a customer's database nothing —
