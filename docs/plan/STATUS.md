@@ -3,8 +3,176 @@
 Current position: **Phases 0–4 complete and signed off.** Next: Phase 5 / WP5.1
 Next step:        `p5.1-dal-validator` — the SQL policy engine. Read plan §6
                   Phase 5 and architecture Part 7.1 and 7.5 **before writing any
-                  code**; this is the security boundary, it gets human review on
-                  every PR, and the full brief is under "## Next step
+                  code**: this is the security boundary, it gets human review on
+                  every PR, and the full brief is at the end of this file.
+                  Take **B-016** first — it is a short fix, and WP5.3's coverage
+                  gate is what makes it urgent.
+Merge policy: ASK
+Blocked on user: nothing
+Last updated: 2026-08-13 by Claude Code
+
+## Phase 0 — Bootstrap & walking skeleton (M0)
+- [x] WP0.1 Repo, docs, tracking files, branch protection
+- [x] WP0.2 API skeleton (FastAPI, /healthz, tooling, Dockerfile)
+- [x] WP0.3 Web skeleton (Next.js, health page, tooling, Dockerfile)
+- [x] WP0.4 Compose stack + Makefile + pizza seed v0
+- [x] WP0.5 CI v1 (lint/type/test/build, gitleaks, TODO check)   ← gate PR
+- [x] GATE: compose up → page calls API; CI green on main; user sign-off
+      — signed off 2026-08-11: page showed Healthy, CI green on main
+
+## Phase 1 — Platform DB + tenancy (M1)
+- [x] WP1.1 SQLAlchemy models + alembic + core tables
+      — also added CI's Postgres service + `DATABASE_URL` + `REQUIRE_DB=1`,
+      the migration up/down test deferred from WP0.5 (DECISIONS D-006, done)
+- [x] WP1.2 RLS migration + tenancy session + base repository
+- [x] WP1.3 RLS proof tests + migration up/down in CI            ← gate PR
+- [x] GATE: cross-org read provably blocked; user sign-off
+      — signed off 2026-08-11
+
+## Phase 2 — AuthN/AuthZ (M2)
+- [x] WP2.1a JWT validation + JWKS cache + dev issuer (guarded, excluded from prod)
+- [x] WP2.1b Request context resolution + role guards + audited denials
+      — WP2.1 split in two (plan §1.1): authentication and authorization are
+      separately reviewable, which matters more than usual in a security phase
+- [x] WP2.2 Orgs/users/invitations APIs + bootstrap + audit events
+- [x] WP2.3 Web auth (MSAL) + /me + invite UI + role matrix tests ← gate PR
+- [x] GATE: signup→org→invite Reader; Reader 403 audited; user sign-off
+      — signed off 2026-08-12 on a real Entra External ID tenant: sign-in,
+      org creation, invite link, single-use redemption all confirmed in the
+      browser, and the audited 403 confirmed on the demo org: a Reader's
+      attempt on an Admin route recorded as auth.denied / insufficient_role
+      in that organization's own audit_log (B-010 closed).
+
+## Phase 3 — Data source connectors (M3)
+- [x] WP3.1 SecretsProvider (local backend) + datasources CRUD + sanitizer
+      — also closed **B-009** (`users.email` is nullable; a missing claim is
+      recorded as missing rather than as `<subject>@unknown.invalid`), and
+      taught coverage about greenlets, which had been hiding half of what the
+      async service tests actually execute
+- [x] WP3.2 Connector protocol + Postgres connector + test-connection
+      — also closed **B-006** (`make seed` now creates `pizza_readonly`, so the
+      demo database can be registered with credentials that genuinely cannot
+      write), and defined `ValidatedQuery` with its grant, four phases before
+      the DAL that will hold it
+- [x] **B-013** TLS to a customer database is a setting with a safe default
+      — pulled forward from Phase 12 by the owner on 2026-08-12. Not a work
+      package: a backlog item taken between WP3.2 and WP3.3 so the SQL Server
+      connector is written against the settled policy instead of retrofitted.
+      See DECISIONS **D-011**; the residue (per-source CA material) is **B-015**
+- [x] WP3.3 SQL Server connector + compose profile + dialect tests
+      — pyodbc behind the same async protocol, `sys.*` introspection, and the
+      same two-part read-only verification. Both dialects' templates live in one
+      `introspection` module so `SANCTIONED_VALIDATORS` stays at two names.
+      Raised **B-016**: the `api` job has no SQL Server, so it measures this
+      connector at 27% and the total at 88% — harmless until §4.4's ratchet
+- [x] WP3.4 Data sources screen (register, test, rotate, remove)     ← gate PR
+      — added 2026-08-12 from **B-012**, accepted by the owner: the phase's exit
+      criterion said "registered via the API", which meant a curl command for
+      the first thing a new organization must do. The gate demo is now in the
+      browser. WP3.3 keeps its work and hands the gate marker to WP3.4.
+      Also closed **B-008**: a Reader is no longer offered controls the API will
+      refuse, here and on the members screen
+- [x] GATE: both seed DBs registered **from the browser**; creds never echoed;
+      read-only verified; a wrong password fails with a sanitized message;
+      a Reader sees no admin controls; user sign-off
+      — signed off 2026-08-12. Both demo databases registered through the screen
+      and left `verified` in `data_sources`: `seed-pizza-pg:5432/pizza` and
+      `mssql:1433/pizza`, each connecting as `pizza_readonly`. The wrong-password
+      source was registered, failed with a sanitized message, and removed again.
+      Run as the Gmail account, which had to be promoted to Admin directly in the
+      database first — see **B-017**
+
+## Phase 4 — Discovery & catalog (M4)
+- [x] WP4.1 Schema discovery → catalog tables + refresh + incremental hash
+      — revision 0007 and four tenant tables; **DECISIONS D-012** settles what a
+      snapshot is, and a refresh that finds no change writes nothing at all,
+      which `test_a_refresh_that_finds_no_change_writes_nothing` asserts by
+      counting rows. Verified against both live seeded databases: 6 tables /
+      33 columns / 4 joins from PostgreSQL in 0.14s, 7 / 36 / 4 from SQL Server
+      in 0.22s, and **no `orders → menu_items` edge on either**
+- [x] WP4.2 Profiler (budgets/timeouts) + sensitivity classifier + auto-mask
+      — revision 0008; **DECISIONS D-013** splits a *profile* (belongs to a
+      snapshot) from a *policy* (belongs to a column by name, and survives every
+      refresh). Samples are masked on the way in, proved by a test that dumps
+      the whole platform database as text and greps it for the planted
+      addresses. Live: `customers.email`, `customers.phone`,
+      `customers.full_name` and `staff.full_name` auto-masked on both engines in
+      ~0.2s — and profiling the real database is what caught a classifier bug
+      that read every ISO date as a phone number
+- [x] WP4.3 Table cards + search + catalog APIs/UI + column policy  ← gate PR
+      — cards are prose built from catalog rows only, so their examples are the
+      masked ones; `card_tsv` is a **generated** column, so the index cannot
+      disagree with the text it indexes. Search is lexical (**B-018** carries
+      embeddings). Reading the first real card caught two false numbers: a row
+      count taken from the sample cap, and PostgreSQL's `reltuples = -1`
+      clamped to zero — "unknown" now stays unknown
+- [x] GATE: pizza DB discovered ≤2 min; email auto-masked; user sign-off
+      — signed off 2026-08-13, and the platform database holds the whole of it.
+      Both demo sources carry an **active version 1** catalog, profiled to
+      `complete`: 33 columns from PostgreSQL and 36 from SQL Server, **4 of each
+      flagged sensitive**. Discovery took 0.14s and 0.22s against a two-minute
+      budget.
+      The eight `column_policies` rows are the best evidence in the phase,
+      because they show both halves of D-013 at once. Seven are `mask` decided
+      **automatically** — `customers.full_name`, `customers.phone` and
+      `staff.full_name` on both sources, and `customers.email` on the SQL Server
+      one — with nobody having reviewed them. The eighth is `customers.email` on
+      the PostgreSQL source, `mask` decided by **a person** during the demo and
+      still standing after a later profiling pass, which is the thing that must
+      never be silently overwritten.
+
+## Phase 5 — DAL + SQL policy engine (M5)  ⚠ human review on every PR
+- [ ] WP5.1 sqlglot validator + policy pipeline + catalog grounding
+- [ ] WP5.2 Executor (read-only, timeouts, LIMIT) + masking + audit hook
+- [ ] WP5.3 Adversarial corpus per dialect + property tests + 90% gate ← gate PR
+- [ ] GATE: arch Part 7.5 property table proven in tests; user sign-off
+
+## Phase 6 — LLM abstraction (M6)
+- [ ] WP6.1 LLMProvider protocol + FakeLLM + registry + usage metering
+- [ ] WP6.2 Azure OpenAI + Anthropic impls + fallback + live smoke  ← gate PR
+- [ ] GATE: same suite passes on both providers; tokens metered; sign-off
+
+## Phase 7 — Single-shot Q&A (M7)
+- [ ] WP7.1 Conversations/runs/events schema + routes + run status
+- [ ] WP7.2 Context builder + planner-lite + core tools + repair-or-refuse
+- [ ] WP7.3 e2e vs seed DB + minimal chat UI with citation          ← gate PR
+- [ ] GATE: "orders in July?" answered with citation; user sign-off
+
+## Phase 8 — Research loop + trace (M8)
+- [ ] WP8.1 ResearchState + bounded loop + budgets + duplicate/progress rules
+- [ ] WP8.2 Capability check (join-graph) + honest refusal path
+- [ ] WP8.3 SSE streaming + durable replay + trace UI               ← gate PR
+- [ ] GATE: pizza scenario ≤8 iters; menu-items → honest refusal; sign-off
+
+## Phase 9 — Critic + composer + evals (M9)
+- [ ] **B-005 (P1) must be closed before this phase starts** — the seed window
+      must stop drifting before evals are written against it
+- [ ] WP9.1 Deterministic critic + LLM checklist + bounded re-entry
+- [ ] WP9.2 Composer (citations/limitations) + eval harness v1      ← gate PR
+- [ ] GATE: seeded-wrong-draft caught; 20 golden evals pass; sign-off
+
+## Phase 10 — Knowledge + semantic layer (M10)
+- [ ] WP10.1 Docs ingest/chunk/embed/retrieve under RLS + APIs
+- [ ] WP10.2 Semantic definitions + verified queries + critic enforcement ← gate
+- [ ] GATE: uploaded policy changes generated SQL; isolation test; sign-off
+
+## Phase 11 — Charts + polish (M11)
+- [ ] WP11.1 Chart tool (validated Vega-Lite) + client renderer
+- [ ] WP11.2 History/catalog/members polish + Playwright smoke      ← gate PR
+      — carries **B-017**: recovery when an org has no Admin who can sign in
+      (owner's call 2026-08-12, moved forward from Phase 12)
+- [ ] GATE: trend question → rendered chart; smoke green; sign-off
+
+## Phase 12 — Azure deploy + hardening (M12)  ⚠ human review on every PR
+- [ ] WP12.1 Bicep modules + env params + what-if in CI
+- [ ] WP12.2 OIDC deploy workflow → dev env + Key Vault backend + smoke
+- [ ] WP12.3 Observability wiring + quotas hard-stop + alerts
+- [ ] WP12.4 Prod env + ASVS-lite checklist + restore drill + v1.0 tag ← gate
+- [ ] GATE: arch Part 14 acceptance; nightly evals on; user sign-off
+
+---
+
+## Next step
 
 Phase 5 / **WP5.1 — validator + policy pipeline** (`p5.1-dal-validator`).
 **⚠ This is the security boundary.** Human review on every PR, the highest test
