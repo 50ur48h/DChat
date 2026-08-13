@@ -100,3 +100,4 @@ pnpm-debug.log*
 yarn-error.log*
 tmp/
 .scratch/
+coverage-data/
