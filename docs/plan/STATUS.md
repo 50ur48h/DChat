@@ -1,12 +1,13 @@
 # STATUS — data-agent build
 
-Current position: **Phases 0–4 complete and signed off.** Phase 5: everything
-                  but the gate is done — **B-019**, **B-016**, **WP5.1**,
-                  **WP5.2a** and **WP5.2b**
-Next step:        `p5.3-dal-adversarial` — the **gate PR** for the security
-                  phase. The adversarial corpus per dialect, arch 7.5's property
-                  table transcribed as a test map, and the coverage gates. Human
-                  review, and this one ends in your sign-off. Brief at the end.
+Current position: **Phase 5 built; the gate is yours.** WP5.1, WP5.2a, WP5.2b
+                  and WP5.3 are merged or in review; B-019 and B-016 cleared
+                  before them.
+Next step:        **Sign off the Phase 5 gate** — the manual test script is in
+                  the WP5.3 PR. After that, Phase 6 / WP6.1
+                  (`p6.1-llm-core`): the LLMProvider protocol, FakeLLM, the
+                  registry and usage metering. Phase 6 needs a real provider key
+                  only at WP6.2 (plan §3.2).
 Merge policy: ASK
 Blocked on user: nothing
 Last updated: 2026-08-13 by Claude Code
@@ -183,7 +184,21 @@ Last updated: 2026-08-13 by Claude Code
       counts returned, **real customer emails masked** to `k***@e***.com`, all
       three outcomes recorded, and no unmasked value in either table or in any
       stored file. `dal/` at **97%**
-- [ ] WP5.3 Adversarial corpus per dialect + property tests + 90% gate ← gate PR
+- [x] WP5.3 Adversarial corpus per dialect + property tests + 90% gate ← gate PR
+      — 64 corpus cases, **112 assertions across both dialects**, each naming
+      the `ViolationCode` it must produce and each run through the executor with
+      a connector that fails the test if it is asked to run anything: every case
+      proves both that it was refused and that **nothing was sent**. Writing it
+      corrected the corpus rather than the code in eight places, and corrected
+      the code in two — `EXPLAIN ANALYZE` now says so instead of reporting a
+      parse failure of a fragment nobody wrote, and a quoted `"EMAIL"` is
+      reported as the unknown column it is rather than as `unresolvable`.
+      Hypothesis covers what nobody thought of: every case mixture of a denied
+      column, Cyrillic homoglyphs, and arbitrary identifiers — one of which
+      corrected a property I had stated too broadly (`SELECT 0` is a literal,
+      not an identifier). `test_property_table.py` transcribes arch 7.5 as a
+      map from property to proof and **fails if a named test stops existing**.
+      `make test.dal` gates `dal/` at 90%; it stands at **97%**
 - [ ] GATE: arch Part 7.5 property table proven in tests; user sign-off
 
 ## Phase 6 — LLM abstraction (M6)

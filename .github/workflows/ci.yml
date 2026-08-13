@@ -134,6 +134,14 @@ jobs:
       - name: Tenant isolation proof (may never be skipped)
         if: env.RUN == 'true'
         run: make test.rls
+      # Its own step, and its own gate, for the same reason the RLS proof has
+      # one: the DAL is the security boundary (plan §4.4), and a number that
+      # only exists inside a larger total is one nobody looks at. `pytest`
+      # exits 5 if it collects nothing, so a deleted suite fails the build
+      # rather than passing with no tests.
+      - name: DAL suite and its coverage gate
+        if: env.RUN == 'true'
+        run: make test.dal
       - name: Keep this job's half of the coverage data
         if: env.RUN == 'true'
         uses: actions/upload-artifact@v4
