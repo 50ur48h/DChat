@@ -198,7 +198,11 @@ Last updated: 2026-08-13 by Claude Code
       corrected a property I had stated too broadly (`SELECT 0` is a literal,
       not an identifier). `test_property_table.py` transcribes arch 7.5 as a
       map from property to proof and **fails if a named test stops existing**.
-      `make test.dal` gates `dal/` at 90%; it stands at **97%**
+      `make test.dal` gates `dal/` at 90%; it stands at **97%**. Adding that
+      step also broke the combined coverage number — it wrote to the same data
+      file as the full run and replaced the shard with a DAL-only one, taking
+      the total from 96% to 63% — which **B-016's combine job caught on this
+      very PR**. The gate now measures into its own file
 - [ ] GATE: arch Part 7.5 property table proven in tests; user sign-off
 
 ## Phase 6 — LLM abstraction (M6)
