@@ -1,13 +1,11 @@
 # STATUS — data-agent build
 
 Current position: **Phases 0–4 complete and signed off.** Phase 5 in progress:
-                  **B-019** and **B-016** done, WP5.1 next
-Next step:        `p5.1-dal-validator` — the SQL policy engine. Read plan §6
-                  Phase 5 and architecture Part 7.1 and 7.5 **before writing any
-                  code**: this is the security boundary, it gets human review on
-                  every PR, and the full brief is at the end of this file.
-                  B-016 is cleared, so the coverage number WP5.3 gates on is
-                  now the combined one and is true.
+                  **B-019**, **B-016** and **WP5.1** done
+Next step:        `p5.2-dal-executor` — the half of the DAL that touches data.
+                  Still the security boundary: human review on every PR. The
+                  brief is at the end of this file, and WP5.1's output is the
+                  input, so read `dal/validator.py`'s docstring first.
 Merge policy: ASK
 Blocked on user: nothing
 Last updated: 2026-08-13 by Claude Code
@@ -139,7 +137,20 @@ Last updated: 2026-08-13 by Claude Code
       half the suite. A run with no SQL Server shard says so in the log instead
       of quietly reporting a total that is six points low. Cleared before WP5.1
       so WP5.3's `--cov-fail-under=90` on `dal/` lands on a true measurement
-- [ ] WP5.1 sqlglot validator + policy pipeline + catalog grounding
+- [x] WP5.1 sqlglot validator + policy pipeline + catalog grounding
+      — `dal/validator.py` enforces architecture 7.1's pipeline in order, and
+      `dal/policy.py` loads what it judges against (catalog + column policies +
+      `Caps`) on a 30-second, org-keyed cache that the policy setter drops on
+      write, so a denial takes effect on the next query rather than in half a
+      minute. **DECISIONS D-015**: a function sqlglot cannot type is refused for
+      being unrecognised — the deny list only buys a clearer message — and two
+      ceilings (20,000 characters, 50 levels of nesting) close a hole found in
+      testing, where 300 nested parentheses raised a bare `RecursionError`
+      before any rule ran. 187 tests, both dialects, `dal/` at **97%** against
+      WP5.3's 90% gate. Verified against the two live demo catalogs: the same
+      six statements refused on both engines with the same codes, `SELECT *`
+      over `customers` expanded and its three masked columns recorded, and
+      nothing in `dal/` branching on an engine name. Raised **B-020**
 - [ ] WP5.2 Executor (read-only, timeouts, LIMIT) + masking + audit hook
 - [ ] WP5.3 Adversarial corpus per dialect + property tests + 90% gate ← gate PR
 - [ ] GATE: arch Part 7.5 property table proven in tests; user sign-off
@@ -191,56 +202,57 @@ Last updated: 2026-08-13 by Claude Code
 
 ## Next step
 
-Phase 5 / **WP5.1 — validator + policy pipeline** (`p5.1-dal-validator`).
-**⚠ This is the security boundary.** Human review on every PR, the highest test
-density in the repository, and the one phase where "it works" is not the bar —
-the bar is arch Part 7.5's property table, proven per dialect.
+Phase 5 / **WP5.2 — executor + masking + audit** (`p5.2-dal-executor`).
+**⚠ Still the security boundary.** Human review on every PR. WP5.1 decided what
+may run; this is the half that opens a connection, and it is where the promises
+made in `readonly_verified` and in the column policies are either kept or not.
 
-**Take B-016 first.** WP5.3 adds `--cov-fail-under=90` on `dal/` and §4.4
-ratchets the overall number, and the `api` job currently measures the SQL Server
-connector at 27% because it has no SQL Server. An hour now; an emergency during
-WP5.3 otherwise.
+Build (plan §6 WP5.2, architecture Part 7.1 steps 4–7 and Part 10.1):
 
-Then, in order (plan §6 Phase 5, architecture Part 7.1 diagram 6 and 7.5):
+- A migration for `query_executions` and `result_artifacts` — **both are tenant
+  tables**, so both need an RLS policy, a line in `TENANT_TABLES` and an
+  extension of the rls_proof suite, in this same PR.
+- `dal/executor.py`: takes a `Validated`, clamps or injects a LIMIT on the
+  outermost SELECT (default 1 000, hard cap per policy — `Caps.limit_syntax`
+  already says whether that is `LIMIT` or `TOP`), executes through the connector
+  with a statement timeout and a byte guard, and normalises to a `ResultFrame`.
+- `dal/masking.py`: applies the `mask` policies to the values coming back.
+  `Validated.masked` already names the columns; that list is the input, not
+  something to re-derive from the catalog.
+- `dal/audit_hook.py`: a `query_executions` row and an `audit_log` row for every
+  attempt — success, failure **and** refusal. `Validated.tables` /
+  `.columns` / `.touches_sensitive` are what those rows are made of, which is
+  why the validator returns them.
+- The single entry point `DAL.run(org_ctx, ds_id, sql) -> Execution`. Internal
+  only: no public route in this WP.
 
-- `dal/validator.py` on sqlglot. Parse in the connector's dialect, walk the AST,
-  and enforce **in this order**: one statement only; type ∈ {SELECT, EXPLAIN};
-  no DML, DDL or transaction control anywhere — including inside CTEs and
-  subqueries, which is where a checker that only looks at the top level fails;
-  no system schemas (`pg_catalog`, `information_schema`, `sys`), dialect-aware;
-  no denied functions (`pg_read_file`, `pg_sleep`, `xp_*`, `openrowset`); every
-  table and column resolved against the org's catalog; denied columns rejected
-  **wherever they appear**, not only in the select list; star expansion resolved
-  against the catalog *before* column checks.
-- Output: the `ValidatedQuery` that has existed since WP3.2. Errors are
-  structured `PolicyViolation`s with a machine-readable code and a message that
-  is safe to show the LLM (arch 7.4).
-- `dal/policy.py`: the per-org context loader — column policies and per-source
-  caps — with a small TTL cache.
+What WP5.1 hands it, and what it must not re-do:
 
-What the previous phases hand it, and what it must not re-invent:
+- **`validate(sql, source=…) -> Validated`.** `query` is the `ValidatedQuery` a
+  connector accepts; `tables`, `columns` and `masked` are the analysis. The
+  canonical SQL is already fully qualified and star-expanded, so the executor
+  knows its result columns before it runs anything.
+- **`source_policy(org_id, ds_id)`** loads catalog + policies + `Caps` on a
+  30-second org-keyed cache. Use it; do not read `catalog_columns` again.
+- **Refusals are `PolicyViolation`, and only that.** `validate` raises nothing
+  else, including on input built to blow the stack — so the executor's error
+  handling has exactly two shapes to think about: a violation, and a
+  `ConnectorError` from the far end.
+- **Masking of *results* has not happened.** Catalog samples were masked at
+  write time (D-013), which says nothing about the rows a query returns. This is
+  the WP where `customers.email` in an answer is `a***@d***.com` or is a leak.
 
-- **The type gate is already built and already sanctioned.**
-  `dataagent.dal.validator` is on `SANCTIONED_VALIDATORS` today, and
-  `test_only_sanctioned_modules_build_queries` scans `src` to keep the list
-  honest. No widening is needed; the seam was cut in WP3.2 for exactly this.
-- **Grounding has an authority.** `catalog_tables` / `catalog_columns` via
-  `browse.active_catalog`. An unknown identifier must produce a structured error
-  that *names* it — the agent repairs from that message, so it is a feature.
-- **Column policy is decided, stored, and durable.** `effective_policy` answers
-  allow | mask | deny, survives a refresh (D-013), and distinguishes a person's
-  decision from the safe default. The validator consumes it; it does not
-  re-derive it.
-- **`Caps` states per-engine truth** — dialect, `limit_syntax`,
-  `max_identifier_length` — so nothing in `dal/` should branch on an engine name.
-- **Masking already happened once, at write time, for *catalog samples*.** That
-  is not the same thing as masking *query results*, which is WP5.2's job. Do not
-  assume the first makes the second unnecessary.
-
-WP5.2 then adds the executor, result masking and the audit hook; WP5.3 is the
-adversarial corpus per dialect and the 90% gate, and it is the Phase 5 gate PR.
+WP5.3 is then the adversarial corpus per dialect, the property table from arch
+7.5 transcribed as a test map, and the 90% gate — the Phase 5 gate PR.
 
 ## Notes
+
+- **The validator is strict on purpose, and that has a running cost.** A
+  function sqlglot cannot type is refused for being unrecognised (D-015), so an
+  engine-specific function a real question needs will be refused until somebody
+  adds it to `_ALLOWED_UNTYPED_FUNCTIONS` — deliberately, in a PR that says why.
+  Phase 7 is where this will first be felt. The right response is a decision
+  about that one function, never a widening of the rule.
 
 - **This file is now checked by CI, and the check is on your side.** It protects
   the shape — the header fields, a heading per phase 0–12 with a GATE line each,

@@ -22,6 +22,7 @@ dependencies = [
     # Fernet, for the local secrets backend (DECISIONS D-001). Already present
     # transitively via pyjwt[crypto]; declared directly because we import it.
     "cryptography>=44.0",
+    "sqlglot>=30.17.0",
 ]
 
 [dependency-groups]

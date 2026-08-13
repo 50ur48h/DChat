@@ -38,6 +38,9 @@ SRC = Path(__file__).resolve().parents[2] / "src" / "dataagent"
 CONSTRUCTION_SITES = {
     SRC / "connectors" / "base.py",
     SRC / "connectors" / "introspection.py",
+    # WP5.1. The SQL policy engine is the second holder of the grant, and the
+    # only one that ever sees a statement the model wrote.
+    SRC / "dal" / "validator.py",
 }
 
 

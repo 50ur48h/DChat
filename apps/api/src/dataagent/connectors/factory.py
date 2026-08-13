@@ -9,11 +9,11 @@ somewhere deeper with an attribute error.
 from __future__ import annotations
 
 from dataagent.config import Settings, get_settings
-from dataagent.connectors.base import Connector, ConnectorError
-from dataagent.connectors.postgres import PostgresConnector
-from dataagent.connectors.sqlserver import SqlServerConnector
+from dataagent.connectors.base import Caps, Connector, ConnectorError
+from dataagent.connectors.postgres import POSTGRES_CAPS, PostgresConnector
+from dataagent.connectors.sqlserver import SQLSERVER_CAPS, SqlServerConnector
 
-__all__ = ["SUPPORTED_ENGINES", "connector_for", "require_supported"]
+__all__ = ["SUPPORTED_ENGINES", "caps_for", "connector_for", "require_supported"]
 
 #: Engines this build can talk to.
 SUPPORTED_ENGINES: frozenset[str] = frozenset({"pg", "mssql"})
@@ -39,6 +39,23 @@ def require_supported(engine: str) -> None:
     if pending is not None:
         raise ConnectorError(f"No connector for engine {engine!r} yet. {pending}")
     raise ConnectorError(f"Unknown engine {engine!r}")
+
+
+#: What each engine is, without asking one. Kept beside ``connector_for`` so the
+#: two answers to "what happens for engine X" cannot drift apart.
+_CAPS: dict[str, Caps] = {"pg": POSTGRES_CAPS, "mssql": SQLSERVER_CAPS}
+
+
+def caps_for(engine: str) -> Caps:
+    """The engine's capabilities, with no connection and no credential.
+
+    The DAL judges a query before anything is opened — whether LIMIT is spelled
+    TOP does not depend on whether the customer's server is up — so this reads
+    the connector module's constant rather than calling ``capabilities()`` on an
+    instance that would first have to connect.
+    """
+    require_supported(engine)
+    return _CAPS[engine]
 
 
 def connector_for(
