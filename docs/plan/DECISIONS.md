@@ -4,6 +4,34 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-016 — An audit row outlives the thing it is about
+Date: 2026-08-13 · Phase: 5 · PR: #31 · Confirmed by the owner
+Context: Revision 0010 gives `query_executions.data_source_id` `ON DELETE SET
+NULL`. Architecture Part 10.1 lists the column and says nothing about what
+happens when the data source is removed, so the default reading — the cascade
+every other child of `data_sources` uses — would delete the execution history
+along with the registration. The two readings differ in exactly the case that
+matters: someone removes a source, and the record of what was read from it goes
+with it.
+Options: (a) `CASCADE`, consistent with `column_policies` and the catalog chain;
+(b) `SET NULL`, keeping the row and losing only the pointer; (c) no foreign key
+at all, as `audit_log` does with `object_id`.
+Decision: (b), confirmed by the owner on 2026-08-13 — "an audit trail that
+vanishes with the subject isn't one". The catalog tables cascade because they
+*describe* a source and are meaningless without it; an execution row **records
+an act** and is meaningful forever. What is lost on delete is the join, not the
+evidence: `sql_text`, `tables`, `columns`, `sensitive_accessed`, the actor and
+the timestamp all remain, and `data_source_id IS NULL` reads as "the source this
+was read from has since been removed".
+Consequences: `data_source_id` is nullable, which every reader must handle —
+a screen grouping by source needs an "unregistered" bucket. Retention is
+therefore governed by the deliberate policy on `result_artifacts.expires_at`
+rather than by the accident of someone deleting a data source, which is the
+right place for it (architecture 7.6). `result_artifacts` still cascades from
+its execution: an artifact without its execution is a payload with nothing to
+say about itself. Architecture Part 10.1 updated to state the rule rather than
+leave it to be inferred.
+
 ## D-015 — A function the validator cannot name is a function it will not run
 Date: 2026-08-13 · Phase: 5 · PR: #28
 Context: Architecture 7.5 and plan §6 WP5.1 specify a **deny list** of engine
