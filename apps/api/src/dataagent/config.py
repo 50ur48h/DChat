@@ -213,6 +213,23 @@ class Settings(BaseSettings):
         ),
     )
 
+    dal_max_rows: int = Field(
+        default=1000,
+        gt=0,
+        description=(
+            "Ceiling on rows any one query may return. Written into the SQL, so "
+            "the engine stops early, and enforced again when the rows are read."
+        ),
+    )
+    dal_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        description=(
+            "Deadline for one query against a customer's database. Their server "
+            "is the one paying for a slow query, so this is short by default."
+        ),
+    )
+
     # NoDecode: without it pydantic-settings JSON-decodes any complex-typed env
     # var, so the natural `CORS_ORIGINS=http://a,http://b` would be a boot error.
     cors_origins: Annotated[tuple[str, ...], NoDecode] = Field(

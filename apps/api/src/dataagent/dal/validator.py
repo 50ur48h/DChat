@@ -31,10 +31,13 @@ is that a function this validator cannot name is a function it will not run.
 That is stricter than architecture 7.5's deny list, in the direction 7.5 asks
 for — see DECISIONS D-015.
 
-**What this module does not do.** It does not connect, execute, inject a LIMIT
-or mask a value; that is WP5.2's executor. It ends at a ``ValidatedQuery`` — the
-only object a connector will run — plus the tables and columns the statement
-touches, which the executor needs for masking and the audit row.
+**What this module does and does not do.** It does not connect, execute, or mask
+a value. It does write the row limit into the statement, because emitting SQL is
+exactly what holding the grant means — the executor decides the *number* from
+policy and this module is what puts it in the text. It ends at a
+``ValidatedQuery`` — the only object a connector will run — plus the tables and
+columns the statement touches and a description of the result, which the
+executor needs for masking and the audit row.
 """
 
 #
@@ -46,6 +49,7 @@ touches, which the executor needs for masking and the audit row.
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import TypeGuard, cast
 
@@ -62,7 +66,7 @@ from dataagent.connectors.base import PolicyGrant, ValidatedQuery
 from dataagent.dal.errors import PolicyViolation, ViolationCode
 from dataagent.dal.policy import SourcePolicy
 
-__all__ = ["ColumnRef", "TableRef", "Validated", "validate"]
+__all__ = ["ColumnRef", "Projection", "TableRef", "Validated", "validate"]
 
 #: This module is on ``SANCTIONED_VALIDATORS`` (connectors/base.py). Holding the
 #: grant is what lets it declare SQL fit to run, and it is the only module in the
@@ -189,12 +193,34 @@ class ColumnRef:
 
 
 @dataclass(frozen=True, slots=True)
+class Projection:
+    """One column of the result, and where its value comes from.
+
+    Masking works from this rather than from column names, because names
+    collide: ``SELECT c.email, s.email FROM …`` returns two columns called
+    ``email`` and the executor must mask by position, not by matching strings.
+
+    ``sensitive`` is not the same question as "is this a masked column". It asks
+    whether the *value in this cell* can carry one: ``UPPER(email)`` still spells
+    out the address, while ``COUNT(email)`` is a number that no policy is about.
+    """
+
+    #: The name the engine will return for this column.
+    name: str
+    #: The catalog column, when the projection is one. None for expressions,
+    #: literals and aggregates.
+    source: ColumnRef | None
+    #: True when a masked column's value can be read out of this cell.
+    sensitive: bool
+
+
+@dataclass(frozen=True, slots=True)
 class Validated:
     """SQL that may run, and what it will touch.
 
     ``query`` is the only part a connector accepts. The rest is for the executor
-    and the audit row: which tables were read, which columns, and which of those
-    carry a ``mask`` policy that must be applied to the values coming back —
+    and the audit row: which tables were read, which columns, which of those
+    carry a ``mask`` policy, and which *result* columns those policies land on —
     masking catalog samples at write time (D-013) said nothing about results.
     """
 
@@ -202,6 +228,11 @@ class Validated:
     tables: tuple[TableRef, ...]
     columns: tuple[ColumnRef, ...]
     masked: tuple[ColumnRef, ...]
+    projections: tuple[Projection, ...] = ()
+    #: The row cap written into the SQL, when one was asked for. The executor
+    #: bounds the fetch as well; this is the half the *engine* enforces, so a
+    #: query that would have scanned a billion rows stops at the server.
+    row_limit: int | None = None
 
     @property
     def sql(self) -> str:
@@ -212,21 +243,27 @@ class Validated:
         return bool(self.masked)
 
 
-def validate(sql: str, *, source: SourcePolicy) -> Validated:
+def validate(sql: str, *, source: SourcePolicy, max_rows: int | None = None) -> Validated:
     """Judge one statement against one data source. Raises ``PolicyViolation``.
 
     The only entry point, and the only exception it raises is a violation — a
     caller that has to catch anything else is a caller that will eventually not.
 
-    That is what the ``RecursionError`` guard is for. Parsing, qualifying and
-    generating SQL are all recursive over the tree, so a statement that is deep
-    rather than long — a thousand nested parentheses, a chain of ANDs — can
-    exhaust the interpreter's stack instead of breaking a rule. ``_too_complex``
-    refuses the ones that can be seen coming; this catches the rest, and turns a
-    process-level failure into an ordinary refusal the agent can repair.
+    ``max_rows`` is the executor's decision and this module's job to apply: the
+    number comes from policy, and the SQL that carries it may only be emitted
+    here, because emitting SQL is what holding the grant means. An existing
+    smaller limit is kept — an agent asking for ten rows gets ten.
+
+    That is also what the ``RecursionError`` guard is for. Parsing, qualifying
+    and generating SQL are all recursive over the tree, so a statement that is
+    deep rather than long — a thousand nested parentheses, a chain of ANDs — can
+    exhaust the interpreter's stack instead of breaking a rule.
+    ``_refuse_if_too_complex`` refuses the ones that can be seen coming; this
+    catches the rest, and turns a process-level failure into an ordinary refusal
+    the agent can repair.
     """
     try:
-        return _validate(sql, source=source)
+        return _validate(sql, source=source, max_rows=max_rows)
     except RecursionError:
         failure = PolicyViolation(
             ViolationCode.TOO_COMPLEX,
@@ -235,7 +272,7 @@ def validate(sql: str, *, source: SourcePolicy) -> Validated:
     raise failure
 
 
-def _validate(sql: str, *, source: SourcePolicy) -> Validated:
+def _validate(sql: str, *, source: SourcePolicy, max_rows: int | None) -> Validated:
     dialect = source.dialect
     statement, is_explain = _parse_one_read_only(sql, dialect)
 
@@ -244,7 +281,14 @@ def _validate(sql: str, *, source: SourcePolicy) -> Validated:
 
     tables = _bind_tables(statement, source.catalog)
     qualified = _resolve_identifiers(statement, source, tables)
-    columns, masked = _apply_column_policy(qualified, source.catalog)
+    columns, masked, origin = _apply_column_policy(qualified, source.catalog)
+    projections = _projections(qualified, origin, masked)
+
+    # Last, so the limit lands on the statement that passed every rule rather
+    # than on one still being rewritten. EXPLAIN is left alone: a plan is one
+    # short result whatever the query would have returned, and TOP inside an
+    # EXPLAIN would be describing a different statement than the one asked about.
+    row_limit = None if is_explain else _bound_rows(qualified, max_rows)
 
     canonical = qualified.sql(dialect=dialect, comments=False)
     if is_explain:
@@ -255,6 +299,8 @@ def _validate(sql: str, *, source: SourcePolicy) -> Validated:
         tables=tuple(sorted(set(tables.values()), key=str)),
         columns=tuple(sorted(columns, key=str)),
         masked=tuple(sorted(masked, key=str)),
+        projections=projections,
+        row_limit=row_limit,
     )
 
 
@@ -695,7 +741,7 @@ def _diagnose(
 
 def _apply_column_policy(
     qualified: exp.Expression, catalog: Catalog
-) -> tuple[set[ColumnRef], set[ColumnRef]]:
+) -> tuple[set[ColumnRef], set[ColumnRef], dict[int, ColumnRef]]:
     """Check every column reference in every scope against its policy.
 
     Scopes rather than a flat walk, because an alias means different things in
@@ -703,10 +749,15 @@ def _apply_column_policy(
     has two ``x``. Resolving that by a single dictionary would attribute a column
     to the wrong table — and therefore judge it by the wrong policy, which is the
     one kind of mistake this module may not make.
+
+    The third return value maps each ``Column`` node to the catalog column it
+    resolved to, so the projection pass below can ask "what is this cell made
+    of" without doing the scope work a second time and possibly differently.
     """
     policies = _policy_index(catalog)
     touched: set[ColumnRef] = set()
     masked: set[ColumnRef] = set()
+    origin: dict[int, ColumnRef] = {}
 
     for scope in traverse_scope(qualified):
         for column in scope.columns:
@@ -732,10 +783,137 @@ def _apply_column_policy(
                     subject=str(ref),
                 )
             touched.add(ref)
+            origin[id(column)] = ref
             if decision == POLICY_MASK:
                 masked.add(ref)
 
-    return touched, masked
+    return touched, masked, origin
+
+
+# ---------------------------------------------------------------------------
+# What the result will look like, and what may be read out of each cell
+# ---------------------------------------------------------------------------
+
+#: Aggregates whose result is a count or a total rather than a member of the
+#: column. A masked value inside one of these cannot be read out of the answer,
+#: so the answer is not masked — masking a COUNT would replace a number nobody
+#: needs protecting with a string nobody can use. MIN, MAX and the string
+#: aggregates are deliberately absent: they return a value that was in the
+#: column, which is the thing a policy is about.
+_VALUE_DESTROYING_AGGREGATES: tuple[type, ...] = (
+    exp.Count,
+    exp.Sum,
+    exp.Avg,
+    exp.Stddev,
+    exp.StddevPop,
+    exp.StddevSamp,
+    exp.Variance,
+    exp.VariancePop,
+    exp.ApproxDistinct,
+)
+
+
+def _projections(
+    qualified: exp.Expression, origin: dict[int, ColumnRef], masked: set[ColumnRef]
+) -> tuple[Projection, ...]:
+    """Describe the result, one entry per column the engine will return.
+
+    A set operation is described by its arms together: the names come from the
+    first, and a cell is sensitive if *any* arm can put a masked value there —
+    ``SELECT city FROM a UNION SELECT email FROM b`` is one output column, and
+    half of it is an address.
+    """
+    arms = [arm for arm in _select_arms(qualified) if isinstance(arm, exp.Select)]
+    if not arms:
+        return ()
+
+    described: list[Projection] = []
+    for index, expression in enumerate(arms[0].selects):
+        peers = [arm.selects[index] for arm in arms if index < len(arm.selects)]
+        source = _projected_column(expression, origin)
+        described.append(
+            Projection(
+                name=expression.alias_or_name,
+                source=source,
+                sensitive=any(_carries_masked_value(peer, origin, masked) for peer in peers),
+            )
+        )
+    return tuple(described)
+
+
+def _select_arms(expression: exp.Expr) -> list[exp.Expr]:
+    if isinstance(expression, exp.SetOperation):
+        return _select_arms(expression.left) + _select_arms(expression.right)
+    if isinstance(expression, exp.Subquery):
+        return _select_arms(expression.this)
+    return [expression]
+
+
+def _projected_column(expression: exp.Expr, origin: dict[int, ColumnRef]) -> ColumnRef | None:
+    """The catalog column this projection *is*, if it is one and not built."""
+    inner = expression.this if isinstance(expression, exp.Alias) else expression
+    if isinstance(inner, exp.Column):
+        return origin.get(id(inner))
+    return None
+
+
+def _carries_masked_value(
+    expression: exp.Expr, origin: dict[int, ColumnRef], masked: set[ColumnRef]
+) -> bool:
+    """Can a masked column's value be read out of this cell?
+
+    Yes for the column itself, and yes for anything built from it —
+    ``UPPER(email)``, ``email || '!'``, ``SUBSTRING(email, 1, 40)`` all spell the
+    address out. No when every mention of it sits inside an aggregate that
+    returns a count or a total instead of a value. Anything not understood
+    counts as yes.
+    """
+    for column in expression.find_all(exp.Column):
+        ref = origin.get(id(column))
+        if ref is None or ref not in masked:
+            continue
+        if not _inside_value_destroying_aggregate(column, expression):
+            return True
+    return False
+
+
+def _inside_value_destroying_aggregate(column: exp.Column, root: exp.Expr) -> bool:
+    node: exp.Expr | None = column.parent
+    while node is not None and node is not root.parent:
+        if isinstance(node, _VALUE_DESTROYING_AGGREGATES):
+            return True
+        node = node.parent
+    return False
+
+
+# ---------------------------------------------------------------------------
+# The row cap, written into the statement the engine will run
+# ---------------------------------------------------------------------------
+
+
+def _bound_rows(qualified: exp.Expression, max_rows: int | None) -> int | None:
+    """Clamp the outermost row limit, in place, and say what it ended up as.
+
+    One code path for both engines: sqlglot parses T-SQL's ``TOP n`` and
+    PostgreSQL's ``LIMIT n`` into the same node and emits each dialect's own
+    spelling, so nothing here asks which engine it is.
+
+    A smaller existing limit is kept. An agent that asked for ten rows means it,
+    and replacing that with a thousand would be this layer quietly making the
+    query more expensive than it was written to be.
+    """
+    if max_rows is None or not isinstance(qualified, exp.Query):
+        return None
+
+    existing = qualified.args.get("limit")
+    current: int | None = None
+    if isinstance(existing, exp.Limit) and isinstance(existing.expression, exp.Literal):
+        with suppress(ValueError):
+            current = int(existing.expression.name)
+
+    effective = max_rows if current is None else min(current, max_rows)
+    qualified.set("limit", exp.Limit(expression=exp.Literal.number(effective)))
+    return effective
 
 
 def _policy_index(catalog: Catalog) -> dict[tuple[str, str, str], str]:

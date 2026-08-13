@@ -320,7 +320,7 @@ def test_a_recursion_failure_below_still_reaches_the_caller_as_a_refusal(
     the backstop for the ones that cannot: whatever runs out of stack, a caller
     of the DAL sees a violation, never an interpreter-level error."""
 
-    def boom(sql: str, *, source: SourcePolicy) -> object:
+    def boom(sql: str, *, source: SourcePolicy, max_rows: int | None) -> object:
         raise RecursionError("maximum recursion depth exceeded")
 
     monkeypatch.setattr(validator, "_validate", boom)

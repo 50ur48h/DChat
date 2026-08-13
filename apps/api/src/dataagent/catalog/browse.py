@@ -60,6 +60,11 @@ class CatalogColumnView:
     policy: str = "allow"
     #: True when a person set it, rather than the classifier's default.
     policy_decided: bool = False
+    #: How a masked value should be replaced — full | email | phone | last4 |
+    #: hash. Only an Admin sets it; None means the DAL picks from the semantic
+    #: role. Carried here because the DAL masks *results* (WP5.2) and would
+    #: otherwise have to read `column_policies` all over again.
+    mask_type: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,6 +209,7 @@ async def _tables(
                     sensitivity=column.sensitivity,
                 ),
                 policy_decided=decision is not None and decision.decided_by is not None,
+                mask_type=decision.mask_type if decision else None,
             )
         )
 

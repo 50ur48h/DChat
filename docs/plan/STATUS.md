@@ -1,11 +1,12 @@
 # STATUS — data-agent build
 
 Current position: **Phases 0–4 complete and signed off.** Phase 5 in progress:
-                  **B-019**, **B-016** and **WP5.1** done
-Next step:        `p5.2-dal-executor` — the half of the DAL that touches data.
-                  Still the security boundary: human review on every PR. The
-                  brief is at the end of this file, and WP5.1's output is the
-                  input, so read `dal/validator.py`'s docstring first.
+                  **B-019**, **B-016**, **WP5.1** and **WP5.2a** done
+Next step:        `p5.2b-dal-audit` — the record: revision 0010, the artifact
+                  store, and the audit hook. Still the security boundary: human
+                  review on every PR, and **two new tenant tables**, so RLS
+                  policies, `TENANT_TABLES` and the rls_proof suite all move in
+                  the same PR. The brief is at the end of this file.
 Merge policy: ASK
 Blocked on user: nothing
 Last updated: 2026-08-13 by Claude Code
@@ -151,7 +152,22 @@ Last updated: 2026-08-13 by Claude Code
       six statements refused on both engines with the same codes, `SELECT *`
       over `customers` expanded and its three masked columns recorded, and
       nothing in `dal/` branching on an engine name. Raised **B-020**
-- [ ] WP5.2 Executor (read-only, timeouts, LIMIT) + masking + audit hook
+- [x] WP5.2a Executor (read-only, timeouts, LIMIT) + result masking
+      — WP5.2 split in two (plan §1.1: the whole was ~1,100 lines against a
+      ~600 target, in the phase where review quality matters most). The split
+      is by *what could go wrong*: this half is everything that decides what a
+      caller receives, so no version of `main` ever returns an unmasked value
+      through the DAL; **WP5.2b** is everything that records it, landing with
+      the migration it writes to.
+      The row cap is applied twice — written into the SQL so the engine stops
+      early, and again as the fetch bound — and the validator is what emits it,
+      because emitting SQL is what holding the grant means. Masking works from
+      a per-position `Projection` map rather than from column names, so
+      `SELECT c.email, s.email` is unambiguous; `UPPER(email)` is masked and
+      `COUNT(email)` is not, which is the distinction that makes `mask` more
+      useful than `deny`. An Admin's `mask_type` is now honoured — `browse` was
+      dropping it. 84 DAL tests, `dal/` at **98%**
+- [ ] WP5.2b Query execution records + artifacts + audit hook
 - [ ] WP5.3 Adversarial corpus per dialect + property tests + 90% gate ← gate PR
 - [ ] GATE: arch Part 7.5 property table proven in tests; user sign-off
 
@@ -202,45 +218,43 @@ Last updated: 2026-08-13 by Claude Code
 
 ## Next step
 
-Phase 5 / **WP5.2 — executor + masking + audit** (`p5.2-dal-executor`).
-**⚠ Still the security boundary.** Human review on every PR. WP5.1 decided what
-may run; this is the half that opens a connection, and it is where the promises
-made in `readonly_verified` and in the column policies are either kept or not.
+Phase 5 / **WP5.2b — the record** (`p5.2b-dal-audit`).
+**⚠ Still the security boundary.** Human review on every PR. WP5.2a made the
+read bounded and the result masked; this is what remembers that it happened.
 
-Build (plan §6 WP5.2, architecture Part 7.1 steps 4–7 and Part 10.1):
+Build (plan §6 WP5.2, architecture Part 7.1 step 7 and Part 10.1):
 
-- A migration for `query_executions` and `result_artifacts` — **both are tenant
-  tables**, so both need an RLS policy, a line in `TENANT_TABLES` and an
-  extension of the rls_proof suite, in this same PR.
-- `dal/executor.py`: takes a `Validated`, clamps or injects a LIMIT on the
-  outermost SELECT (default 1 000, hard cap per policy — `Caps.limit_syntax`
-  already says whether that is `LIMIT` or `TOP`), executes through the connector
-  with a statement timeout and a byte guard, and normalises to a `ResultFrame`.
-- `dal/masking.py`: applies the `mask` policies to the values coming back.
-  `Validated.masked` already names the columns; that list is the input, not
-  something to re-derive from the catalog.
+- **Revision 0010: `query_executions` and `result_artifacts`.** Both are tenant
+  tables, so both need an RLS policy, a line in `TENANT_TABLES` **and** an
+  extension of the rls_proof suite — in this same PR, no exceptions
+  (`test_no_tenant_table_can_be_added_without_protecting_it` asks the database
+  and will fail otherwise).
+- `dal/artifacts.py`: an `ArtifactStore` interface with a local-disk backend,
+  the same seam `SecretsProvider` uses — Blob arrives in Phase 12 behind it.
+  What is stored is the **masked** frame; there is no unmasked copy to leak,
+  in the same way there is no unmasked catalog sample (D-013).
 - `dal/audit_hook.py`: a `query_executions` row and an `audit_log` row for every
-  attempt — success, failure **and** refusal. `Validated.tables` /
-  `.columns` / `.touches_sensitive` are what those rows are made of, which is
-  why the validator returns them.
-- The single entry point `DAL.run(org_ctx, ds_id, sql) -> Execution`. Internal
-  only: no public route in this WP.
+  attempt — success, failure **and refusal**. A refused query is the most
+  interesting row in the table and the easiest one to forget to write.
+- `DAL.run(org_ctx, ds_id, sql) -> Execution` wrapping `executor.run`, so the
+  record cannot be skipped by calling the layer underneath. Internal only: no
+  public route in this WP.
 
-What WP5.1 hands it, and what it must not re-do:
+What WP5.2a hands it, and what it must not re-do:
 
-- **`validate(sql, source=…) -> Validated`.** `query` is the `ValidatedQuery` a
-  connector accepts; `tables`, `columns` and `masked` are the analysis. The
-  canonical SQL is already fully qualified and star-expanded, so the executor
-  knows its result columns before it runs anything.
-- **`source_policy(org_id, ds_id)`** loads catalog + policies + `Caps` on a
-  30-second org-keyed cache. Use it; do not read `catalog_columns` again.
-- **Refusals are `PolicyViolation`, and only that.** `validate` raises nothing
-  else, including on input built to blow the stack — so the executor's error
-  handling has exactly two shapes to think about: a violation, and a
-  `ConnectorError` from the far end.
-- **Masking of *results* has not happened.** Catalog samples were masked at
-  write time (D-013), which says nothing about the rows a query returns. This is
-  the WP where `customers.email` in an answer is `a***@d***.com` or is a leak.
+- **`executor.run(...) -> Execution`** already validates, bounds, executes and
+  masks. `Execution` carries everything a row needs: `sql`, `sql_hash`,
+  `row_count`, `duration_ms`, `truncated`, `sensitive_accessed`, and the
+  `Validated` with `tables` / `columns`. Assemble the row *from that object*,
+  not from values remembered alongside it.
+- **`frame.rows` is already masked**, and `frame.masked_columns` says which
+  columns were. Persist that frame; do not reach back for the original.
+- **Refusals never reach a connector**, so a `PolicyViolation` has no duration
+  and no row count — its record is the code, the subject and the SQL that was
+  refused. Store the *submitted* SQL there, not a canonical form: there is none.
+- **Sanitized SQL only.** `Execution.sql` is our own generated text and is safe;
+  the submitted SQL in a refusal is the model's and is safe for the same reason
+  a `PolicyViolation` message is (arch 7.4). Neither is a credential path.
 
 WP5.3 is then the adversarial corpus per dialect, the property table from arch
 7.5 transcribed as a test map, and the 90% gate — the Phase 5 gate PR.
