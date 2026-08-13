@@ -63,6 +63,19 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Every TODO has a backlog ID
         run: bash scripts/check_todos.sh
+      # Runs before the check it tests, so a guard that has stopped catching
+      # anything fails loudly instead of passing everything (B-019).
+      - name: The STATUS guard still catches a gutted file
+        run: bash scripts/check_status.sh --selftest
+      - name: STATUS.md keeps its checklist and its signed-off work
+        env:
+          # On a PR, what the branch is proposing to change. On a push to main,
+          # the commit before it — comparing a ref with itself proves nothing.
+          STATUS_BASE_REF: >-
+            ${{ github.event_name == 'pull_request'
+                && format('origin/{0}', github.base_ref)
+                || 'HEAD^' }}
+        run: bash scripts/check_status.sh
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
