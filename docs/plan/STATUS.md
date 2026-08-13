@@ -6,8 +6,8 @@ Next step:        `p5.1-dal-validator` — the SQL policy engine. Read plan §6
                   Phase 5 and architecture Part 7.1 and 7.5 **before writing any
                   code**: this is the security boundary, it gets human review on
                   every PR, and the full brief is at the end of this file.
-                  Take **B-016** first — it is a short fix, and WP5.3's coverage
-                  gate is what makes it urgent.
+                  B-016 is cleared, so the coverage number WP5.3 gates on is
+                  now the combined one and is true.
 Merge policy: ASK
 Blocked on user: nothing
 Last updated: 2026-08-13 by Claude Code
