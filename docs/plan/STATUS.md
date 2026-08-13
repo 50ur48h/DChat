@@ -1,7 +1,7 @@
 # STATUS — data-agent build
 
 Current position: **Phases 0–4 complete and signed off.** Phase 5 in progress:
-                  **B-019** done, **B-016** next, then WP5.1
+                  **B-019** and **B-016** done, WP5.1 next
 Next step:        `p5.1-dal-validator` — the SQL policy engine. Read plan §6
                   Phase 5 and architecture Part 7.1 and 7.5 **before writing any
                   code**: this is the security boundary, it gets human review on
@@ -132,7 +132,13 @@ Last updated: 2026-08-13 by Claude Code
       today it went green. The guard has a `--selftest` that CI runs first, so
       a check that has stopped catching anything fails instead of passing
       everything
-- [ ] B-016 Combine coverage across the `api` and `mssql` jobs
+- [x] **B-016** Combine coverage across the `api` and `mssql` jobs
+      — each job now keeps its own `.coverage.<shard>`, uploads it, and a
+      `coverage` job combines them into the number CI reports, with plan §4.4's
+      overall floor of 70 applied there rather than in a job that can only see
+      half the suite. A run with no SQL Server shard says so in the log instead
+      of quietly reporting a total that is six points low. Cleared before WP5.1
+      so WP5.3's `--cov-fail-under=90` on `dal/` lands on a true measurement
 - [ ] WP5.1 sqlglot validator + policy pipeline + catalog grounding
 - [ ] WP5.2 Executor (read-only, timeouts, LIMIT) + masking + audit hook
 - [ ] WP5.3 Adversarial corpus per dialect + property tests + 90% gate ← gate PR
@@ -242,6 +248,13 @@ adversarial corpus per dialect and the 90% gate, and it is the Phase 5 gate PR.
   anything else. Growing it, rewording it and adding items are all free, so the
   only edit it refuses is the one nobody meant to make. `make check.status` runs
   it locally, against the base branch's copy, exactly as `hygiene` does (B-019).
+
+- **Coverage is measured in pieces, and only the combined number is real.** The
+  suite is split by which database a job can reach — `api` has Postgres, `mssql`
+  has SQL Server, neither has both — so each writes its own shard and the
+  `coverage` job combines them. Read the total there, never inside one job. If a
+  future job runs part of the suite, it must upload a shard too, or the
+  connectors it exercises will look untested (B-016).
 
 - **`readonly_verified` is a claim, so it is earned.** It is false until this
   service has evidence: the engine's privilege catalog says the role cannot

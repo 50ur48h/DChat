@@ -96,6 +96,10 @@ jobs:
       # and password are read from this; each test builds its own database name.
       APP_DATABASE_URL: postgresql+asyncpg://dataagent_app:apptest@localhost:5432/postgres
       REQUIRE_DB: "1"
+      # This job measures everything except the SQL Server connector, which it
+      # cannot reach. Its half is kept under its own name and combined with the
+      # mssql job's half in `coverage` below (B-016).
+      COVERAGE_FILE: ${{ github.workspace }}/.coverage.api
     services:
       # pgvector, not plain postgres: revision 0001 creates the vector extension.
       postgres:
@@ -130,6 +134,17 @@ jobs:
       - name: Tenant isolation proof (may never be skipped)
         if: env.RUN == 'true'
         run: make test.rls
+      - name: Keep this job's half of the coverage data
+        if: env.RUN == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-api
+          path: .coverage.api
+          retention-days: 1
+          # Coverage data files start with a dot, and upload-artifact skips
+          # hidden files unless told otherwise — silently, leaving `coverage`
+          # with nothing to combine and a number that looks fine.
+          include-hidden-files: true
       - name: Nothing to do
         if: env.RUN != 'true'
         run: echo "No changes under apps/api or ops — skipping."
@@ -161,6 +176,9 @@ jobs:
       # Postgres fixtures are not part of this job, so the shared conftest must
       # be allowed to skip them rather than failing on a missing DATABASE_URL.
       REQUIRE_DB: "0"
+      # This is the only job that can execute connectors/sqlserver.py, so it is
+      # the only job whose measurement of it means anything (B-016).
+      COVERAGE_FILE: ${{ github.workspace }}/.coverage.mssql
     services:
       mssql:
         image: mcr.microsoft.com/mssql/server:2022-latest
@@ -198,7 +216,41 @@ jobs:
             sh -c 'exec /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$MSSQL_SA_PASSWORD" -C -b -v ReadonlyPassword="$RO_PASSWORD"' \
             < ops/seed/seed_pizza_mssql.sql
       - name: Connector tests (may not skip here)
-        run: uv run --directory apps/api pytest tests/connectors -q
+        run: uv run --directory apps/api pytest tests/connectors -q --cov
+      - name: Keep this job's half of the coverage data
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-mssql
+          path: .coverage.mssql
+          retention-days: 1
+          include-hidden-files: true
+
+  # The API's coverage number, assembled from the jobs that each measured part
+  # of it (B-016). Splitting the suite by which database a job can reach is
+  # right; letting either half report the total as if it were the whole is not.
+  #
+  # `always()` for the D-007 reason: a job that is skipped never reports, and a
+  # number that only sometimes appears is one nobody notices going missing. The
+  # mssql shard is conditional, so this must not be conditional on it — the
+  # script says which shards it found and what their absence means.
+  coverage:
+    needs: [api, mssql]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+      - name: Collect what each job measured
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+          path: apps/api/coverage-data
+      - name: Combine the shards and apply the floor
+        run: bash scripts/coverage_report.sh
 
   web:
     needs: changes

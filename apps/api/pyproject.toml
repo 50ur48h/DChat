@@ -104,6 +104,11 @@ markers = [
 [tool.coverage.run]
 source = ["src/dataagent"]
 branch = true
+# The suite is measured in more than one CI job — one has Postgres, one has SQL
+# Server, neither has both — and the shards are combined afterwards (B-016).
+# Absolute paths would not match across jobs, and a combine that silently
+# matches nothing reports the same structurally wrong number it was meant to fix.
+relative_files = true
 # SQLAlchemy's asyncio layer runs awaited database work inside greenlets, and the
 # secrets backend does its file I/O in a worker thread. Without declaring both,
 # coverage silently misses every line executed there — reporting service modules
