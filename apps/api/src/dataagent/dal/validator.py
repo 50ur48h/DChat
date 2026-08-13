@@ -358,7 +358,20 @@ def _parse_one_read_only(sql: str, dialect: str) -> tuple[exp.Expression, bool]:
 
     statement = parsed[0]
     if _is_explain(statement):
-        inner, nested = _parse_one_read_only(_explain_body(statement), dialect)
+        try:
+            inner, nested = _parse_one_read_only(_explain_body(statement), dialect)
+        except PolicyViolation as violation:
+            # A body that does not parse means the EXPLAIN is malformed, and
+            # "line 1, column 9" about a fragment nobody wrote is no help. The
+            # common case is EXPLAIN ANALYZE, which executes the query it claims
+            # to be planning, so the answer names the rule rather than the typo.
+            if violation.code is not ViolationCode.PARSE_ERROR:
+                raise
+            explain_failure = PolicyViolation(
+                ViolationCode.STATEMENT_NOT_READ_ONLY,
+                "EXPLAIN must be followed by a plain SELECT — no ANALYZE, and no options.",
+            )
+            raise explain_failure from None
         if nested:
             raise PolicyViolation(
                 ViolationCode.STATEMENT_NOT_READ_ONLY, "EXPLAIN cannot explain an EXPLAIN."
@@ -606,6 +619,11 @@ def _lookup_table(
     return TableRef(candidates[0].schema_name, candidates[0].table_name)
 
 
+def _is_quoted(column: exp.Column) -> bool:
+    identifier = column.this
+    return isinstance(identifier, exp.Identifier) and bool(identifier.quoted)
+
+
 def _is_system_schema(schema: str) -> bool:
     folded = schema.lower()
     return folded in _SYSTEM_SCHEMAS or folded.startswith(_SYSTEM_SCHEMA_PREFIXES)
@@ -684,14 +702,18 @@ def _diagnose(
     """
     used = set(tables.values())
     available: dict[str, set[str]] = {}
+    exact_available: dict[str, set[str]] = {}
     columns_of: dict[TableRef, set[str]] = {}
+    exact_columns_of: dict[TableRef, set[str]] = {}
     for table in catalog.tables:
         ref = TableRef(table.schema_name, table.table_name)
         if ref not in used:
             continue
         columns_of[ref] = {column.name.lower() for column in table.columns}
+        exact_columns_of[ref] = {column.name for column in table.columns}
         for column in table.columns:
             available.setdefault(column.name.lower(), set()).add(table.table_name)
+            exact_available.setdefault(column.name, set()).add(table.table_name)
 
     aliases: dict[str, TableRef] = {}
     for node in statement.find_all(exp.Table):
@@ -699,20 +721,26 @@ def _diagnose(
             aliases[node.alias_or_name.lower()] = TableRef(node.db, node.name)
 
     for column in statement.find_all(exp.Column):
+        # A quoted identifier means what it says, case included, so `"EMAIL"` is
+        # not `email` and reporting it as unknown is the truth rather than a
+        # near-miss the agent has to guess at.
+        exact = _is_quoted(column)
+        wanted = column.name if exact else column.name.lower()
         if column.table:
             owner = aliases.get(column.table.lower())
             if owner is None or owner not in columns_of:
                 # An alias belonging to a CTE or a derived table: what it holds
                 # is decided by its own body, not by the catalog.
                 continue
-            if column.name.lower() not in columns_of[owner]:
+            known = columns_of[owner] if not exact else exact_columns_of.get(owner, set())
+            if wanted not in known:
                 return PolicyViolation(
                     ViolationCode.UNKNOWN_COLUMN,
                     f"There is no column {column.name} on {owner}.",
                     subject=f"{owner}.{column.name}",
                 )
             continue
-        owners = available.get(column.name.lower(), set())
+        owners = (exact_available if exact else available).get(wanted, set())
         if not owners:
             return PolicyViolation(
                 ViolationCode.UNKNOWN_COLUMN,

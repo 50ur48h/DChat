@@ -1,0 +1,296 @@
+# The adversarial corpus (plan §6 WP5.3, Appendix C; architecture Part 7.5).
+#
+# APPEND-ONLY. A case is never edited to make it pass and never deleted because
+# it became inconvenient: each one is a statement that must not reach a
+# customer's database, and the file is the standing record of what has been
+# thought of. If a case starts failing, the validator changed and the question
+# is whether that change was intended — not whether the case is still wanted.
+#
+# Every entry states the ViolationCode it must produce. "Refused somehow" is not
+# the assertion: an attack caught by the wrong rule is a rule that happens to
+# overlap today and may not tomorrow, and the code is what WP5.3's runner, the
+# audit trail and any future eval all key on.
+#
+# The runner sends each case through the executor with a recording connector, so
+# every case proves two things at once: it was refused, and **nothing was sent**.
+#
+# Fields:
+#   id       stable, kebab-case, never reused
+#   sql      the statement, exactly as an attacker would submit it
+#   expect   the ViolationCode (dal/errors.py)
+#   dialects optional; defaults to both. Only for genuinely engine-specific SQL
+#   note     why this case exists, when that is not obvious from the SQL
+#
+# The fixture catalog is in catalog_fixture.py: public.{orders, customers,
+# menu_items, staff}, archive.{orders_2025, staff}. `customers.tax_id` is
+# **deny**, `customers.email` and the `full_name` columns are **mask**.
+
+cases:
+  # -- more than one statement ----------------------------------------------
+  - id: multi-statement-drop
+    sql: "SELECT id FROM orders; DROP TABLE orders"
+    expect: multiple_statements
+    note: the classic smuggle, and the reason statement counting comes first
+  - id: multi-statement-trailing-delete
+    sql: "SELECT id FROM orders;DELETE FROM orders"
+    expect: multiple_statements
+    note: no space after the semicolon, in case anything splits on '; '
+  - id: multi-statement-comment-between
+    sql: "SELECT id FROM orders; /* pause */ UPDATE orders SET total = 0"
+    expect: multiple_statements
+  - id: transaction-control
+    sql: "BEGIN; SELECT id FROM orders; COMMIT"
+    expect: multiple_statements
+    note: Appendix C's tx-control case; counted before it is typed
+
+  # -- writes, however they are dressed -------------------------------------
+  #
+  # Two codes appear here and the split is the rule order, not an accident: a
+  # write at the *top level* is refused by the statement-type gate
+  # (statement_not_read_only) because that runs first, and a write *nested
+  # inside a read* is refused by the node walk (write_operation) because that is
+  # the only thing that can see it. The second is the interesting one — it is
+  # the case a validator that checks only the statement type approves.
+  - id: bare-delete
+    sql: "DELETE FROM orders"
+    expect: statement_not_read_only
+  - id: bare-update
+    sql: "UPDATE orders SET total = 0"
+    expect: statement_not_read_only
+  - id: bare-insert
+    sql: "INSERT INTO orders (id) VALUES (1)"
+    expect: statement_not_read_only
+  - id: dml-in-cte-update
+    sql: "WITH x AS (UPDATE orders SET total = 0 RETURNING id) SELECT id FROM x"
+    expect: write_operation
+    note: parses as a SELECT; the top-level type check alone approves it
+    dialects: [postgres]
+  - id: dml-in-cte-insert
+    sql: "WITH x AS (INSERT INTO orders (id) VALUES (1) RETURNING id) SELECT id FROM x"
+    expect: write_operation
+    dialects: [postgres]
+  - id: dml-in-cte-delete-nested
+    sql: >-
+      SELECT id FROM orders WHERE id IN
+      (WITH d AS (DELETE FROM orders RETURNING id) SELECT id FROM d)
+    expect: write_operation
+    dialects: [postgres]
+  - id: select-into
+    sql: "SELECT * INTO orders_copy FROM orders"
+    expect: write_operation
+    note: Appendix C's tsql SELECT INTO; refused on both engines
+  - id: locking-read
+    sql: "SELECT id FROM orders FOR UPDATE"
+    expect: write_operation
+    note: takes row locks on a database we promised only to read
+    dialects: [postgres]
+  - id: truncate
+    sql: "TRUNCATE TABLE orders"
+    expect: statement_not_read_only
+  - id: grant
+    sql: "GRANT SELECT ON orders TO someone"
+    expect: statement_not_read_only
+  - id: create-table
+    sql: "CREATE TABLE smuggled (a int)"
+    expect: statement_not_read_only
+  - id: drop-table
+    sql: "DROP TABLE orders"
+    expect: statement_not_read_only
+  - id: alter-session-read-only-off
+    sql: "SET default_transaction_read_only = off"
+    expect: statement_not_read_only
+    note: how a read-only session stops being one
+  - id: explain-of-a-write
+    sql: "EXPLAIN DELETE FROM orders"
+    expect: statement_not_read_only
+    note: Appendix C's DML-under-EXPLAIN
+  - id: explain-analyze
+    sql: "EXPLAIN ANALYZE SELECT id FROM orders"
+    expect: statement_not_read_only
+    note: >-
+      ANALYZE executes the query it claims to be planning. Reported as "EXPLAIN
+      must be followed by a plain SELECT" rather than as a parse failure of a
+      fragment nobody wrote — a distinction this corpus caused
+
+  # -- the engine's own dictionary ------------------------------------------
+  - id: pg-catalog-tables
+    sql: "SELECT * FROM pg_catalog.pg_tables"
+    expect: system_schema
+    dialects: [postgres]
+  - id: information-schema-columns
+    sql: "SELECT * FROM information_schema.columns"
+    expect: system_schema
+  - id: information-schema-upper
+    sql: "SELECT * FROM INFORMATION_SCHEMA.COLUMNS"
+    expect: system_schema
+    note: case-folded, because a case-sensitive deny list is not one
+  - id: sys-objects
+    sql: "SELECT * FROM sys.objects"
+    expect: system_schema
+    dialects: [tsql]
+  - id: system-schema-in-subquery
+    sql: "SELECT id FROM orders WHERE id IN (SELECT oid FROM pg_catalog.pg_class)"
+    expect: system_schema
+    dialects: [postgres]
+    note: not only at the top level
+  - id: cross-database
+    sql: "SELECT name FROM master.sys.databases"
+    expect: cross_database
+    dialects: [tsql]
+
+  # -- engine escape hatches -------------------------------------------------
+  - id: pg-sleep
+    sql: "SELECT pg_sleep(60)"
+    expect: denied_function
+    dialects: [postgres]
+  - id: pg-read-file
+    sql: "SELECT pg_read_file('/etc/passwd')"
+    expect: denied_function
+    dialects: [postgres]
+  - id: pg-sleep-in-predicate
+    sql: "SELECT id FROM orders WHERE id = 1 AND pg_sleep(60) IS NULL"
+    expect: denied_function
+    dialects: [postgres]
+  - id: xp-cmdshell
+    sql: "EXEC xp_cmdshell 'dir'"
+    expect: statement_not_read_only
+    dialects: [tsql]
+    note: EXECUTE is not a SELECT, so the type gate refuses it before the name is read
+  - id: xp-cmdshell-as-function
+    sql: "SELECT xp_cmdshell('dir')"
+    expect: denied_function
+    dialects: [tsql]
+  - id: openrowset
+    sql: "SELECT * FROM OPENROWSET('SQLNCLI', 'server=x;', 'SELECT 1')"
+    expect: denied_function
+    dialects: [tsql]
+    note: sqlglot leaves it Anonymous, so the function rule reaches it first
+  - id: unknown-extension-function
+    sql: "SELECT some_extension_fn(id) FROM orders"
+    expect: unknown_function
+    note: on no deny list, and refused for being unrecognised (D-015)
+  - id: table-function
+    sql: "SELECT * FROM generate_series(1, 10)"
+    expect: table_function
+
+  # -- identifiers that are not in the catalog -------------------------------
+  - id: unknown-table
+    sql: "SELECT id FROM orders_backup"
+    expect: unknown_table
+  - id: unknown-table-in-join
+    sql: "SELECT o.id FROM orders o JOIN orders_backup b ON b.id = o.id"
+    expect: unknown_table
+  - id: unknown-column
+    sql: "SELECT ssn FROM customers"
+    expect: unknown_column
+  - id: unknown-column-qualified
+    sql: "SELECT c.ssn FROM customers c"
+    expect: unknown_column
+  - id: unknown-column-in-where
+    sql: "SELECT id FROM customers WHERE ssn = '1'"
+    expect: unknown_column
+  - id: ambiguous-column
+    sql: "SELECT id FROM public.orders o JOIN customers c ON c.id = o.customer_id"
+    expect: ambiguous_column
+    note: >-
+      the name is on both tables, so qualifying it is the repair
+  - id: ambiguous-table
+    sql: "SELECT id FROM staff"
+    expect: ambiguous_table
+    note: exists in public and archive; guessing would be a coin toss
+  - id: no-table-at-all
+    sql: "SELECT 1"
+    expect: unknown_table
+
+  # -- a denied column, in every position it can hide ------------------------
+  - id: denied-in-select-list
+    sql: "SELECT tax_id FROM customers"
+    expect: denied_column
+  - id: denied-in-where
+    sql: "SELECT id FROM customers WHERE tax_id LIKE '%1%'"
+    expect: denied_column
+    note: a predicate reads the column out one answer at a time
+  - id: denied-in-join-condition
+    sql: "SELECT c.id FROM customers c JOIN menu_items m ON c.tax_id = m.name"
+    expect: denied_column
+  - id: denied-in-order-by
+    sql: "SELECT id FROM customers ORDER BY tax_id"
+    expect: denied_column
+  - id: denied-in-group-by
+    sql: "SELECT COUNT(*) FROM customers GROUP BY tax_id"
+    expect: denied_column
+  - id: denied-in-having
+    sql: "SELECT COUNT(*) FROM customers HAVING MAX(tax_id) > '1'"
+    expect: denied_column
+  - id: denied-in-subquery
+    sql: "SELECT * FROM (SELECT tax_id FROM customers) t"
+    expect: denied_column
+  - id: denied-in-cte
+    sql: "WITH t AS (SELECT tax_id AS reference FROM customers) SELECT reference FROM t"
+    expect: denied_column
+    note: renaming it in a CTE does not launder it
+  - id: denied-in-union-arm
+    sql: "SELECT city FROM customers UNION SELECT tax_id FROM customers"
+    expect: denied_column
+    note: Appendix C's UNION smuggle
+  - id: denied-in-scalar-subquery
+    sql: "SELECT (SELECT MAX(tax_id) FROM customers) AS x FROM orders"
+    expect: denied_column
+  - id: denied-in-star-expansion
+    sql: "SELECT * FROM customers"
+    expect: denied_column
+    note: the star is expanded against the catalog before the column rules run
+  - id: denied-under-a-function
+    sql: "SELECT UPPER(tax_id) FROM customers"
+    expect: denied_column
+  - id: denied-under-count
+    sql: "SELECT COUNT(tax_id) FROM customers"
+    expect: denied_column
+    note: deny is not mask — an aggregate over it is refused too
+
+  # -- casing, quoting and lookalikes ---------------------------------------
+  - id: denied-upper-case
+    sql: "SELECT TAX_ID FROM CUSTOMERS"
+    expect: denied_column
+    note: unquoted identifiers fold, so this is the same column
+  - id: denied-mixed-case
+    sql: "SELECT tAx_Id FROM customers"
+    expect: denied_column
+  - id: quoted-upper-case-column
+    sql: 'SELECT "EMAIL" FROM "CUSTOMERS"'
+    expect: unknown_column
+    note: >-
+      Appendix C's case/quoting probe. A quoted identifier means what it says,
+      case included, so "EMAIL" is not `email` and the refusal names it. Table
+      names are matched case-insensitively on purpose (see _catalog_index), so
+      "CUSTOMERS" does resolve — this case is about the column
+    dialects: [postgres]
+  - id: unicode-homoglyph-column
+    sql: "SELECT еmail FROM customers"
+    expect: unknown_column
+    note: >-
+      the first letter is Cyrillic ye (U+0435). A different identifier, and
+      refused as one — never quietly matched to `email`
+  - id: unicode-homoglyph-table
+    sql: "SELECT id FROM сustomers"
+    expect: unknown_table
+    note: Cyrillic es (U+0441) for the leading c
+
+  # -- statements that cannot be checked ------------------------------------
+  - id: unparseable
+    sql: "SELECT FROM WHERE"
+    expect: parse_error
+  - id: empty
+    sql: "   "
+    expect: empty_statement
+  - id: comment-only
+    sql: "-- nothing to see"
+    expect: empty_statement
+  - id: unterminated-string
+    sql: "SELECT 'unterminated FROM orders"
+    expect: parse_error
+  - id: procedural-block
+    sql: "DO $$ BEGIN PERFORM 1; END $$"
+    expect: statement_not_read_only
+    dialects: [postgres]
+    note: sqlglot cannot parse it, so it becomes a Command — which is not a SELECT
