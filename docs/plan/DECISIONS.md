@@ -4,6 +4,35 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-015 — A function the validator cannot name is a function it will not run
+Date: 2026-08-13 · Phase: 5 · PR: #28
+Context: Architecture 7.5 and plan §6 WP5.1 specify a **deny list** of engine
+escape hatches (`pg_read_file`, `pg_sleep`, `xp_*`, `OPENROWSET`). Building it
+against sqlglot showed the deny list is the weaker half of a control that is
+already there: sqlglot resolves every function it knows to a typed node
+(`Count`, `Lower`, `TimestampTrunc`, `Cast`, even `generate_series`), and leaves
+everything it does not know as `Anonymous` — which is where *every* named escape
+hatch lands, and where the next one nobody has thought of will land too.
+Options: (a) implement the deny list as written and accept that an unlisted
+function passes; (b) refuse every `Anonymous` function, with the deny list kept
+only to give a clearer message; (c) an explicit allowlist of every permitted
+function name, per dialect.
+Decision: (b). The deny list stays and is the reason `pg_sleep` earns
+`denied_function` rather than `unknown_function`, but it is not what stops
+anything: an unrecognised function is refused for being unrecognised.
+`_ALLOWED_UNTYPED_FUNCTIONS` is the escape valve and is **empty** — an entry in
+it is a standing decision about one engine function, made in a PR that says why.
+Consequences: stricter than the architecture, in the direction 7.5 already
+states ("overly strict beats permissive: exotic-but-valid SQL that the validator
+rejects returns a clear error the agent can rephrase around"). The cost is real:
+a legitimate engine-specific function is refused until somebody adds it, and
+Phase 7 is where that will first be felt. Architecture 7.5 updated to describe
+the two-layer control. Two ceilings ship with it for the same reason — a
+statement longer than 20,000 characters or nested deeper than 50 is refused
+before parsing, because parse, qualify and generate all recurse, and 300 nested
+parentheses raised a bare `RecursionError` out of the validator during testing:
+a way past every rule, since none of them ever ran.
+
 ## D-014 — No `embedding` column until something can fill it
 Date: 2026-08-13 · Phase: 4 · PR: #23
 Context: Architecture Part 10.1 gives `catalog_tables` an `embedding vector(1536)`

@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from dataagent.auth.context import RequestContext
 from dataagent.auth.guards import require_admin, require_contributor, require_member
 from dataagent.catalog import browse, discovery, policies, profiler, search
+from dataagent.dal import policy as dal_policy
 from dataagent.datasources.service import NotFoundError
 
 router = APIRouter(prefix="/v1", tags=["catalog"])
@@ -342,6 +343,11 @@ async def set_column_policy(
         )
     except policies.ColumnNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+
+    # The DAL caches this data source's policies for a few seconds. An Admin who
+    # has just denied a column expects the next query to be refused, not the one
+    # after the TTL, so the decision drops the entry rather than waiting it out.
+    dal_policy.invalidate_source(context.org_id, data_source_id)
 
     return PolicyOut(
         schema_name=decided.schema_name,
