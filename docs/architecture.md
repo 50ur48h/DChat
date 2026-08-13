@@ -712,15 +712,34 @@ agent_configs(org_id PK, instructions text, budget_overrides jsonb, model_overri
 conversations(id, org_id, user_id, title, created_at)
 messages(id, org_id, conversation_id, role user|assistant, content, run_id null, created_at)
 agent_events(id bigserial, org_id, run_id, seq, ts, type, payload jsonb, UNIQ(run_id,seq))
-query_executions(id, org_id, run_id, data_source_id, sql_text, sql_hash, tables jsonb,
-                 columns jsonb, status, row_count, duration_ms, error, sensitive_accessed bool)
+query_executions(id, org_id, run_id, data_source_id NULL ON DELETE SET NULL, actor_user_id,
+                 sql_text, sql_hash, tables jsonb, columns jsonb,
+                 status ok|error|refused, violation_code NULL, row_count, duration_ms,
+                 error, sensitive_accessed bool, created_at)
 result_artifacts(id, org_id, query_execution_id, summary jsonb, sample_rows jsonb masked,
-                 truncated bool, expires_at)
+                 truncated bool, storage_ref NULL, expires_at, created_at)
 findings(id, org_id, run_id, statement, support jsonb, confidence)
 audit_log(id bigserial, org_id, actor_user_id, action, object_type, object_id,
           details jsonb, sensitive bool, ts)   -- append-only; no UPDATE/DELETE grants
 usage_ledger(id, org_id, ts, kind tokens|queries|runs, model, amount, cost_estimate, run_id)
 ```
+
+**An execution row outlives the source it read** (DECISIONS D-016). Catalog rows
+cascade from `data_sources` because they *describe* a source and mean nothing
+without it; a `query_executions` row **records an act** and stays meaningful
+forever, so deleting a data source sets `data_source_id` to NULL and keeps the
+row. What is lost is the join, never the evidence — the statement, the tables
+and columns it touched, who ran it, whether anything sensitive was reached, and
+when, all remain. Retention of results is therefore governed by
+`result_artifacts.expires_at` (7.6) rather than by whoever last tidied up a data
+source. `result_artifacts` does cascade from its execution: a payload with
+nothing to say about itself is not worth keeping.
+
+`status` is three-valued because **refused** is a distinct outcome from
+**error**: a statement the DAL declined to send reaches no engine, so it appears
+in no server log and no latency graph, and this table is the only place it is
+visible at all. `violation_code` is set exactly when `status = 'refused'`, and a
+CHECK constraint enforces the pairing.
 
 ## 10.2 API contracts (§49)
 
