@@ -10,6 +10,13 @@ under "Unreleased", only for changes a user would notice.
 ## [Unreleased]
 
 ### Security
+- Every query the platform runs against a customer's database is checked before
+  it is sent: one statement, read-only, no system schemas, and every table and
+  column resolved against that organization's own catalog. A column an admin has
+  marked unqueryable is refused wherever it appears — in the result, in a
+  filter, in a join — and a column marked sensitive comes back masked. Each
+  query is capped in rows and in time, and every attempt is recorded, including
+  the ones refused before the database was contacted.
 - Connections to a customer's database are encrypted unless the database is on
   the server itself. A data source may ask for stricter TLS and never for
   weaker; each one shows the mode it uses, and testing it reports whether the

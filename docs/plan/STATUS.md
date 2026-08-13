@@ -1,16 +1,16 @@
 # STATUS — data-agent build
 
-Current position: **Phase 5 built; the gate is yours.** WP5.1, WP5.2a, WP5.2b
-                  and WP5.3 are merged or in review; B-019 and B-016 cleared
-                  before them.
-Next step:        **Sign off the Phase 5 gate** — the manual test script is in
-                  the WP5.3 PR. After that, Phase 6 / WP6.1
-                  (`p6.1-llm-core`): the LLMProvider protocol, FakeLLM, the
-                  registry and usage metering. Phase 6 needs a real provider key
-                  only at WP6.2 (plan §3.2).
+Current position: **Phases 0–5 complete and signed off.** The security boundary
+                  is built, proven and closed.
+Next step:        Phase 6 / WP6.1 (`p6.1-llm-core`) — the LLMProvider protocol,
+                  FakeLLM, the registry and usage metering. **No key needed for
+                  this WP**; WP6.2 is the one that needs a real provider, and
+                  the brief at the end of this file says exactly what to ask
+                  for. Phase 6 depends only on Phase 0, so nothing in it is
+                  waiting on anything already built.
 Merge policy: ASK
 Blocked on user: nothing
-Last updated: 2026-08-13 by Claude Code
+Last updated: 2026-08-13 by Claude Code (session end: Phase 5 closed)
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
 - [x] WP0.1 Repo, docs, tracking files, branch protection
@@ -203,7 +203,19 @@ Last updated: 2026-08-13 by Claude Code
       file as the full run and replaced the shard with a DAL-only one, taking
       the total from 96% to 63% — which **B-016's combine job caught on this
       very PR**. The gate now measures into its own file
-- [ ] GATE: arch Part 7.5 property table proven in tests; user sign-off
+- [x] GATE: arch Part 7.5 property table proven in tests; user sign-off
+      — signed off 2026-08-13, and the sign-off included the two steps that
+      matter most: the owner tampered with a corpus expectation and saw the case
+      fail naming both codes, and renamed a test in the property map and saw the
+      gate refuse to pass. The evidence was tested, not just read.
+      What the phase leaves behind: one entry point (`dal.run`), 418 DAL tests,
+      64 adversarial cases over both dialects, `dal/` at **97%** against a 90%
+      gate that CI now enforces in its own step, and a `query_executions` row
+      for every attempt — including the ones refused before any engine saw them.
+      **B-019** and **B-016** were cleared first, and both earned their place
+      during the phase: the STATUS guard now protects this very file, and the
+      coverage combine caught the DAL gate clobbering the shard on the PR that
+      introduced it.
 
 ## Phase 6 — LLM abstraction (M6)
 - [ ] WP6.1 LLMProvider protocol + FakeLLM + registry + usage metering
@@ -252,46 +264,45 @@ Last updated: 2026-08-13 by Claude Code
 
 ## Next step
 
-Phase 5 / **WP5.3 — adversarial corpus + gates** (`p5.3-dal-adversarial`).
-**⚠ The gate PR for the security phase**, and the one that ends in your
-sign-off. The DAL is built; this proves it, and the proof is the deliverable.
+Phase 6 / **WP6.1 — protocol + FakeLLM + registry + meter** (`p6.1-llm-core`).
+Plan §6 Phase 6, architecture Part 4 and 8.3. No human review requirement and no
+gate on this WP; WP6.2 is the gate PR.
 
-Build (plan §6 WP5.3, architecture Part 7.5):
+**No USER INPUT is needed to start.** WP6.2 needs at least one real provider —
+Azure OpenAI (endpoint, key, a chat deployment and a small/cheap deployment)
+and/or an Anthropic API key. Both is better, because two providers is what
+proves the abstraction. Ask when WP6.1 is merged, not before, and remember CI
+never uses them.
 
-- `apps/api/tests/dal/adversarial_corpus.yaml` — **append-only**. The starter
-  set is plan Appendix C: multi-statement, comment tricks, DML in a CTE, system
-  catalog probes, unknown and denied identifiers in every clause position,
-  UNION smuggling, casing/quoting/unicode homoglyph identifiers, dialect-specific
-  `TOP`/`OFFSET` abuse, function deny-list hits. Each case names the
-  `ViolationCode` it must produce; the runner asserts **refusal, never
-  execution**, on both dialects.
-- Property tests (hypothesis): generated identifier casings and quotings never
-  bypass grounding.
-- CI: a dedicated `test.dal` step with `--cov=dataagent.dal --cov-fail-under=90`.
-  The overall floor of 70 is already applied on the combined number (B-016), so
-  this is the second gate rather than a replacement.
-- **The property table of arch 7.5, transcribed as a test map** — every row
-  names a passing test. That map is the gate's evidence, so write it as a file
-  a reviewer can read against the architecture, not as a comment.
+Build:
 
-What is already true, and should be cited rather than rebuilt:
+- `llm/base.py` — `LLMProvider.complete(role, messages, schema=None, budget)
+  -> Completion`. Structured output through a JSON-schema-constrained call where
+  the provider supports one, and parse-then-repair **once** where it does not.
+- `llm/registry.py` — the five roles from arch Part 4 (`planner`, `sql_author`,
+  `critic`, `composer`, `cheap`) mapped from config. Model tiering is the
+  biggest cost lever in the product (arch 8.3), and it lives here.
+- `llm/fake.py` — the deterministic FakeLLM: scripted responses keyed by
+  (role, matcher), every call recorded for assertions. **This is the backbone of
+  every agent test and of the Phase 9 evals**, so its recording API is worth
+  more care than its scripting API.
+- `llm/meter.py` + a migration for `usage_ledger` — tokens in/out, model, role,
+  org, run, cost estimate, on **every** call whatever the provider. A new tenant
+  table, so: RLS policy, `TENANT_TABLES`, rls_proof extension, same PR. That
+  rule has bitten twice now and both times the guard caught it.
 
-- `tests/dal/test_violation_codes.py` already pins the code vocabulary and gives
-  **every code a statement that produces it**. That table is the corpus's seed
-  and the two must not drift — a code with no corpus case is a rule with no
-  attack, and vice versa.
-- `dal/` sits at **97%** today, so the 90% gate should pass on arrival. If it
-  does not, the answer is a test, never a lowered gate (plan §1.7).
-- The refusal path is recorded (`status='refused'`, `violation_code`), so a
-  corpus case can also assert that the attempt was *written down*, which is the
-  half of 7.5 that is about detection rather than prevention.
-- Both dialects already run every DAL test through the `either` fixture. A
-  corpus case that only runs on one engine is a case that proves half of what
-  it claims.
+What Phase 5 hands it:
 
-**GATE (arch M5):** the property table proven per dialect, the corpus green,
-`dal/` ≥90%, and your sign-off. Everything after this phase — the agent, the
-tools, the chat UI — inherits whatever this gate lets through.
+- **Nothing in `dal/` calls an LLM and nothing in `llm/` will call the DAL.**
+  The agent joins them in Phase 7; keeping them ignorant of each other is what
+  makes the FakeLLM able to stand in for a provider without a database, and the
+  DAL testable without a model.
+- **`usage_ledger` is the third tenant table this build adds after the pattern
+  was set** (0007 catalog, 0010 executions). Copy 0010's shape: policy, force,
+  grant, and the seed/forge pair in `test_rls_proof.py`.
+- **Budgets are not built yet.** `Completion` should carry what a budget would
+  need — tokens, model, latency — but the BudgetState that spends them is
+  Phase 8. Do not invent it early.
 
 ## Notes
 
@@ -300,6 +311,13 @@ tools, the chat UI — inherits whatever this gate lets through.
   cascading the history away — so every reader must handle a null there, and a
   screen that groups by source needs an "unregistered" bucket. Catalog rows
   still cascade, because they describe a source rather than record an act.
+
+- **Two guards built this phase have already paid for themselves, on the very
+  PRs that introduced the problems they catch.** The STATUS check (B-019) now
+  protects this file; the coverage combine (B-016) caught the new DAL gate
+  overwriting the whole suite's shard, and said what the number was made of.
+  Neither would have been noticed by a person reading a green tick. When a guard
+  fires, read what it says before assuming it is wrong.
 
 - **Nothing reads customer data except through `dal.run`.** It is the only
   entry point, and it records on every path — success, engine failure, and
@@ -390,7 +408,11 @@ tools, the chat UI — inherits whatever this gate lets through.
 - **The local demo environment, as this session left it.** Five containers up
   (`platform-pg`, `seed-pizza-pg`, `mssql`, `api`, `web`); platform database at
   revision **0010**, and the `api` image rebuilt (WP5.1 added sqlglot, so an
-  image from before it cannot import the DAL); the demo organization `ebfe8139-…` holds two verified data
+  image from before it cannot import the DAL — rebuild after any dependency
+  change or the container and the host disagree about what exists). The demo
+  org's `query_executions` holds real rows from the WP5.2b verification: two
+  `ok`, one `refused`, one `error`. They are evidence, not fixtures — a reseed
+  does not recreate them; the demo organization `ebfe8139-…` holds two verified data
   sources, each with an active version 1 catalog, and one hand-set column policy.
   `make up && make seed` and `make up.mssql && make seed.mssql` rebuild the
   fixtures from nothing; `make db.setup` brings a fresh database to head.
