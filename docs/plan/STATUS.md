@@ -295,6 +295,12 @@ tools, the chat UI — inherits whatever this gate lets through.
 
 ## Notes
 
+- **An audit row outlives the thing it is about** (D-016, owner's call). Deleting
+  a data source sets `query_executions.data_source_id` to NULL rather than
+  cascading the history away — so every reader must handle a null there, and a
+  screen that groups by source needs an "unregistered" bucket. Catalog rows
+  still cascade, because they describe a source rather than record an act.
+
 - **Nothing reads customer data except through `dal.run`.** It is the only
   entry point, and it records on every path — success, engine failure, and
   refusal. Calling `executor.execute` directly would get data without leaving a
