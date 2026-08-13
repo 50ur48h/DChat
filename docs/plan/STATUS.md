@@ -1,12 +1,12 @@
 # STATUS — data-agent build
 
-Current position: **Phases 0–4 complete and signed off.** Phase 5 in progress:
-                  **B-019**, **B-016**, **WP5.1** and **WP5.2a** done
-Next step:        `p5.2b-dal-audit` — the record: revision 0010, the artifact
-                  store, and the audit hook. Still the security boundary: human
-                  review on every PR, and **two new tenant tables**, so RLS
-                  policies, `TENANT_TABLES` and the rls_proof suite all move in
-                  the same PR. The brief is at the end of this file.
+Current position: **Phases 0–4 complete and signed off.** Phase 5: everything
+                  but the gate is done — **B-019**, **B-016**, **WP5.1**,
+                  **WP5.2a** and **WP5.2b**
+Next step:        `p5.3-dal-adversarial` — the **gate PR** for the security
+                  phase. The adversarial corpus per dialect, arch 7.5's property
+                  table transcribed as a test map, and the coverage gates. Human
+                  review, and this one ends in your sign-off. Brief at the end.
 Merge policy: ASK
 Blocked on user: nothing
 Last updated: 2026-08-13 by Claude Code
@@ -167,7 +167,22 @@ Last updated: 2026-08-13 by Claude Code
       `COUNT(email)` is not, which is the distinction that makes `mask` more
       useful than `deny`. An Admin's `mask_type` is now honoured — `browse` was
       dropping it. 84 DAL tests, `dal/` at **98%**
-- [ ] WP5.2b Query execution records + artifacts + audit hook
+- [x] WP5.2b Query execution records + artifacts + audit hook
+      — revision **0010**: `query_executions` and `result_artifacts`, both
+      tenant tables, both with an RLS policy, both in `TENANT_TABLES`, and the
+      rls_proof suite extended to seed and forge rows in each. `status` has
+      three values, not two: **refused** is the row this half exists for, since
+      a query that never reached an engine leaves no other trace anywhere — no
+      connection, no server log, no latency graph. A CHECK constraint makes a
+      refusal without a `violation_code` impossible.
+      `dal.run` is the front door and records on every path, so there is no
+      call that gets data without leaving a row. Artifacts go to an
+      `ArtifactStore` (local files now, Blob in Phase 12 behind the same
+      interface) whose keys are org-prefixed and checked, `..` included.
+      Verified against the live pizza database through the container: real
+      counts returned, **real customer emails masked** to `k***@e***.com`, all
+      three outcomes recorded, and no unmasked value in either table or in any
+      stored file. `dal/` at **97%**
 - [ ] WP5.3 Adversarial corpus per dialect + property tests + 90% gate ← gate PR
 - [ ] GATE: arch Part 7.5 property table proven in tests; user sign-off
 
@@ -218,48 +233,54 @@ Last updated: 2026-08-13 by Claude Code
 
 ## Next step
 
-Phase 5 / **WP5.2b — the record** (`p5.2b-dal-audit`).
-**⚠ Still the security boundary.** Human review on every PR. WP5.2a made the
-read bounded and the result masked; this is what remembers that it happened.
+Phase 5 / **WP5.3 — adversarial corpus + gates** (`p5.3-dal-adversarial`).
+**⚠ The gate PR for the security phase**, and the one that ends in your
+sign-off. The DAL is built; this proves it, and the proof is the deliverable.
 
-Build (plan §6 WP5.2, architecture Part 7.1 step 7 and Part 10.1):
+Build (plan §6 WP5.3, architecture Part 7.5):
 
-- **Revision 0010: `query_executions` and `result_artifacts`.** Both are tenant
-  tables, so both need an RLS policy, a line in `TENANT_TABLES` **and** an
-  extension of the rls_proof suite — in this same PR, no exceptions
-  (`test_no_tenant_table_can_be_added_without_protecting_it` asks the database
-  and will fail otherwise).
-- `dal/artifacts.py`: an `ArtifactStore` interface with a local-disk backend,
-  the same seam `SecretsProvider` uses — Blob arrives in Phase 12 behind it.
-  What is stored is the **masked** frame; there is no unmasked copy to leak,
-  in the same way there is no unmasked catalog sample (D-013).
-- `dal/audit_hook.py`: a `query_executions` row and an `audit_log` row for every
-  attempt — success, failure **and refusal**. A refused query is the most
-  interesting row in the table and the easiest one to forget to write.
-- `DAL.run(org_ctx, ds_id, sql) -> Execution` wrapping `executor.run`, so the
-  record cannot be skipped by calling the layer underneath. Internal only: no
-  public route in this WP.
+- `apps/api/tests/dal/adversarial_corpus.yaml` — **append-only**. The starter
+  set is plan Appendix C: multi-statement, comment tricks, DML in a CTE, system
+  catalog probes, unknown and denied identifiers in every clause position,
+  UNION smuggling, casing/quoting/unicode homoglyph identifiers, dialect-specific
+  `TOP`/`OFFSET` abuse, function deny-list hits. Each case names the
+  `ViolationCode` it must produce; the runner asserts **refusal, never
+  execution**, on both dialects.
+- Property tests (hypothesis): generated identifier casings and quotings never
+  bypass grounding.
+- CI: a dedicated `test.dal` step with `--cov=dataagent.dal --cov-fail-under=90`.
+  The overall floor of 70 is already applied on the combined number (B-016), so
+  this is the second gate rather than a replacement.
+- **The property table of arch 7.5, transcribed as a test map** — every row
+  names a passing test. That map is the gate's evidence, so write it as a file
+  a reviewer can read against the architecture, not as a comment.
 
-What WP5.2a hands it, and what it must not re-do:
+What is already true, and should be cited rather than rebuilt:
 
-- **`executor.run(...) -> Execution`** already validates, bounds, executes and
-  masks. `Execution` carries everything a row needs: `sql`, `sql_hash`,
-  `row_count`, `duration_ms`, `truncated`, `sensitive_accessed`, and the
-  `Validated` with `tables` / `columns`. Assemble the row *from that object*,
-  not from values remembered alongside it.
-- **`frame.rows` is already masked**, and `frame.masked_columns` says which
-  columns were. Persist that frame; do not reach back for the original.
-- **Refusals never reach a connector**, so a `PolicyViolation` has no duration
-  and no row count — its record is the code, the subject and the SQL that was
-  refused. Store the *submitted* SQL there, not a canonical form: there is none.
-- **Sanitized SQL only.** `Execution.sql` is our own generated text and is safe;
-  the submitted SQL in a refusal is the model's and is safe for the same reason
-  a `PolicyViolation` message is (arch 7.4). Neither is a credential path.
+- `tests/dal/test_violation_codes.py` already pins the code vocabulary and gives
+  **every code a statement that produces it**. That table is the corpus's seed
+  and the two must not drift — a code with no corpus case is a rule with no
+  attack, and vice versa.
+- `dal/` sits at **97%** today, so the 90% gate should pass on arrival. If it
+  does not, the answer is a test, never a lowered gate (plan §1.7).
+- The refusal path is recorded (`status='refused'`, `violation_code`), so a
+  corpus case can also assert that the attempt was *written down*, which is the
+  half of 7.5 that is about detection rather than prevention.
+- Both dialects already run every DAL test through the `either` fixture. A
+  corpus case that only runs on one engine is a case that proves half of what
+  it claims.
 
-WP5.3 is then the adversarial corpus per dialect, the property table from arch
-7.5 transcribed as a test map, and the 90% gate — the Phase 5 gate PR.
+**GATE (arch M5):** the property table proven per dialect, the corpus green,
+`dal/` ≥90%, and your sign-off. Everything after this phase — the agent, the
+tools, the chat UI — inherits whatever this gate lets through.
 
 ## Notes
+
+- **Nothing reads customer data except through `dal.run`.** It is the only
+  entry point, and it records on every path — success, engine failure, and
+  refusal. Calling `executor.execute` directly would get data without leaving a
+  row, which is the one thing architecture 8.2 does not allow; if a later phase
+  needs something the front door does not offer, widen the front door.
 
 - **The validator is strict on purpose, and that has a running cost.** A
   function sqlglot cannot type is refused for being unrecognised (D-015), so an
@@ -343,7 +364,8 @@ WP5.3 is then the adversarial corpus per dialect, the property table from arch
 
 - **The local demo environment, as this session left it.** Five containers up
   (`platform-pg`, `seed-pizza-pg`, `mssql`, `api`, `web`); platform database at
-  revision **0009**; the demo organization `ebfe8139-…` holds two verified data
+  revision **0010**, and the `api` image rebuilt (WP5.1 added sqlglot, so an
+  image from before it cannot import the DAL); the demo organization `ebfe8139-…` holds two verified data
   sources, each with an active version 1 catalog, and one hand-set column policy.
   `make up && make seed` and `make up.mssql && make seed.mssql` rebuild the
   fixtures from nothing; `make db.setup` brings a fresh database to head.

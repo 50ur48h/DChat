@@ -67,6 +67,7 @@ class SeededOrgs:
     b_data_source: uuid.UUID
     b_snapshot: uuid.UUID
     b_table: uuid.UUID
+    b_execution: uuid.UUID
 
 
 async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
@@ -187,8 +188,35 @@ async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
                     ),
                     {"org": org_id, "ds": data_source_id},
                 )
+                # What the DAL wrote down about a query (WP5.2b). Seeded here
+                # so the isolation proof covers the table that answers "who
+                # read what" — the one place an unprotected row would be a
+                # leak of another tenant's activity rather than of their data.
+                execution_id = (
+                    await connection.execute(
+                        text(
+                            "INSERT INTO query_executions "
+                            "(org_id, data_source_id, sql_text, sql_hash, status) VALUES "
+                            "(:org, :ds, 'SELECT 1', :hash, 'ok') RETURNING id"
+                        ),
+                        {"org": org_id, "ds": data_source_id, "hash": uuid.uuid4().hex[:12]},
+                    )
+                ).scalar_one()
+                await connection.execute(
+                    text(
+                        "INSERT INTO result_artifacts "
+                        "(org_id, query_execution_id, expires_at) VALUES "
+                        "(:org, :execution, now() + interval '30 days')"
+                    ),
+                    {"org": org_id, "execution": execution_id},
+                )
                 if org_id == org_b:
-                    catalog.update(data_source=data_source_id, snapshot=snapshot_id, table=table_id)
+                    catalog.update(
+                        data_source=data_source_id,
+                        snapshot=snapshot_id,
+                        table=table_id,
+                        execution=execution_id,
+                    )
     finally:
         await engine.dispose()
     return SeededOrgs(
@@ -198,6 +226,7 @@ async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
         b_data_source=catalog["data_source"],
         b_snapshot=catalog["snapshot"],
         b_table=catalog["table"],
+        b_execution=catalog["execution"],
     )
 
 
@@ -242,6 +271,14 @@ def _forged_insert(table: str, seeded: SeededOrgs) -> str:
         "catalog_columns": (
             "INSERT INTO catalog_columns (org_id, table_id, name, ordinal, data_type, nullable) "
             f"VALUES ('{other_org}', '{seeded.b_table}', 'forged', 1, 'text', true)"
+        ),
+        "query_executions": (
+            "INSERT INTO query_executions (org_id, data_source_id, sql_text, sql_hash, status) "
+            f"VALUES ('{other_org}', '{seeded.b_data_source}', 'SELECT 1', 'forged12', 'ok')"
+        ),
+        "result_artifacts": (
+            "INSERT INTO result_artifacts (org_id, query_execution_id, expires_at) VALUES "
+            f"('{other_org}', '{seeded.b_execution}', now() + interval '30 days')"
         ),
         "catalog_relationships": (
             "INSERT INTO catalog_relationships "

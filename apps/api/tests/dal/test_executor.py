@@ -84,7 +84,7 @@ def stub_policy(monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest)
 
 
 async def run(sql: str, connector: RecordingConnector, **kwargs: object) -> executor.Execution:
-    return await executor.run(
+    return await executor.execute(
         org_id=uuid.uuid4(),
         data_source_id=uuid.uuid4(),
         sql=sql,
@@ -290,7 +290,7 @@ async def test_a_connector_opened_here_is_closed_even_when_the_query_fails(
     monkeypatch.setattr(executor.datasources, "connector_for_view", fake_connector)
 
     with pytest.raises(ConnectorError):
-        await executor.run(
+        await executor.execute(
             org_id=uuid.uuid4(), data_source_id=uuid.uuid4(), sql="SELECT id FROM orders"
         )
 
@@ -313,7 +313,7 @@ async def test_a_connector_opened_here_is_closed_after_a_good_query(
     monkeypatch.setattr(executor.datasources, "get_data_source", fake_view)
     monkeypatch.setattr(executor.datasources, "connector_for_view", fake_connector)
 
-    execution = await executor.run(
+    execution = await executor.execute(
         org_id=uuid.uuid4(), data_source_id=uuid.uuid4(), sql="SELECT id FROM orders"
     )
 

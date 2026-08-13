@@ -230,6 +230,22 @@ class Settings(BaseSettings):
         ),
     )
 
+    artifacts_path: Path = Field(
+        default=Path("ops/artifacts"),
+        description=(
+            "Where query results are kept locally, one directory per org. Blob "
+            "storage replaces this in Phase 12 behind the same interface."
+        ),
+    )
+    artifact_retention_days: int = Field(
+        default=30,
+        gt=0,
+        description=(
+            "How long a stored result lives. A promise to the customer, so it is "
+            "written onto the row rather than left to a cleanup script's mood."
+        ),
+    )
+
     # NoDecode: without it pydantic-settings JSON-decodes any complex-typed env
     # var, so the natural `CORS_ORIGINS=http://a,http://b` would be a boot error.
     cors_origins: Annotated[tuple[str, ...], NoDecode] = Field(
