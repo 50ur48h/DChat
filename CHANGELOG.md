@@ -26,6 +26,14 @@ under "Unreleased", only for changes a user would notice.
   cannot bypass it. The audit log is append-only by grant.
 
 ### Added
+- Every table gets a plain-language card describing what it holds, its columns
+  and roles, and the tables it joins to — or that it joins to none, which is the
+  answer that matters most often. Searching in ordinary words finds the right
+  table: "revenue" finds orders.
+- A catalog browser: tables, columns, what a sample looked like, and which
+  columns are masked. An Admin can change a column's policy from there, and the
+  screen distinguishes "the classifier suspects this" from "somebody decided
+  this" rather than showing one tick for both.
 - Columns are profiled from a bounded sample — how often they are empty, how
   many distinct values, their range, and their commonest values — and anything
   that looks like personal data is masked before it is stored and defaults to

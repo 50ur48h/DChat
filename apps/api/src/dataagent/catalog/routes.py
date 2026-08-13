@@ -21,12 +21,12 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 
 from dataagent.auth.context import RequestContext
 from dataagent.auth.guards import require_admin, require_contributor, require_member
-from dataagent.catalog import browse, discovery, policies, profiler
+from dataagent.catalog import browse, discovery, policies, profiler, search
 from dataagent.datasources.service import NotFoundError
 
 router = APIRouter(prefix="/v1", tags=["catalog"])
@@ -104,6 +104,14 @@ class TableOut(BaseModel):
     table_name: str
     kind: str
     description: str | None = None
+    row_estimate: int | None = None
+    card_text: str | None = Field(
+        default=None,
+        description=(
+            "The description an agent is given instead of the schema. Built from "
+            "catalog rows only, so its examples are the masked ones."
+        ),
+    )
     columns: list[ColumnOut] = Field(default_factory=list[ColumnOut])
 
 
@@ -201,6 +209,8 @@ async def get_catalog(
                 table_name=table.table_name,
                 kind=table.kind,
                 description=table.description,
+                row_estimate=table.row_estimate,
+                card_text=table.card_text,
                 columns=[
                     ColumnOut(
                         id=column.id,
@@ -343,3 +353,37 @@ async def set_column_policy(
         decided_by=decided.decided_by,
         decided_at=decided.decided_at,
     )
+
+
+class CardHitOut(BaseModel):
+    data_source_id: uuid.UUID
+    schema_name: str
+    table_name: str
+    card_text: str
+    rank: float = Field(description="Comparable within one result set only, not across queries.")
+
+
+@router.get(
+    "/orgs/{org_id}/catalog/search",
+    response_model=list[CardHitOut],
+    summary="Find tables by describing what you are looking for",
+)
+async def search_catalog(
+    context: Annotated[RequestContext, Depends(require_member)],
+    q: Annotated[str, Query(description="Words to look for. Search-engine syntax works.")],
+    data_source_id: Annotated[uuid.UUID | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=search.MAX_LIMIT)] = search.DEFAULT_LIMIT,
+) -> list[CardHitOut]:
+    """Any member may search: a card describes structure, and its examples were
+    masked before they were stored."""
+    hits = await search.search_cards(context.org_id, q, data_source_id=data_source_id, limit=limit)
+    return [
+        CardHitOut(
+            data_source_id=hit.data_source_id,
+            schema_name=hit.schema_name,
+            table_name=hit.table_name,
+            card_text=hit.card_text,
+            rank=hit.rank,
+        )
+        for hit in hits
+    ]

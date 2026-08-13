@@ -39,6 +39,7 @@ from typing import Any, cast
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dataagent.catalog import cards
 from dataagent.catalog.classify import Verdict, classify_column, mask_value
 from dataagent.connectors import introspection
 from dataagent.connectors.base import (
@@ -248,19 +249,27 @@ async def profile(
         return ProfileOutcome(status=STATUS_NONE, detail=str(error))
 
     try:
+        estimates = await _row_estimates(
+            connector, sorted({target.schema_name for target in targets})
+        )
         results, skipped, errors = await _sample_everything(connector, targets, limits)
     finally:
         await connector.aclose()
 
-    return await _store(
+    outcome = await _store(
         org_id=org_id,
         actor_user_id=actor_user_id,
         data_source_id=data_source_id,
         snapshot_id=snapshot_id,
         results=results,
+        estimates=estimates,
         skipped=skipped,
         errors=errors,
     )
+    # A profile changes what a card can say about values, so the cards are
+    # rewritten with it rather than describing a database nobody profiled.
+    await cards.refresh_cards(org_id, data_source_id)
+    return outcome
 
 
 @dataclass(frozen=True, slots=True)
@@ -332,6 +341,32 @@ async def _targets(session: AsyncSession, snapshot_id: uuid.UUID) -> tuple[_Targ
     )
 
 
+async def _row_estimates(
+    connector: Connector, schemas: Sequence[str]
+) -> dict[tuple[str, str], int]:
+    """How big each table is, as the engine already believes.
+
+    A catalog query against statistics the engine keeps anyway — no scan, and no
+    identifier interpolation, because it asks about every table at once.
+    """
+    caps = connector.capabilities()
+    query = (
+        introspection.tsql_row_estimates()
+        if caps.dialect == introspection.TSQL
+        else introspection.pg_row_estimates(list(schemas))
+    )
+    try:
+        frame = await connector.execute(query, ExecLimits(max_rows=50_000, timeout_seconds=30.0))
+    except ConnectorError:
+        # A row count is a nicety. Losing it must not lose the profile.
+        return {}
+    return {
+        (str(row[0]), str(row[1])): int(cast("int", row[2]))
+        for row in frame.rows
+        if row[2] is not None
+    }
+
+
 async def _sample_everything(
     connector: Connector, targets: Sequence[_Target], budget: Budget
 ) -> tuple[dict[uuid.UUID, ColumnProfile], int, tuple[str, ...]]:
@@ -389,6 +424,7 @@ async def _store(
     data_source_id: uuid.UUID,
     snapshot_id: uuid.UUID,
     results: dict[uuid.UUID, ColumnProfile],
+    estimates: dict[tuple[str, str], int],
     skipped: int,
     errors: tuple[str, ...],
 ) -> ProfileOutcome:
@@ -425,6 +461,13 @@ async def _store(
         for column in columns:
             found = results[column.id]
             profiled_tables.add(column.table_id)
+            table = tables.get(column.table_id)
+            if table is not None:
+                # The *engine's* estimate, never the sample's size. A table of
+                # 72,000 rows profiled from a cap of 5,000 would otherwise be
+                # described as having about 5,000 rows, which is not a floor or
+                # an approximation — it is wrong.
+                table.row_estimate = estimates.get((table.schema_name, table.table_name))
             column.null_frac = found.null_frac
             column.distinct_est = found.distinct
             column.min_val = found.min_val

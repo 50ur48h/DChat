@@ -38,6 +38,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from dataagent.catalog import cards
 from dataagent.connectors.base import ColumnInfo, Connector, ConnectorError, ForeignKey, TableRef
 from dataagent.datasources import service as datasources
 from dataagent.db.models import (
@@ -199,12 +200,18 @@ async def discover(
             detail=str(error),
         )
 
-    return await _store(
+    outcome = await _store(
         org_id=org_id,
         actor_user_id=actor_user_id,
         data_source_id=data_source_id,
         crawl=crawl,
     )
+    if outcome.changed:
+        # A new snapshot's tables have no cards yet, and a catalog nobody can
+        # search is half a catalog. Written here rather than left to the caller
+        # so there is no path that produces one without the other.
+        await cards.refresh_cards(org_id, data_source_id)
+    return outcome
 
 
 async def _read_the_database(view: datasources.DataSourceView) -> _Crawl:

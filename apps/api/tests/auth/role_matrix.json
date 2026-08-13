@@ -9,6 +9,11 @@
     "contributor": "deny(403)",
     "reader": "deny(403)"
   },
+  "GET /v1/orgs/{org_id}/catalog/search": {
+    "admin": "allow",
+    "contributor": "allow",
+    "reader": "allow"
+  },
   "GET /v1/orgs/{org_id}/data-sources": {
     "admin": "allow",
     "contributor": "allow",

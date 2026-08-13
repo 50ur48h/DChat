@@ -1,0 +1,132 @@
+.search {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-end;
+}
+
+.search > :first-child {
+  flex: 1;
+}
+
+.hits {
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.hit {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+}
+
+.hitName {
+  font-weight: 600;
+}
+
+.hitCard {
+  margin-top: var(--space-2);
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.tables {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.table {
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  padding: var(--space-4);
+}
+
+.tableHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.tableName {
+  margin: 0;
+  font-size: 15px;
+  line-height: 24px;
+  font-weight: 600;
+}
+
+.tableNote {
+  margin-top: var(--space-1);
+  color: var(--fg-muted);
+}
+
+.columns {
+  width: 100%;
+  margin-top: var(--space-3);
+  border-collapse: collapse;
+}
+
+.columns th {
+  text-align: left;
+  padding: var(--space-2);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+}
+
+.columns td {
+  padding: var(--space-2);
+  border-top: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.columnName {
+  font-weight: 600;
+}
+
+.columnFacts {
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.card {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg-muted);
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.policy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: flex-end;
+}
+
+.error {
+  margin-top: var(--space-3);
+  color: var(--danger);
+}
+
+.muted {
+  margin-top: var(--space-3);
+  color: var(--fg-muted);
+}

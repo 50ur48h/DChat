@@ -10,19 +10,27 @@
 
 import {
   isAccepted,
+  isCardHit,
+  isCatalog,
   isDataSource,
   isHealth,
   isInvitation,
   isMe,
   isMember,
+  isProfileResult,
+  isRefreshResult,
   isTestResult,
   type Accepted,
+  type CardHit,
+  type Catalog,
   type DataSource,
   type Health,
   type Invitation,
   type Me,
   type Member,
   type NewDataSource,
+  type ProfileResult,
+  type RefreshResult,
   type TestResult,
 } from "./types";
 
@@ -125,6 +133,16 @@ export interface Api {
   ): Promise<DataSource>;
   testDataSource(orgId: string, dataSourceId: string): Promise<TestResult>;
   removeDataSource(orgId: string, dataSourceId: string): Promise<void>;
+  refreshCatalog(orgId: string, dataSourceId: string): Promise<RefreshResult>;
+  profileCatalog(orgId: string, dataSourceId: string): Promise<ProfileResult>;
+  catalog(orgId: string, dataSourceId: string): Promise<Catalog>;
+  searchCatalog(orgId: string, query: string, dataSourceId?: string): Promise<CardHit[]>;
+  setColumnPolicy(
+    orgId: string,
+    dataSourceId: string,
+    columnId: string,
+    decision: { policy: string; reason?: string | undefined },
+  ): Promise<void>;
 }
 
 /** Binds the API to a session's token getter. */
@@ -202,6 +220,42 @@ export function createApi(getToken: () => Promise<string | null>): Api {
     },
     async removeDataSource(orgId, dataSourceId) {
       await call(`/v1/orgs/${orgId}/data-sources/${dataSourceId}`, { method: "DELETE" });
+    },
+    async refreshCatalog(orgId, dataSourceId) {
+      return narrow(
+        await call(`/v1/orgs/${orgId}/data-sources/${dataSourceId}/refresh`, { method: "POST" }),
+        isRefreshResult,
+        "catalog refresh",
+      );
+    },
+    async profileCatalog(orgId, dataSourceId) {
+      return narrow(
+        await call(`/v1/orgs/${orgId}/data-sources/${dataSourceId}/profile`, { method: "POST" }),
+        isProfileResult,
+        "catalog profile",
+      );
+    },
+    async catalog(orgId, dataSourceId) {
+      return narrow(
+        await call(`/v1/orgs/${orgId}/data-sources/${dataSourceId}/catalog`),
+        isCatalog,
+        "catalog",
+      );
+    },
+    async searchCatalog(orgId, query, dataSourceId) {
+      const parameters = new URLSearchParams({ q: query });
+      if (dataSourceId) parameters.set("data_source_id", dataSourceId);
+      const payload = await call(`/v1/orgs/${orgId}/catalog/search?${parameters.toString()}`);
+      if (!Array.isArray(payload) || !payload.every(isCardHit)) {
+        throw new ApiError("The API's search response did not match the expected shape", 200);
+      }
+      return payload;
+    },
+    async setColumnPolicy(orgId, dataSourceId, columnId, decision) {
+      await call(`/v1/orgs/${orgId}/data-sources/${dataSourceId}/columns/${columnId}/policy`, {
+        method: "PATCH",
+        body: decision,
+      });
     },
   };
 }
