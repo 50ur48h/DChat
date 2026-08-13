@@ -111,6 +111,11 @@ migration: .env ## Autogenerate a revision: make migration m="add widgets"
 secrets.key: ## Print a fresh LOCAL_SECRETS_KEY line to paste into .env
 	@$(UV_API) python -c "from cryptography.fernet import Fernet; print('LOCAL_SECRETS_KEY=' + Fernet.generate_key().decode())"
 
+.PHONY: check.status
+check.status: ## Fail if STATUS.md lost its phase checklist or signed-off work
+	bash scripts/check_status.sh --selftest
+	bash scripts/check_status.sh
+
 .PHONY: truths check.truths
 truths: ## Regenerate ops/seed/truths.json without touching the database
 	uv run ops/seed/seed_pizza.py --truths-only

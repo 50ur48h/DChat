@@ -1,6 +1,7 @@
 # STATUS — data-agent build
 
-Current position: **Phases 0–4 complete and signed off.** Next: Phase 5 / WP5.1
+Current position: **Phases 0–4 complete and signed off.** Phase 5 in progress:
+                  **B-019** done, **B-016** next, then WP5.1
 Next step:        `p5.1-dal-validator` — the SQL policy engine. Read plan §6
                   Phase 5 and architecture Part 7.1 and 7.5 **before writing any
                   code**: this is the security boundary, it gets human review on
@@ -122,6 +123,16 @@ Last updated: 2026-08-13 by Claude Code
       never be silently overwritten.
 
 ## Phase 5 — DAL + SQL policy engine (M5)  ⚠ human review on every PR
+- [x] **B-019** CI keeps STATUS.md from losing its checklist
+      — raised and taken on 2026-08-13, before any Phase 5 code. `hygiene` now
+      checks the header fields, one heading per phase 0–12 with a GATE line
+      each, that the file did not lose a fifth of its lines against the base
+      branch, and that nothing already `[x]` came back as anything else.
+      Replayed against #24, the PR that gutted this file: 43 findings, where
+      today it went green. The guard has a `--selftest` that CI runs first, so
+      a check that has stopped catching anything fails instead of passing
+      everything
+- [ ] B-016 Combine coverage across the `api` and `mssql` jobs
 - [ ] WP5.1 sqlglot validator + policy pipeline + catalog grounding
 - [ ] WP5.2 Executor (read-only, timeouts, LIMIT) + masking + audit hook
 - [ ] WP5.3 Adversarial corpus per dialect + property tests + 90% gate ← gate PR
@@ -224,6 +235,13 @@ WP5.2 then adds the executor, result masking and the audit hook; WP5.3 is the
 adversarial corpus per dialect and the 90% gate, and it is the Phase 5 gate PR.
 
 ## Notes
+
+- **This file is now checked by CI, and the check is on your side.** It protects
+  the shape — the header fields, a heading per phase 0–12 with a GATE line each,
+  no losing a fifth of the lines, and nothing that was `[x]` coming back as
+  anything else. Growing it, rewording it and adding items are all free, so the
+  only edit it refuses is the one nobody meant to make. `make check.status` runs
+  it locally, against the base branch's copy, exactly as `hygiene` does (B-019).
 
 - **`readonly_verified` is a claim, so it is earned.** It is false until this
   service has evidence: the engine's privilege catalog says the role cannot
