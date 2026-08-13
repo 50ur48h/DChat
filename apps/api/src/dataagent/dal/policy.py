@@ -33,7 +33,8 @@ import uuid
 from dataclasses import dataclass
 
 from dataagent.catalog.browse import Catalog, active_catalog
-from dataagent.connectors.base import Caps
+from dataagent.config import Settings, get_settings
+from dataagent.connectors.base import Caps, ExecLimits
 from dataagent.connectors.factory import caps_for
 from dataagent.datasources.service import get_data_source
 
@@ -67,16 +68,32 @@ class SourcePolicy:
     #: The active snapshot, with each column's effective policy already resolved
     #: (allow | mask | deny — D-013).
     catalog: Catalog
+    #: The ceiling every execution runs under. A caller may ask for less and
+    #: never for more, which is what makes this a policy rather than a default.
+    limits: ExecLimits
 
     @property
     def dialect(self) -> str:
         return self.caps.dialect
 
+    def limits_for(self, max_rows: int | None) -> ExecLimits:
+        """Bounds for one execution: the caller's wish, clamped to the ceiling.
+
+        A caller asking for more rows than policy allows is not an error — it is
+        an agent guessing at a number — so it is quietly held to the ceiling
+        rather than refused. Asking for fewer is honoured exactly.
+        """
+        if max_rows is None or max_rows >= self.limits.max_rows:
+            return self.limits
+        return ExecLimits(max_rows=max(max_rows, 1), timeout_seconds=self.limits.timeout_seconds)
+
 
 _CACHE: dict[tuple[uuid.UUID, uuid.UUID], tuple[float, SourcePolicy]] = {}
 
 
-async def source_policy(org_id: uuid.UUID, data_source_id: uuid.UUID) -> SourcePolicy:
+async def source_policy(
+    org_id: uuid.UUID, data_source_id: uuid.UUID, *, settings: Settings | None = None
+) -> SourcePolicy:
     """Load — or reuse — everything needed to validate against one data source.
 
     Raises ``NotFoundError`` when the source does not belong to this
@@ -93,6 +110,7 @@ async def source_policy(org_id: uuid.UUID, data_source_id: uuid.UUID) -> SourceP
     # Both reads are org-scoped and go through the tenant session, so a source
     # belonging to another organization is not found rather than found and
     # rejected.
+    resolved = settings if settings is not None else get_settings()
     source = await get_data_source(org_id, data_source_id)
     policy = SourcePolicy(
         org_id=org_id,
@@ -100,6 +118,9 @@ async def source_policy(org_id: uuid.UUID, data_source_id: uuid.UUID) -> SourceP
         engine=source.engine,
         caps=caps_for(source.engine),
         catalog=await active_catalog(org_id, data_source_id),
+        limits=ExecLimits(
+            max_rows=resolved.dal_max_rows, timeout_seconds=resolved.dal_timeout_seconds
+        ),
     )
     _CACHE[key] = (now, policy)
     return policy

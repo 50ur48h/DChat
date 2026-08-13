@@ -18,6 +18,7 @@ import pytest
 
 from dataagent.catalog.browse import Catalog, CatalogColumnView, CatalogTableView
 from dataagent.catalog.discovery import SnapshotView
+from dataagent.connectors.base import ExecLimits
 from dataagent.connectors.factory import caps_for
 from dataagent.dal.errors import PolicyViolation
 from dataagent.dal.policy import SourcePolicy
@@ -110,13 +111,14 @@ def build_catalog() -> Catalog:
     )
 
 
-def build_source(engine: str) -> SourcePolicy:
+def build_source(engine: str, *, max_rows: int = 1000) -> SourcePolicy:
     return SourcePolicy(
         org_id=uuid.uuid4(),
         data_source_id=uuid.uuid4(),
         engine=engine,
         caps=caps_for(engine),
         catalog=build_catalog(),
+        limits=ExecLimits(max_rows=max_rows, timeout_seconds=30.0),
     )
 
 
