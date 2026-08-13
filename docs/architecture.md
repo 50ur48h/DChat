@@ -682,8 +682,12 @@ data_sources(id, org_id, name, engine pg|mssql|mysql, host_display, status, sett
 catalog_snapshots(id, org_id, data_source_id, version, status building|active|failed|superseded,
                   captured_at, completed_at, object_count, error)
 catalog_tables(id, org_id, snapshot_id, schema_name, table_name, kind table|view,
-               structural_hash, row_estimate, description, card_text, embedding vector(1536),
-               flags jsonb)
+               structural_hash, row_estimate, description, card_text,
+               card_tsv tsvector GENERATED, flags jsonb,
+               embedding vector(1536))
+               -- embedding is NOT built yet: it arrives with the embeddings key
+               -- that can fill it (D-014, B-018). Cards carry
+               -- flags.embedding = 'queued' until then, and search is lexical.
 catalog_columns(id, org_id, table_id, name, ordinal, data_type, nullable, is_pk, fk_ref,
                 description, sample_rows, null_frac, distinct_est, min_val, max_val,
                 top_values jsonb, semantic_role measure|dimension|time|id|other,

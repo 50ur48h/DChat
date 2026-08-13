@@ -4,6 +4,27 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-014 — No `embedding` column until something can fill it
+Date: 2026-08-13 · Phase: 4 · PR: #23
+Context: Architecture Part 10.1 gives `catalog_tables` an `embedding vector(1536)`
+and plan §6 WP4.3 says embeddings are written "when key configured, else queued
+flag". No embeddings key is configured, and plan §6 Phase 4's USER INPUT note
+already says card search runs lexical-only without one.
+Options: (a) create the column now and leave it null; (b) create it and a vector
+index, and write a backfill nothing can run; (c) leave it out until the key that
+fills it exists.
+Decision: (c), the same rule WP4.1 and WP4.2 followed — the columns a pass fills
+arrive in the revision that fills them. A vector column nothing writes is never
+exercised, so nobody learns it is wrong; the index question (ivfflat or hnsw,
+and with what lists) cannot be answered without data to tune against; and a
+rerank over cards nobody embedded is a code path that cannot be right.
+Consequences: revision 0009 adds `card_text`, a **generated** `card_tsv` and
+`flags`, and no vector column. Every card is written with
+`flags.embedding = "queued"`, so the backfill has its work list before it
+exists, and `search_cards` already has the seam it needs (rank, then reorder).
+**B-018** carries the work. Architecture Part 10.1 annotated so the absence is
+deliberate rather than an omission a later session "fixes".
+
 ## D-013 — A profile belongs to a snapshot; a policy belongs to a column
 Date: 2026-08-12 · Phase: 4 · PR: #22
 Context: Architecture Part 10.1 puts `policy allow|mask|deny` on
