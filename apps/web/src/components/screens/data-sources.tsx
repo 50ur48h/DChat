@@ -22,6 +22,7 @@
  * *verified* — `require` encrypts without checking any certificate (B-013).
  */
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Badge, type Tone } from "@/components/ui/badge";
@@ -29,7 +30,13 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Select } from "@/components/ui/input";
 import { Row, Stack } from "@/components/ui/page";
-import { createApi, type DataSource, type TestResult } from "@/lib/api-client";
+import {
+  createApi,
+  type DataSource,
+  type ProfileResult,
+  type RefreshResult,
+  type TestResult,
+} from "@/lib/api-client";
 import { useSession } from "@/lib/auth/session";
 
 import styles from "./data-sources.module.css";
@@ -129,10 +136,14 @@ export function DataSources({ orgId, role }: { orgId: string; role: string | nul
   // Unknown role means no admin controls. Failing closed costs an Admin one
   // page load; failing open shows buttons to people the API will refuse.
   const isAdmin = role === "admin";
+  // Reading a database into the catalog is Contributor work: it changes nothing
+  // in the customer's database and nothing about who may see what.
+  const canRefresh = isAdmin || role === "contributor";
 
   const [sources, setSources] = useState<DataSource[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, TestResult>>({});
+  const [catalogNotes, setCatalogNotes] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [rotating, setRotating] = useState<string | null>(null);
@@ -215,6 +226,19 @@ export function DataSources({ orgId, role }: { orgId: string; role: string | nul
       setResults((current) => ({ ...current, [source.id]: result }));
     });
 
+  const note = (source: DataSource, said: RefreshResult | ProfileResult) =>
+    setCatalogNotes((current) => ({ ...current, [source.id]: said.detail }));
+
+  const refresh = (source: DataSource) =>
+    void run(async () => {
+      note(source, await api.refreshCatalog(orgId, source.id));
+    });
+
+  const profileSource = (source: DataSource) =>
+    void run(async () => {
+      note(source, await api.profileCatalog(orgId, source.id));
+    });
+
   return (
     <Stack>
       <Card
@@ -268,6 +292,28 @@ export function DataSources({ orgId, role }: { orgId: string; role: string | nul
                 </dl>
 
                 {results[source.id] && <Result result={results[source.id] as TestResult} />}
+
+                {catalogNotes[source.id] && (
+                  <p className={styles.muted}>{catalogNotes[source.id]}</p>
+                )}
+
+                {(canRefresh || isAdmin) && (
+                  <div className={styles.actions}>
+                    <Link href={`/orgs/${orgId}/data-sources/${source.id}/catalog`}>
+                      <Button>Catalog</Button>
+                    </Link>
+                    {canRefresh && (
+                      <>
+                        <Button disabled={busy} onClick={() => refresh(source)}>
+                          Refresh catalog
+                        </Button>
+                        <Button disabled={busy} onClick={() => profileSource(source)}>
+                          Profile columns
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                )}
 
                 {isAdmin && (
                   <div className={styles.actions}>

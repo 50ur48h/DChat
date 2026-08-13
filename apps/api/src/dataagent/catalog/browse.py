@@ -69,6 +69,9 @@ class CatalogTableView:
     kind: str
     description: str | None
     columns: tuple[CatalogColumnView, ...]
+    row_estimate: int | None = None
+    #: The prose an agent reads instead of the schema (WP4.3).
+    card_text: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,6 +214,8 @@ async def _tables(
             kind=table.kind,
             description=table.description,
             columns=tuple(by_table.get(table.id, ())),
+            row_estimate=table.row_estimate,
+            card_text=table.card_text,
         )
         for table in tables
     )

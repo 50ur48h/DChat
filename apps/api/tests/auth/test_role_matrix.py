@@ -100,8 +100,17 @@ PROBES: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
         "/v1/orgs/{org_id}/data-sources/{data_source_id}/columns/{column_id}/policy",
         {"policy": "mask", "reason": "probe"},
     ),
+    # Searching reads cards, whose examples were masked before they were stored,
+    # so it is member work like browsing.
+    ("GET", "/v1/orgs/{org_id}/catalog/search", None),
     ("DELETE", "/v1/orgs/{org_id}/data-sources/{data_source_id}", None),
 )
+
+
+#: Query strings for routes that require one. Without it the probe earns a 422
+#: from validation, and the matrix would record a validation error as though it
+#: were an authorization decision — which is the one thing this file is for.
+QUERIES: dict[str, str] = {"/v1/orgs/{org_id}/catalog/search": "?q=orders"}
 
 
 class _SubjectAsToken(TokenValidator):
@@ -252,7 +261,7 @@ async def test_the_role_matrix_matches_its_snapshot(matrix_app: Matrix) -> None:
             user_id=matrix_app.users["spare-admin"],
             data_source_id=matrix_app.data_source_id,
             column_id=matrix_app.column_id,
-        )
+        ) + QUERIES.get(template, "")
         key = f"{method} {template}"
         observed[key] = {}
         for role in ROLES:

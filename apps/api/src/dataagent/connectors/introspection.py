@@ -502,10 +502,14 @@ def tsql_sample(schema: str, table: str, columns: Sequence[str], limit: int) -> 
 #: Row counts as the engine already estimates them — no scan, and no identifier
 #: interpolation, because these ask about every table at once and the profiler
 #: looks up the one it wants.
+#:
+#: PostgreSQL writes ``reltuples = -1`` for a table that has never been analysed,
+#: meaning *unknown*. Clamping that to zero would turn "we do not know" into "it
+#: is empty", which a table card would then state as fact, so it stays NULL.
 _PG_ROW_ESTIMATES = """
 SELECT n.nspname AS schema_name,
        c.relname AS table_name,
-       GREATEST(c.reltuples, 0)::bigint AS row_estimate
+       CASE WHEN c.reltuples < 0 THEN NULL ELSE c.reltuples::bigint END AS row_estimate
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE c.relkind IN ('r', 'p', 'm')

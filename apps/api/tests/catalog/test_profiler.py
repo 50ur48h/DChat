@@ -408,3 +408,52 @@ def test_effective_policy_prefers_a_person_over_a_default() -> None:
     assert policies.effective_policy(stored=None, sensitivity="suspected") == "mask"
     assert policies.effective_policy(stored="allow", sensitivity="suspected") == "allow"
     assert policies.effective_policy(stored="deny", sensitivity="none") == "deny"
+
+
+async def test_the_row_count_comes_from_the_engine_not_from_the_sample(
+    platform: URL, migrated_database: URL, isolated_customer_database: CustomerDatabase
+) -> None:
+    """A table of 72,000 rows profiled from a cap of 5,000 must not be described
+    as having about 5,000 rows.
+
+    Found by reading a card built from the real pizza database, which said
+    exactly that. It is not a floor or an approximation — it is wrong, and a
+    number in a card is read by something that cannot tell.
+    """
+    org_id, user_id, source_id = await _discovered(migrated_database, isolated_customer_database)
+
+    await profiler.profile(
+        org_id=org_id,
+        actor_user_id=user_id,
+        data_source_id=source_id,
+        budget=profiler.Budget(max_rows=2),
+    )
+
+    catalog = await browse.active_catalog(org_id, source_id)
+    people = next(table for table in catalog.tables if table.table_name == "people")
+    email = next(column for column in people.columns if column.name == "email")
+
+    assert email.sample_rows == 2, "the cap applied"
+    # Nothing has analysed this fixture, so the engine's answer is "unknown" —
+    # which stays unknown. PostgreSQL spells it -1, and clamping that to 0 would
+    # have a card state that a four-row table is empty.
+    assert people.row_estimate is None
+
+    # Once the engine does know, the profile takes its word and not the sample's.
+    engine = create_async_engine(isolated_customer_database.url, isolation_level="AUTOCOMMIT")
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("ANALYZE people"))
+    finally:
+        await engine.dispose()
+
+    await profiler.profile(
+        org_id=org_id,
+        actor_user_id=user_id,
+        data_source_id=source_id,
+        budget=profiler.Budget(max_rows=2),
+    )
+
+    catalog = await browse.active_catalog(org_id, source_id)
+    people = next(table for table in catalog.tables if table.table_name == "people")
+    assert people.row_estimate == 4, "four rows in the table, two in the sample"

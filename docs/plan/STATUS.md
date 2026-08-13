@@ -1,9 +1,10 @@
 # STATUS — data-agent build
 
-Current position: Phase 3 signed off. Phase 4 in progress: WP4.1–4.2 done.
-                  Next: WP4.3 (the Phase 4 gate)
+Current position: Phase 4 complete but for the gate. Next: the Phase 4 GATE,
+                  then Phase 5 / WP5.1
 Merge policy: ASK
-Blocked on user: nothing
+Blocked on user: the **Phase 4 gate demo**, a browser flow and yours to run —
+                 the manual test script is in the WP4.3 PR
 Last updated: 2026-08-12 by Claude Code
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
@@ -94,7 +95,13 @@ Last updated: 2026-08-12 by Claude Code
       `customers.full_name` and `staff.full_name` auto-masked on both engines in
       ~0.2s — and profiling the real database is what caught a classifier bug
       that read every ISO date as a phone number
-- [ ] WP4.3 Table cards + search + catalog APIs/UI + column policy  ← gate PR
+- [x] WP4.3 Table cards + search + catalog APIs/UI + column policy  ← gate PR
+      — cards are prose built from catalog rows only, so their examples are the
+      masked ones; `card_tsv` is a **generated** column, so the index cannot
+      disagree with the text it indexes. Search is lexical (**B-018** carries
+      embeddings). Reading the first real card caught two false numbers: a row
+      count taken from the sample cap, and PostgreSQL's `reltuples = -1`
+      clamped to zero — "unknown" now stays unknown
 - [ ] GATE: pizza DB discovered ≤2 min; email auto-masked; user sign-off
 
 ## Phase 5 — DAL + SQL policy engine (M5)  ⚠ human review on every PR
@@ -150,40 +157,40 @@ Last updated: 2026-08-12 by Claude Code
 
 ## Next step
 
-Phase 4 / **WP4.3 — Table cards, search and catalog UI** (`p4.3-cards-search`),
-the **gate PR**. Read plan §6 Phase 4 WP4.3, architecture Part 5.3, and
-docs/design.md. It brings:
+**The Phase 4 gate, and it is yours to run** — the numbered script is in the
+WP4.3 PR. In short: refresh and profile the pizza database from the browser,
+confirm `customers.email` shows a **mask** policy nobody had to set, search
+"revenue" and see `orders` first, and read the card the agent would be given.
 
-- `catalog/cards.py`: a compact natural-language summary per table — the exact
-  text the agent will later consume — stored with a tsvector, and embeddings
-  when a key is configured (pgvector) or a queued flag when not.
-- `catalog/search.py` and `GET /v1/catalog/search?q=`: lexical
-  (`websearch_to_tsquery`) with an optional vector rerank.
-- Web: the catalog browser — tables, columns, sensitivity badges, and the policy
-  editor for an Admin — plus refresh and profile from the data sources screen.
-- **Accept/GATE (arch M4):** fresh `make seed` → register → refresh completes
-  ≤2 min; `customers.email` shows a `mask` policy automatically; searching
-  "revenue" returns the `orders` card first; user sign-off.
+Then Phase 5 / **WP5.1 — the SQL policy engine** (`p5.1-dal-validator`), and it
+is the phase this whole build has been walking toward. Read plan §6 Phase 5 and
+architecture Part 7.1 (diagram 6) and 7.5 — **human review on every PR, and the
+highest test density in the repository**.
 
-What WP4.1 and WP4.2 leave for it:
+- `dal/validator.py` on sqlglot: parse in the connector's dialect, walk the AST,
+  and enforce in order — one statement; SELECT or EXPLAIN only; no DML, DDL or
+  transaction control *anywhere*, including inside CTEs and subqueries; no
+  system schemas; no denied functions; every identifier resolved against the
+  org's catalog; denied columns rejected wherever they appear; star expansion
+  resolved before column checks.
+- Its output is the `ValidatedQuery` that has existed since WP3.2 and that only
+  a `PolicyGrant` holder may build. `dataagent.dal.validator` is **already** on
+  `SANCTIONED_VALIDATORS`, so the seam is waiting — no widening required.
 
-- A card is built from rows that already exist: table and column names, types,
-  keys, the FK graph, and the profile. Nothing in WP4.3 needs to talk to a
-  customer's database.
-- **Masked values are the only ones there are.** A card renders `top_values` and
-  min/max straight from `catalog_columns`, which is safe because those were
-  masked on the way in (D-013) — the card builder must not go looking for
-  unmasked originals to make a nicer summary.
-- The policy editor's route already exists and is audited:
-  `PATCH …/columns/{id}/policy`. The screen needs the column id, which the
-  catalog response now carries.
-- `sensitivity` and `policy` are different things and the UI must show both:
-  "the classifier suspects this" and "somebody decided this" are not the same
-  claim, and `policy_decided` distinguishes them.
+What Phase 4 hands it:
 
-**USER INPUT (optional, not blocking):** an embeddings key —
-`EMBEDDINGS_PROVIDER/ENDPOINT/KEY/MODEL`. Without it, card search runs
-lexical-only and embedding backfill is a flagged idempotent job for later.
+- **Grounding is possible now.** `catalog_tables` and `catalog_columns` are the
+  authority an identifier is resolved against, and `active_catalog` reads them
+  in one call. An unknown identifier must produce a structured error naming it,
+  not a database error.
+- **Column policy is already decided and already stored.** `effective_policy`
+  answers allow | mask | deny for any column, and it survives a refresh (D-013).
+  The validator consumes it; it does not re-derive it.
+- **`Caps` states the per-engine truth** the transpile step needs — dialect,
+  `limit_syntax`, `max_identifier_length` — so nothing in the DAL should be
+  branching on an engine name.
+- **The adversarial corpus is Phase 5's own work (WP5.3)** and the property
+  table in arch 7.5 is what it must prove, per dialect.
 
 ## Notes
 
@@ -245,6 +252,14 @@ lexical-only and embedding backfill is a flagged idempotent job for later.
 - **UI follows docs/design.md.** Tokens live in `apps/web/src/app/globals.css`;
   primitives in `src/components/ui/`. A raw hex value anywhere else is a bug,
   and adding a component library needs a DECISIONS entry first.
+
+- **A card is prose, and its numbers must be true.** The first card built from
+  the real pizza database said "about 5,000 rows" about a 71,798-row table,
+  because the row count came from the sampling cap; the fix took it from the
+  engine's own estimate, and taught it that PostgreSQL's `reltuples = -1` means
+  *unknown* rather than zero. A card is read by something that cannot tell a
+  wrong number from a right one, so every figure in one is either the engine's
+  or absent.
 
 - **Masking happens on the way in, and a policy outlives the catalog** (D-013).
   A sample that reaches `catalog_columns` is already masked, so there is no

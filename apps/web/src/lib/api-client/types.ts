@@ -97,6 +97,93 @@ export interface NewDataSource {
   tls_mode?: string | undefined;
 }
 
+/** One column as the catalog knows it, including what a sample looked like. */
+export interface CatalogColumn {
+  id: string;
+  name: string;
+  ordinal: number;
+  data_type: string;
+  nullable: boolean;
+  is_pk: boolean;
+  description: string | null;
+  null_frac: number | null;
+  distinct_est: number | null;
+  min_val: string | null;
+  max_val: string | null;
+  top_values: { value?: unknown; count?: unknown }[] | null;
+  semantic_role: string | null;
+  /** none | suspected | confirmed — what the classifier thinks. */
+  sensitivity: string;
+  sample_rows: number | null;
+  /** allow | mask | deny — what applies now. */
+  policy: string;
+  /** True when a person set it, rather than the safe default. */
+  policy_decided: boolean;
+}
+
+export interface CatalogTable {
+  schema_name: string;
+  table_name: string;
+  kind: string;
+  description: string | null;
+  row_estimate: number | null;
+  card_text: string | null;
+  columns: CatalogColumn[];
+}
+
+export interface CatalogSnapshot {
+  id: string;
+  version: number;
+  status: string;
+  captured_at: string;
+  completed_at: string | null;
+  object_count: number;
+  error: string | null;
+}
+
+export interface Catalog {
+  snapshot: CatalogSnapshot;
+  tables: CatalogTable[];
+  relationships: {
+    constraint_name: string;
+    from_schema: string;
+    from_table: string;
+    from_columns: string[];
+    to_schema: string;
+    to_table: string;
+    to_columns: string[];
+    kind: string;
+    confidence: number;
+  }[];
+}
+
+export interface RefreshResult {
+  changed: boolean;
+  detail: string;
+  tables: number;
+  columns: number;
+  relationships: number;
+  snapshot: CatalogSnapshot | null;
+}
+
+export interface ProfileResult {
+  status: string;
+  detail: string;
+  tables_profiled: number;
+  columns_profiled: number;
+  sensitive_columns: number;
+  tables_skipped: number;
+  errors: string[];
+}
+
+export interface CardHit {
+  data_source_id: string;
+  schema_name: string;
+  table_name: string;
+  card_text: string;
+  rank: number;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -191,6 +278,75 @@ export function isTestResult(value: unknown): value is TestResult {
     isNullableString(value.tls_detail) &&
     Array.isArray(value.evidence) &&
     value.evidence.every((note) => typeof note === "string")
+  );
+}
+
+function isCatalogColumn(value: unknown): value is CatalogColumn {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    typeof value.data_type === "string" &&
+    typeof value.sensitivity === "string" &&
+    typeof value.policy === "string" &&
+    typeof value.policy_decided === "boolean"
+  );
+}
+
+function isCatalogTable(value: unknown): value is CatalogTable {
+  return (
+    isRecord(value) &&
+    typeof value.schema_name === "string" &&
+    typeof value.table_name === "string" &&
+    typeof value.kind === "string" &&
+    Array.isArray(value.columns) &&
+    value.columns.every(isCatalogColumn)
+  );
+}
+
+function isSnapshot(value: unknown): value is CatalogSnapshot {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.version === "number" &&
+    typeof value.status === "string"
+  );
+}
+
+export function isCatalog(value: unknown): value is Catalog {
+  return (
+    isRecord(value) &&
+    isSnapshot(value.snapshot) &&
+    Array.isArray(value.tables) &&
+    value.tables.every(isCatalogTable) &&
+    Array.isArray(value.relationships)
+  );
+}
+
+export function isRefreshResult(value: unknown): value is RefreshResult {
+  return (
+    isRecord(value) &&
+    typeof value.changed === "boolean" &&
+    typeof value.detail === "string" &&
+    (value.snapshot === null || isSnapshot(value.snapshot))
+  );
+}
+
+export function isProfileResult(value: unknown): value is ProfileResult {
+  return (
+    isRecord(value) &&
+    typeof value.status === "string" &&
+    typeof value.detail === "string" &&
+    typeof value.sensitive_columns === "number"
+  );
+}
+
+export function isCardHit(value: unknown): value is CardHit {
+  return (
+    isRecord(value) &&
+    typeof value.table_name === "string" &&
+    typeof value.card_text === "string" &&
+    typeof value.rank === "number"
   );
 }
 
