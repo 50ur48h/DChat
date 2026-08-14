@@ -150,7 +150,7 @@ flowchart TB
     API --> PDB[(Platform Postgres with pgvector)]
     DAL --> KV[Azure Key Vault]
     KN --> BLOB[Azure Blob Storage]
-    AG --> LLMP[LLM providers - Azure OpenAI and Anthropic]
+    AG --> LLMP[LLM providers - OpenAI and Anthropic]
     API --> MON[App Insights and Log Analytics]
 ```
 
@@ -343,7 +343,11 @@ MODEL_ROLES = {          # config, not code — editable per org later
 }
 ```
 
-V1 ships **two** providers (Azure OpenAI + Anthropic) to prove the abstraction is real, with a static per-role fallback chain on 429/5xx. Every call is metered into `usage_ledger` (tokens, model, cost estimate, run, org). Deliberately absent in V1: dynamic routing, bandits, fine-tuning, local models — the registry gives them a home later.
+V1 ships **two** providers (OpenAI + Anthropic) to prove the abstraction is real, with a static per-role fallback chain on 429/5xx. Every call is metered into `usage_ledger` (tokens, model, cost estimate, run, org). Deliberately absent in V1: dynamic routing, bandits, fine-tuning, local models — the registry gives them a home later.
+
+Two things the table above is precise about, and the build depends on both (DECISIONS **D-018**). A role maps to a **tier**, never to a model: tiers map to concrete model ids per provider, and both maps are configuration. Model ids themselves are deployment configuration with **no defaults in code** — a provider's catalogue changes every few months, and a stale default either 404s or silently bills for the wrong tier. The six role names here are the states of the research loop in 4.4, and they are the names used in code, in `LLM_ROLE_MAP` and in the `usage_ledger` CHECK constraint.
+
+The two providers are **OpenAI's own API and Anthropic's**, not Azure OpenAI (DECISIONS **D-017**, owner's call). Azure OpenAI is reconsidered when the rest of Azure is stood up in Phase 12; because a provider is one module behind this protocol and its models are configuration, that change costs a file and an environment variable. What it buys back is data residency, which is the first question to re-ask before a real customer's data flows.
 
 ---
 
@@ -431,7 +435,7 @@ sequenceDiagram
     AG->>AG: then query the database for actual values
 ```
 
-Ingestion: originals to Blob (`org/{org_id}/docs/…`); extraction (pymupdf, python-docx, plain md/txt); heading-aware chunks of ~500–800 tokens; embeddings (Azure OpenAI `text-embedding-3-small`); rows in `knowledge_chunks` with `org_id` + RLS. Retrieval: vector + Postgres full-text merged (poor-man's hybrid), top-k with per-document caps, provenance attached. **Division of labor is enforced conceptually and in prompts:** RAG answers *"what does this term mean here,"* the database answers *"what is the value"* — your §6 example flows exactly as written: retrieve revenue definition → ground SQL in it → execute → critic verifies the definition's filters are present → answer cites both the document and the query.
+Ingestion: originals to Blob (`org/{org_id}/docs/…`); extraction (pymupdf, python-docx, plain md/txt); heading-aware chunks of ~500–800 tokens; embeddings (OpenAI `text-embedding-3-small`, from the same provider as the chat models — D-017); rows in `knowledge_chunks` with `org_id` + RLS. Retrieval: vector + Postgres full-text merged (poor-man's hybrid), top-k with per-document caps, provenance attached. **Division of labor is enforced conceptually and in prompts:** RAG answers *"what does this term mean here,"* the database answers *"what is the value"* — your §6 example flows exactly as written: retrieve revenue definition → ground SQL in it → execute → critic verifies the definition's filters are present → answer cites both the document and the query.
 
 ---
 
@@ -611,8 +615,8 @@ flowchart TB
     ACAA --> PG[(Azure Database for PostgreSQL Flexible + pgvector)]
     ACAA --> KV[Key Vault - managed identity]
     ACAA --> BLOB[Blob Storage]
-    ACAA --> AOAI[Azure OpenAI]
-    ACAA -.-> ANT[Anthropic API]
+    ACAA --> OAI[OpenAI API]
+    ACAA --> ANT[Anthropic API]
     ENV --> LAW[Log Analytics + App Insights]
     EID[Entra External ID] --- ACAW
     ACAA --> CDB[(Customer databases - egress)]
@@ -629,7 +633,7 @@ Service-by-service justification (your §10 format — need / problem solved / V
 | ACR (Basic) | Private images | ✓ | GHCR (fine too) | — |
 | App Insights/Log Analytics (capped) | Traces, alerts | ✓ | Self-host OTel stack (ops cost > savings) | — |
 | Entra External ID | Managed identity provider | ✓ | Auth0/Clerk (non-Azure) | SSO tiers later |
-| Azure OpenAI | Models + embeddings in-cloud | ✓ (as one of two providers) | Direct OpenAI API | — |
+| Azure OpenAI | Models + embeddings in-cloud, keeping LLM traffic inside Azure | ✗ — deferred (D-017) | Direct OpenAI API (what V1 uses) | Phase 12, when data residency is worth the second provisioning |
 | **APIM** | Public API keys/quotas | ✗ | ACA ingress + app limits | Public partner API (V2) |
 | **Service Bus** | Durable work queue | ✗ | In-process tasks + checkpoints | Concurrency demands worker (V1.5) |
 | **Azure AI Search** | Hybrid search at scale | ✗ | pgvector + tsvector | Corpus/quality demands (V2) |
@@ -902,7 +906,7 @@ Queue technology (until worker exists) · sandbox runtime choice · APIM tier ·
 | Platform DB | Azure Postgres Flexible | Cosmos, MySQL | RLS + pgvector + JSONB in one engine | ~$15–30 | ✓ |
 | Vector | pgvector | AI Search | $0, tenant isolation via RLS | $0 | ✓ |
 | SQL parsing | sqlglot | sqlparse | Real multi-dialect ASTs + transpile | free | ✓ |
-| LLMs | Azure OpenAI + Anthropic | single provider | Proves abstraction; fallback | usage | ✓ |
+| LLMs | OpenAI + Anthropic (D-017) | single provider; Azure OpenAI | Proves abstraction; fallback | usage | ✓ |
 | Embeddings | text-embedding-3-small | OSS models | Cheap, good, managed | usage | ✓ |
 | Auth | Entra External ID | Auth0, Clerk | Azure-native, free tier, SSO path | $0 tier | ✓ |
 | Hosting | Container Apps | App Service, AKS | Scale-to-zero, revisions, jobs later | ~$0–30 | ✓ |
@@ -947,7 +951,8 @@ data-agent/
 │           ├── dal/          # policy.py validator.py executor.py masking.py audit_hook.py
 │           ├── semantic/     # definitions.py verified.py
 │           ├── knowledge/    # ingest.py chunk.py embed.py retrieve.py
-│           ├── llm/          # base.py azure_openai.py anthropic.py registry.py meter.py
+│           ├── llm/          # base.py registry.py structured.py service.py meter.py
+│           │                 # fake.py openai.py anthropic.py fallback.py
 │           ├── agent/        # runner.py state.py intake.py context.py planner.py loop.py
 │           │                 # critic.py composer.py capability.py budget.py
 │           │   ├── tools/    # registry.py run_sql.py search_tables.py describe_table.py
@@ -1008,9 +1013,9 @@ Ordering logic: **skeleton → identity → data path with security → single-s
 
 - **Repositories:** one — `data-agent` monorepo.
 - **Deployables:** two — `web` (Next.js) and `api` (FastAPI containing agent, DAL, connectors, catalog, knowledge).
-- **Azure services:** Container Apps, Postgres Flexible (+pgvector), Key Vault, Blob, ACR, App Insights/Log Analytics (capped), Entra External ID, Azure OpenAI. Nothing else.
+- **Azure services:** Container Apps, Postgres Flexible (+pgvector), Key Vault, Blob, ACR, App Insights/Log Analytics (capped), Entra External ID. Nothing else. Models come from OpenAI's and Anthropic's own APIs; Azure OpenAI is deferred to Phase 12 (D-017).
 - **Databases:** one platform Postgres (shared schema, org_id + RLS). Customer DBs are theirs, reached read-only.
-- **LLM abstraction:** one `LLMProvider` protocol, role→model registry, Azure OpenAI + Anthropic, static fallback, full metering.
+- **LLM abstraction:** one `LLMProvider` protocol, role→tier→model registry, OpenAI + Anthropic, static fallback, full metering.
 - **Agent:** hand-rolled bounded state machine (Intake→Context→Plan→Execute/Observe/Reflect→Validate→Compose), findings-cite-executions evidence model, deterministic capability check, hybrid critic, durable event log + SSE.
 - **Connectors:** in-process package behind a strict interface + capability descriptor; PostgreSQL and SQL Server; `ValidatedQuery` type gate.
 - **RAG:** Blob originals → chunked → pgvector + tsvector, org-scoped; semantic definitions and verified queries as separate, structured, catalog-validated grounding.

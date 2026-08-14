@@ -210,6 +210,19 @@ async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
                     ),
                     {"org": org_id, "execution": execution_id},
                 )
+                # What a model call cost (WP6.1). Seeded here because usage is
+                # commercially sensitive on its own: how much a tenant spends,
+                # and how often they ask, is inferable from these rows without
+                # reading a single answer.
+                await connection.execute(
+                    text(
+                        "INSERT INTO usage_ledger "
+                        "(org_id, role, tier, provider, model, status, "
+                        "input_tokens, output_tokens) VALUES "
+                        "(:org, 'plan', 'strong', 'fake', 'fake-strong', 'ok', 100, 20)"
+                    ),
+                    {"org": org_id},
+                )
                 if org_id == org_b:
                     catalog.update(
                         data_source=data_source_id,
@@ -279,6 +292,11 @@ def _forged_insert(table: str, seeded: SeededOrgs) -> str:
         "result_artifacts": (
             "INSERT INTO result_artifacts (org_id, query_execution_id, expires_at) VALUES "
             f"('{other_org}', '{seeded.b_execution}', now() + interval '30 days')"
+        ),
+        "usage_ledger": (
+            "INSERT INTO usage_ledger "
+            "(org_id, role, tier, provider, model, status) VALUES "
+            f"('{other_org}', 'plan', 'strong', 'fake', 'forged', 'ok')"
         ),
         "catalog_relationships": (
             "INSERT INTO catalog_relationships "

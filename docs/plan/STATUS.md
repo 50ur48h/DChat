@@ -1,16 +1,18 @@
 # STATUS — data-agent build
 
-Current position: **Phases 0–5 complete and signed off.** The security boundary
-                  is built, proven and closed.
-Next step:        Phase 6 / WP6.1 (`p6.1-llm-core`) — the LLMProvider protocol,
-                  FakeLLM, the registry and usage metering. **No key needed for
-                  this WP**; WP6.2 is the one that needs a real provider, and
-                  the brief at the end of this file says exactly what to ask
-                  for. Phase 6 depends only on Phase 0, so nothing in it is
-                  waiting on anything already built.
+Current position: **Phases 0–5 complete and signed off; Phase 6 started.** WP6.1
+                  is built: one metered front door to every model call.
+Next step:        Phase 6 / WP6.2 (`p6.2-llm-providers`) — the OpenAI and
+                  Anthropic providers, the fallback chain and the live smoke.
+                  **This is the gate PR and it needs the two API keys plus the
+                  model ids to use per tier**, because this build ships no
+                  default model ids on purpose. See the brief at the end of this
+                  file. Provider choice settled by the owner: OpenAI is primary,
+                  Anthropic second, Azure OpenAI reconsidered at Phase 12
+                  (DECISIONS **D-017**).
 Merge policy: ASK
-Blocked on user: nothing
-Last updated: 2026-08-13 by Claude Code (session end: Phase 5 closed)
+Blocked on user: nothing yet — WP6.2 needs the keys before its live smoke
+Last updated: 2026-08-14 by Claude Code (WP6.1)
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
 - [x] WP0.1 Repo, docs, tracking files, branch protection
@@ -218,8 +220,27 @@ Last updated: 2026-08-13 by Claude Code (session end: Phase 5 closed)
       introduced it.
 
 ## Phase 6 — LLM abstraction (M6)
-- [ ] WP6.1 LLMProvider protocol + FakeLLM + registry + usage metering
-- [ ] WP6.2 Azure OpenAI + Anthropic impls + fallback + live smoke  ← gate PR
+- [x] WP6.1 LLMProvider protocol + FakeLLM + registry + usage metering
+      — `llm/service.complete` is the front door and the whole design is that
+      there is no other one: it resolves the role, calls the provider, meters,
+      parses and repairs, and **no path spends tokens without writing a
+      `usage_ledger` row** — including the failures and both halves of a repair.
+      The same shape as `dal.run`, for the same reason.
+      **DECISIONS D-017** (owner's call): OpenAI's own API is the primary
+      provider and Anthropic the second; Azure OpenAI is deferred to Phase 12,
+      and the architecture is edited to say so. **D-018**: roles are the
+      architecture's six (`intake, observe, plan, sql, critic, compose`), and a
+      role names a *tier*, not a model — which is why `usage_ledger` stores both.
+      Model ids are configuration with **no defaults in code**: a stale default
+      404s or bills for the wrong tier, so `LLM_MODELS` is required and
+      resolution fails naming the provider and the missing tier.
+      Revision **0011** adds `usage_ledger` — a tenant table, so an RLS policy,
+      a `TENANT_TABLES` line and the rls_proof seed/forge pair, all in this PR.
+      `cost_usd` is nullable and **null means unpriced, never free**, so a
+      quota built on these rows cannot silently count an unpriced model as zero.
+      68 new tests; the LLM package sits at 96–100% per module. Raised
+      **B-025**–**B-028**
+- [ ] WP6.2 OpenAI + Anthropic impls + fallback + live smoke  ← gate PR
 - [ ] GATE: same suite passes on both providers; tokens metered; sign-off
 
 ## Phase 7 — Single-shot Q&A (M7)
@@ -264,47 +285,93 @@ Last updated: 2026-08-13 by Claude Code (session end: Phase 5 closed)
 
 ## Next step
 
-Phase 6 / **WP6.1 — protocol + FakeLLM + registry + meter** (`p6.1-llm-core`).
-Plan §6 Phase 6, architecture Part 4 and 8.3. No human review requirement and no
-gate on this WP; WP6.2 is the gate PR.
+Phase 6 / **WP6.2 — real providers + fallback + live smoke** (`p6.2-llm-providers`).
+Plan §6 Phase 6, architecture Part 4.9 and 8.5. **This is the gate PR.**
 
-**No USER INPUT is needed to start.** WP6.2 needs at least one real provider —
-Azure OpenAI (endpoint, key, a chat deployment and a small/cheap deployment)
-and/or an Anthropic API key. Both is better, because two providers is what
-proves the abstraction. Ask when WP6.1 is merged, not before, and remember CI
-never uses them.
+**USER INPUT is needed before the live smoke** (ask at the start of the WP, and
+build everything that does not depend on it first):
+
+1. an **OpenAI** API key from platform.openai.com — the primary provider (D-017);
+2. an **Anthropic** API key — the second provider, which is what actually proves
+   the abstraction is real rather than asserted;
+3. for each of them, **the model id to use for `small`, `mid` and `strong`**.
+   This build ships no default model ids on purpose (D-018), so there is nothing
+   to fall back on and nothing to be quietly stale. If the owner would rather not
+   choose, list each account's available models and recommend three.
+
+CI never uses any of it: the whole suite runs against the FakeLLM.
 
 Build:
 
-- `llm/base.py` — `LLMProvider.complete(role, messages, schema=None, budget)
-  -> Completion`. Structured output through a JSON-schema-constrained call where
-  the provider supports one, and parse-then-repair **once** where it does not.
-- `llm/registry.py` — the five roles from arch Part 4 (`planner`, `sql_author`,
-  `critic`, `composer`, `cheap`) mapped from config. Model tiering is the
-  biggest cost lever in the product (arch 8.3), and it lives here.
-- `llm/fake.py` — the deterministic FakeLLM: scripted responses keyed by
-  (role, matcher), every call recorded for assertions. **This is the backbone of
-  every agent test and of the Phase 9 evals**, so its recording API is worth
-  more care than its scripting API.
-- `llm/meter.py` + a migration for `usage_ledger` — tokens in/out, model, role,
-  org, run, cost estimate, on **every** call whatever the provider. A new tenant
-  table, so: RLS policy, `TENANT_TABLES`, rls_proof extension, same PR. That
-  rule has bitten twice now and both times the guard caught it.
+- `llm/openai.py` and `llm/anthropic.py` — thin. Send, receive, report usage,
+  sanitize failures, and raise `LLMError` with `retryable` set correctly, since
+  that flag is the only question the fallback asks. Anthropic takes the system
+  prompt as a top-level parameter rather than as a message, which is exactly
+  what `ProviderCaps.supports_system_message` exists to describe.
+- `llm/fallback.py` — walk the chain `registry.resolve` already returns. Retries
+  with jitter on 429/5xx per arch 8.5, then the next provider, annotating the
+  completion with the provider that answered. The ledger will show the switch on
+  its own: an `error` row followed by an `ok` row from a different provider.
+- `scripts/llm_smoke.py` — local only, real keys, one structured call per
+  provider. Never in CI.
+- Register both in `registry._BUILTIN_FACTORIES`, which is empty and waiting.
 
-What Phase 5 hands it:
+What WP6.1 hands it:
 
-- **Nothing in `dal/` calls an LLM and nothing in `llm/` will call the DAL.**
+- **`llm.complete` is the front door and there is no other one.** It resolves the
+  role, calls, meters, parses and repairs. Fallback goes *inside* it — a second
+  entry point that skips the meter would undo the property the whole package is
+  built around. If the door does not offer what fallback needs, widen the door.
+- **The chain already resolves.** `registry.resolve(role)` returns one
+  `ModelChoice` per configured provider in order; WP6.1 only ever uses `[0]`.
+- **`ProviderCaps` is where providers are allowed to differ.** Native structured
+  output, system-message handling, output ceilings. Anything a provider decides
+  for itself beyond that is a place where behaviour can diverge, which is what
+  this abstraction exists to prevent.
+- **Prices are configuration** (`LLM_PRICES`, USD per million tokens). Ask for
+  them with the model ids, or the gate demo will show real tokens against a null
+  cost — which is honest, and much less useful than the real number.
+
+What Phase 5 handed Phase 6, and still holds:
+
+- **Nothing in `dal/` calls an LLM and nothing in `llm/` calls the DAL.**
   The agent joins them in Phase 7; keeping them ignorant of each other is what
   makes the FakeLLM able to stand in for a provider without a database, and the
   DAL testable without a model.
-- **`usage_ledger` is the third tenant table this build adds after the pattern
-  was set** (0007 catalog, 0010 executions). Copy 0010's shape: policy, force,
-  grant, and the seed/forge pair in `test_rls_proof.py`.
-- **Budgets are not built yet.** `Completion` should carry what a budget would
-  need — tokens, model, latency — but the BudgetState that spends them is
-  Phase 8. Do not invent it early.
+- **Budgets are not built yet.** `Completion` carries what a budget will need —
+  tokens, model, latency — and `CallLimits` bounds one call. The BudgetState that
+  spends across a run is Phase 8. Do not invent it early.
 
 ## Notes
+
+- **Nothing calls a model except through `llm.complete`.** It is the only entry
+  point and it meters on every path — the answer, the provider failure, and both
+  halves of a parse-then-repair. Calling a provider directly would spend a
+  customer's tokens without a `usage_ledger` row, which is the LLM package's
+  version of the rule `dal.run` holds for customer data. A later phase that needs
+  something the door does not offer should widen the door.
+
+- **A role names a tier, not a model** (D-018). Callers say `plan` or `critic`;
+  configuration decides that `plan` is `strong` and that `strong` is some model
+  id. Architecture 8.3 calls tiering the biggest cost lever in the product, and a
+  lever is only a lever if it is in one place — so a model id anywhere outside
+  `LLM_MODELS` is a bug. The ledger stores the role *and* the tier because the
+  map between them changes, and "what did moving observe to small actually save"
+  is a question about history.
+
+- **This build ships no default model ids, and that is the design.** A model id
+  compiled into a release is stale within months: it either 404s or bills for the
+  wrong tier, and the second failure is silent. `LLM_MODELS` is required, and
+  resolution fails naming the provider and the tier that is missing. The same
+  reasoning applies to `LLM_PRICES` — an unpriced model records `cost_usd = NULL`,
+  which means **unpriced, never free**, and a quota must treat it as unknown
+  rather than summing zeros into a total someone enforces a limit from.
+
+- **A FakeLLM in production would not fail — it would fabricate.** That is the
+  worst failure mode this product has: confident, evidenced-looking answers with
+  nothing behind them. `ProviderCaps.is_stub` marks such a provider and the
+  registry refuses to hand one out in a production build or environment, the same
+  pair the auth-mode and secrets-backend assertions use.
 
 - **An audit row outlives the thing it is about** (D-016, owner's call). Deleting
   a data source sets `query_executions.data_source_id` to NULL rather than
@@ -407,11 +474,14 @@ What Phase 5 hands it:
 
 - **The local demo environment, as this session left it.** Five containers up
   (`platform-pg`, `seed-pizza-pg`, `mssql`, `api`, `web`); platform database at
-  revision **0010**, and the `api` image rebuilt (WP5.1 added sqlglot, so an
+  revision **0011**, and the `api` image rebuilt (WP5.1 added sqlglot, so an
   image from before it cannot import the DAL — rebuild after any dependency
-  change or the container and the host disagree about what exists). The demo
+  change or the container and the host disagree about what exists; WP6.1 added
+  no dependency, so the bind mount was enough). The demo
   org's `query_executions` holds real rows from the WP5.2b verification: two
-  `ok`, one `refused`, one `error`. They are evidence, not fixtures — a reseed
+  `ok`, one `refused`, one `error`, and its `usage_ledger` holds four from the
+  WP6.1 one: a priced call, both halves of a repair, and a provider failure
+  costing `NULL`. They are evidence, not fixtures — a reseed
   does not recreate them; the demo organization `ebfe8139-…` holds two verified data
   sources, each with an active version 1 catalog, and one hand-set column policy.
   `make up && make seed` and `make up.mssql && make seed.mssql` rebuild the
