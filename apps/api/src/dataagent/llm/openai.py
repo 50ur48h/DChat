@@ -290,9 +290,3 @@ def _finish_reason(payload: dict[str, Any]) -> str:
             return str(cast(dict[str, Any], details).get("reason", "incomplete"))
         return "incomplete"
     return str(payload.get("status", "completed"))
-
-
-def build() -> OpenAIProvider:
-    """Factory for the registry. Reads configuration at call time, so a process
-    that never uses this provider never needs a key."""
-    return OpenAIProvider()

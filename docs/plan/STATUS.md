@@ -1,18 +1,60 @@
 # STATUS — data-agent build
 
-Current position: **Phases 0–5 complete and signed off; Phase 6 started.** WP6.1
-                  is built: one metered front door to every model call.
-Next step:        Phase 6 / WP6.2 (`p6.2-llm-providers`) — the OpenAI and
-                  Anthropic providers, the fallback chain and the live smoke.
-                  **This is the gate PR and it needs the two API keys plus the
-                  model ids to use per tier**, because this build ships no
-                  default model ids on purpose. See the brief at the end of this
-                  file. Provider choice settled by the owner: OpenAI is primary,
-                  Anthropic second, Azure OpenAI reconsidered at Phase 12
-                  (DECISIONS **D-017**).
+Current position: **Phases 0–5 signed off. Phase 6 built; its gate is partially
+                  met and its PR is still open.** Every model call goes through
+                  one metered front door, and that door now reaches a real
+                  provider — OpenAI, verified live against the owner's account.
+                  ⚠ **WP6.2 lives on `p6.2-llm-providers` in PR #35, which is
+                  NOT merged.** `main` is at WP6.1. Nothing in Phase 6's second
+                  half exists on `main` yet.
+Next step:        **Read the note directly below this block first** — it is the
+                  session-end handoff and it says what to do before any new
+                  work. After that: Phase 7 / WP7.1 (`p7.1-runs-schema`), spec
+                  in the "Next step" section near the end of this file.
 Merge policy: ASK
-Blocked on user: nothing yet — WP6.2 needs the keys before its live smoke
-Last updated: 2026-08-14 by Claude Code (WP6.1)
+Blocked on user: **PR #35 needs a merge decision** (CI green, human review of
+                 `dal/`+`infra/` not required — this PR touches neither).
+                 Separately, an Anthropic API key would close B-029 and the
+                 Phase 6 gate; it blocks neither Phase 7 nor the merge.
+Last updated: 2026-08-14 by Claude Code (WP6.2, session end)
+
+---
+
+## ⚠ Session-end handoff — read this before starting anything
+
+The session that built WP6.2 ended here, deliberately, with the PR open. A new
+session should do these in order and not skip to the build.
+
+1. **Session ritual (plan §7.1), with one addition.** `git fetch --all`, then
+   `gh pr list`. **PR #35 will be open unless the owner merged it.**
+   - *If merged:* `git checkout main && git pull`, confirm `apps/api/src/dataagent/llm/openai.py`
+     is present on `main`, delete the stale local branch, and go to step 3.
+   - *If still open:* do **not** branch off `main` for WP7.1 — you would be
+     building on a tree without the LLM providers. Either wait for the merge or
+     branch from `p6.2-llm-providers`, and say plainly in the PR which you did.
+   - *If it has review comments or red CI:* address those before new work.
+2. **Do not re-verify the provider by calling it.** The live smoke spends real
+   money. It has already been run and its evidence is recorded under Phase 6
+   below. Re-run it only when something about the provider actually changes.
+3. **The Phase 6 gate is not closed.** It is partially met and its checkbox is
+   deliberately empty. Do not tick it, and do not reword the criterion, when
+   Phase 7 work happens to pass — closing it needs a second real provider
+   (**B-029**, P1). Phase 6 cannot be signed off before then; Phase 7 may
+   proceed regardless, because nothing in it needs two providers.
+4. **Local machine state that a fresh clone will not have.** `.env` here carries
+   a working `OPENAI_API_KEY` plus `LLM_PROVIDERS`/`LLM_MODELS`/`LLM_ROLE_MAP`/
+   `LLM_PRICES`/`LLM_RUN_COST_LIMIT_USD`. `ANTHROPIC_API_KEY` exists but is
+   **empty**. `.env.example` documents all of it without the secrets. A new
+   machine needs `make env` and a key before `make llm.smoke` will do anything.
+5. **When the Anthropic key arrives**, verify its three model ids against the
+   account with `GET /v1/models` *before* writing them into `LLM_MODELS` — the
+   same check done for OpenAI. A pricing page says what exists, not what a key
+   may call. That habit is B-027, still unautomated.
+
+One process note worth carrying forward: a patch script that reports success
+without asserting its edit matched will lie to you. This file's header silently
+went un-updated for exactly that reason, and was caught only by reading it back.
+Prefer an edit that fails loudly over one that prints "done".
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
 - [x] WP0.1 Repo, docs, tracking files, branch protection
@@ -528,18 +570,19 @@ What Phase 6 hands it:
 
 - **The local demo environment, as this session left it.** Five containers up
   (`platform-pg`, `seed-pizza-pg`, `mssql`, `api`, `web`); platform database at
-  revision **0011**, and the `api` image rebuilt (WP5.1 added sqlglot, so an
-  image from before it cannot import the DAL — rebuild after any dependency
-  change or the container and the host disagree about what exists; WP6.1 added
-  no dependency, so the bind mount was enough). The demo
-  org's `query_executions` holds real rows from the WP5.2b verification: two
-  `ok`, one `refused`, one `error`, and its `usage_ledger` holds four from the
-  WP6.1 one: a priced call, both halves of a repair, and a provider failure
-  costing `NULL`. They are evidence, not fixtures — a reseed
-  does not recreate them; the demo organization `ebfe8139-…` holds two verified data
-  sources, each with an active version 1 catalog, and one hand-set column policy.
-  `make up && make seed` and `make up.mssql && make seed.mssql` rebuild the
-  fixtures from nothing; `make db.setup` brings a fresh database to head.
+  revision **0011**. Rebuild the `api` image after any dependency change or the
+  container and the host disagree about what exists.
+  The demo organization `ebfe8139-…` now carries evidence from three phases, and
+  none of it is fixtures — a reseed does not recreate any of it. Two verified
+  data sources with an active version 1 catalog and one hand-set column policy
+  (Phase 3–4). Four `query_executions` rows from WP5.2b: two `ok`, one
+  `refused`, one `error`. Four `usage_ledger` rows from WP6.1's FakeLLM check —
+  a priced call, both halves of a repair, and a provider failure costing `NULL`
+  — **plus real rows from WP6.2's live OpenAI calls**, which cost actual money
+  (a fraction of a cent) and are the only proof in the repository that the
+  provider works end to end.
+  `make up && make seed`, `make up.mssql && make seed.mssql` and `make db.setup`
+  rebuild the fixtures from nothing; they do not rebuild the evidence above.
   `ops/scripts/set_role.sh` is the escape hatch that exists because the Entra
   account which created that organization can no longer sign in (**B-017**).
 
