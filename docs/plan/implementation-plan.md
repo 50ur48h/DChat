@@ -214,7 +214,7 @@ Last updated: <date> by Claude Code
 
 ## Phase 6 — LLM abstraction (M6)
 - [ ] WP6.1 LLMProvider protocol + FakeLLM + registry + usage metering
-- [ ] WP6.2 Azure OpenAI + Anthropic impls + fallback + live smoke  ← gate PR
+- [ ] WP6.2 OpenAI + Anthropic impls + fallback + live smoke  ← gate PR
 - [ ] GATE: same suite passes on both providers; tokens metered; sign-off
 
 ## Phase 7 — Single-shot Q&A (M7)
@@ -320,9 +320,9 @@ Dev-issuer guardrails (WP2.1): enabled only when `AUTH_MODE=dev` **and** the ima
 | GitHub org/repo name, visibility, license, MERGE_POLICY | **Phase 0, WP0.1** | — | Also: user must have `gh` authenticated in the Claude Code environment |
 | `LOCAL_SECRETS_KEY` (generated, not asked) | Phase 3 | local `.env` | `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | Entra External ID: tenant ID, SPA client ID, API app ID/audience | **Phase 2, WP2.3** (backend can ship on dev issuer first) | `.env` / web env / GH env | User task card in Phase 2 has the exact clicks |
-| Embedding provider key (Azure OpenAI or OpenAI) | Phase 4 (optional — search degrades to lexical) → **required Phase 10** | `.env`, GH secret `EMBEDDINGS_*` | |
-| Azure OpenAI: endpoint, key, chat + small deployments | **Phase 6, WP6.2** (live smoke; CI stays on FakeLLM) | `.env`, GH secrets | At least ONE real provider needed |
-| Anthropic API key | Phase 6, WP6.2 | `.env`, GH secret `ANTHROPIC_API_KEY` | Second provider proves the abstraction |
+| Embedding provider key (OpenAI) | Phase 4 (optional — search degrades to lexical) → **required Phase 10** | `.env`, GH secret `EMBEDDINGS_*` | Same account as the chat models (D-017) |
+| OpenAI API key + the model ids to use per tier | **Phase 6, WP6.2** (live smoke; CI stays on FakeLLM) | `.env` (`OPENAI_API_KEY`, `LLM_MODELS`), GH secrets | **Primary provider** (D-017 — not Azure OpenAI). At least ONE real provider needed |
+| Anthropic API key + its model ids per tier | Phase 6, WP6.2 | `.env` (`ANTHROPIC_API_KEY`, `LLM_MODELS`), GH secret | Second provider proves the abstraction |
 | Azure subscription ID, region, resource-group naming OK | **Phase 12, WP12.1** | GH environment vars | |
 | Entra app registration for GitHub OIDC (federated credential) | Phase 12, WP12.2 | GH env `AZURE_CLIENT_ID/TENANT_ID/SUBSCRIPTION_ID` | No client secrets in CI — OIDC only |
 | Budget alert email, monthly cap | Phase 12, WP12.3 | Bicep params | |
@@ -697,16 +697,17 @@ Format per WP: **Branch → Build → Tests → Accept** (accept = commands/chec
 
 **Goal:** provider-agnostic, metered, fallback-capable LLM calls; the FakeLLM test harness is born. Design: arch Part 4 (LLMProvider), Part 8.3. Depends only on Phase 0 — build it while blocked, if useful.
 
-> **USER INPUT (WP6.2):** at least one real provider — Azure OpenAI (endpoint, key, a chat deployment + a small/cheap deployment) and/or Anthropic API key. Both is better (proves the abstraction). CI never uses them.
+> **USER INPUT (WP6.2):** at least one real provider — an **OpenAI** API key (platform.openai.com) and/or an **Anthropic** API key, plus the model ids to use for the small/mid/strong tiers, since this build ships no default model ids. Both providers is better (proves the abstraction). CI never uses them. Azure OpenAI is deferred to Phase 12 — DECISIONS **D-017**.
 
 ### WP6.1 — Protocol + FakeLLM + registry + meter — `p6.1-llm-core`
-- `llm/base.py`: `LLMProvider.complete(role, messages, schema=None, budget) -> Completion` (structured output via JSON-schema-constrained call where supported, else parse+repair once); roles per arch Part 4: `planner, sql_author, critic, composer, cheap` mapped in `llm/registry.py` from config (`LLM_ROLE_MAP` env/JSON).
-- `llm/fake.py`: deterministic FakeLLM — scripted responses keyed by (role, matcher) loaded from test fixtures; records every call for assertions; this is the backbone of all agent tests and CI evals.
-- `llm/meter.py` + revision 0007 `usage_ledger` (+RLS+proof): tokens in/out, model, role, org, run_id, cost estimate; every call metered no matter the provider.
+- `llm/base.py`: `LLMProvider.complete(request) -> Completion` (structured output via JSON-schema-constrained call where supported, else parse+repair once — the repair lives in `llm/structured.py` so every provider inherits it); roles per arch 4.9: `intake, observe, plan, sql, critic, compose`, each mapped to a **tier** (`small|mid|strong`) in `llm/registry.py` from config (`LLM_ROLE_MAP`), and tiers mapped to model ids per provider (`LLM_MODELS`). DECISIONS **D-018**.
+- `llm/fake.py`: deterministic FakeLLM — scripted responses keyed by (role, matcher), buildable from plain data so a fixture file needs no parser here; records every call for assertions; this is the backbone of all agent tests and CI evals.
+- `llm/service.py`: the front door — resolve, call, meter, parse, repair once. The only place a model is called, for the same reason `dal.run` is the only place customer data is read.
+- `llm/meter.py` + revision **0011** `usage_ledger` (+RLS+proof): tokens in/out, model, role, tier, org, run_id, cost estimate; every call metered no matter the provider, failures included.
 - **Tests:** registry resolution, schema-output repair path, meter rows written, FakeLLM determinism.
 
 ### WP6.2 — Real providers + fallback — `p6.2-llm-providers` *(gate PR)*
-- `llm/azure_openai.py`, `llm/anthropic.py` (httpx, retries w/ jitter on 429/5xx per arch 8.5); `llm/fallback.py`: static ordered fallback per role (arch Part 4) — on provider-level failure after retries, next provider, annotate completion with `provider_used`.
+- `llm/openai.py`, `llm/anthropic.py` (httpx, retries w/ jitter on 429/5xx per arch 8.5); `llm/fallback.py`: static ordered fallback per role (arch Part 4) — on provider-level failure after retries, next provider in the chain `registry.resolve` already returns, annotate completion with `provider_used`.
 - `scripts/llm_smoke.py`: manual/live smoke (simple structured call per provider) — run locally with real keys, never in CI.
 - **Accept/GATE (arch M6):** one contract test suite passes against FakeLLM in CI and (manually) against both real providers; injected-429 test triggers fallback; `usage_ledger` rows present; keys only via config; sign-off.
 

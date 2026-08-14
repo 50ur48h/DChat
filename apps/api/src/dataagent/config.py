@@ -230,6 +230,45 @@ class Settings(BaseSettings):
         ),
     )
 
+    #: Ordered: the first is primary and the rest are the fallback chain WP6.2
+    #: walks on a retryable failure (architecture 4.9). No default provider is
+    #: usable out of the box — a build that ships with one configured would make
+    #: "which model answered" depend on what nobody set.
+    llm_providers: Annotated[tuple[str, ...], NoDecode] = Field(
+        default=("openai",),
+        description=(
+            "Comma-separated LLM providers, most preferred first. Each must have "
+            "models in LLM_MODELS and a key in its own variable."
+        ),
+    )
+    llm_role_map: dict[str, str] = Field(
+        default_factory=dict[str, str],
+        description=(
+            "JSON object overriding which tier serves which role, e.g. "
+            '{"observe": "small"}. Roles are intake, observe, plan, sql, '
+            "critic, compose; tiers are small, mid, strong. Unset roles keep the "
+            "architecture's defaults, and this is the cost lever of arch 8.3."
+        ),
+    )
+    llm_models: dict[str, dict[str, str]] = Field(
+        default_factory=dict[str, dict[str, str]],
+        description=(
+            "JSON: provider -> tier -> model id, e.g. "
+            '{"openai": {"small": "...", "mid": "...", "strong": "..."}}. '
+            "Required: model ids are deployment configuration, because a default "
+            "compiled into a release is stale within months and a stale model id "
+            "either 404s or bills for the wrong tier."
+        ),
+    )
+    llm_prices: dict[str, dict[str, float]] = Field(
+        default_factory=dict[str, dict[str, float]],
+        description=(
+            "JSON: model id -> {input, output} in USD per million tokens. A model "
+            "with no price here is recorded with a NULL cost, which means "
+            "unpriced — never free."
+        ),
+    )
+
     artifacts_path: Path = Field(
         default=Path("ops/artifacts"),
         description=(
@@ -266,7 +305,7 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator("cors_origins", "tls_local_hosts", mode="before")
+    @field_validator("cors_origins", "tls_local_hosts", "llm_providers", mode="before")
     @classmethod
     def _split_list(cls, value: object) -> object:
         """Accept ``CORS_ORIGINS=http://a,http://b`` as well as a JSON array."""

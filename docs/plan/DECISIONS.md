@@ -4,6 +4,57 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-018 — Roles are the architecture's six, and a role names a tier, not a model
+Date: 2026-08-14 · Phase: 6 · PR: WP6.1
+Context: Two documents disagree about what an LLM role is called. Architecture
+4.9's `MODEL_ROLES` lists six — `intake, observe, plan, sql, critic, compose` —
+and maps each to a *tier* (`small|mid|strong`). Plan §6 WP6.1 paraphrases them
+as five: `planner, sql_author, critic, composer, cheap`. The names are about to
+be written into a CHECK constraint, an env var and every agent call site from
+Phase 7 onward, so the disagreement had to be settled before the first one.
+Options: (a) the plan's five; (b) the architecture's six; (c) both, with aliases.
+Decision: (b). The architecture is the binding document (plan §1.2), and its six
+names are not a synonym for the plan's — they are literally the states of the
+research loop in 4.4, which Phase 8 implements as a state machine. `cheap` is
+not a role at all in that reading; it is the `small` tier, which is why the map
+has two levels. (c) was rejected outright: an alias means two names for one
+concept in a table people will grep.
+Consequences: `Role` and `Tier` live in `llm/base.py`; `usage_ledger` stores
+both, because the map between them is configuration and "what did moving observe
+to the small tier save" is the question architecture 8.3's central claim rests
+on. The schema keeps its own copy of the two lists — a migration must mean the
+same thing in a year — and `test_the_ledger_and_the_llm_package_agree_about_
+roles_and_tiers` fails if they drift. Plan §6 Phase 6 updated to the six names.
+
+## D-017 — OpenAI's own API is the primary provider; Azure OpenAI waits for Phase 12
+Date: 2026-08-14 · Phase: 6 · PR: WP6.1 · Owner's call
+Context: The architecture (4.9, 9.1, 13.4) and plan §6 Phase 6 both name **Azure
+OpenAI** as one of the two V1 providers, on the reasoning that everything else in
+Part 9 is Azure. The owner has credits on `platform.openai.com` — not Azure
+OpenAI — that expire sooner than anything else in the budget, plus an Anthropic
+key. Provisioning an Azure OpenAI resource to spend credits that would lapse
+elsewhere is paying twice.
+Options: (a) provision Azure OpenAI and honour the doc; (b) OpenAI's direct API
+as primary and Anthropic as the second provider, revisiting Azure OpenAI when
+the rest of Azure is stood up in Phase 12; (c) OpenAI only, and drop the second
+provider until later.
+Decision: (b), owner's call on 2026-08-14. (c) was rejected because the second
+provider is not decoration: V1's claim is that the abstraction is real, and the
+only evidence for that is the same contract suite passing on two APIs that
+disagree about system prompts, structured output and usage reporting.
+Consequences: this is a *provider* change, not an architectural one. The
+`LLMProvider` protocol, the registry and the ledger are untouched — which is the
+point of having them, and the first real test of whether they earn their place.
+WP6.2 builds `llm/openai.py` and `llm/anthropic.py`; `llm/azure_openai.py` is not
+written. Model ids and prices are configuration (`LLM_MODELS`, `LLM_PRICES`)
+rather than code, so a later move to Azure OpenAI is a deployment change plus one
+new provider module. Architecture 2.1, 4.9, 9.1 and 13.4 updated to say OpenAI +
+Anthropic, with Azure OpenAI recorded as reconsidered at Phase 12; the Azure
+service table keeps the row and marks it deferred rather than deleting it, so the
+option stays visible. Data residency is the thing given up: calls leave Azure's
+network for OpenAI's, which is acceptable for a demo tenant with generated pizza
+data and is the first question to re-ask before a real customer's data flows.
+
 ## D-016 — An audit row outlives the thing it is about
 Date: 2026-08-13 · Phase: 5 · PR: #31 · Confirmed by the owner
 Context: Revision 0010 gives `query_executions.data_source_id` `ON DELETE SET

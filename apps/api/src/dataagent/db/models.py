@@ -43,6 +43,8 @@ __all__ = [
     "DATA_SOURCE_ENGINES",
     "DATA_SOURCE_STATUSES",
     "EXECUTION_STATUSES",
+    "LLM_ROLES",
+    "LLM_TIERS",
     "PROFILE_STATUSES",
     "RELATIONSHIP_KINDS",
     "SEMANTIC_ROLES",
@@ -50,6 +52,7 @@ __all__ = [
     "SNAPSHOT_STATUSES",
     "TABLE_KINDS",
     "TENANT_TABLES",
+    "USAGE_STATUSES",
     "AuditLog",
     "Base",
     "CatalogColumn",
@@ -630,6 +633,83 @@ class ResultArtifact(Base):
     created_at: Mapped[CreatedAt]
 
 
+#: Architecture 4.9's roles and tiers, as the ledger stores them.
+#: ``dataagent.llm.base`` holds the live copies that application code uses; this
+#: module deliberately does not import them, because the database schema must not
+#: depend on the agent package, and ``test_usage_ledger_matches_the_llm_package``
+#: asserts the two lists agree.
+LLM_ROLES: tuple[str, ...] = ("intake", "observe", "plan", "sql", "critic", "compose")
+LLM_TIERS: tuple[str, ...] = ("small", "mid", "strong")
+
+#: A provider call either answered or it did not. There is no third outcome: a
+#: model that answers badly has still answered, and what it said is judged by the
+#: critic, not by the ledger.
+USAGE_STATUSES: tuple[str, ...] = ("ok", "error")
+
+
+class UsageLedger(Base):
+    """One row per call to a model (architecture Part 4.9, 8.3).
+
+    Written by ``llm/meter.py`` on every path, including failures, because a
+    provider that failed after generating tokens has still spent them and a
+    fallback that is invisible in the ledger is a cost with no explanation.
+
+    ``role`` and ``tier`` are stored rather than derived from ``model``: the map
+    between them is configuration and changes, and "what did moving observe to
+    the small tier actually save" is the question 8.3's central claim rests on.
+
+    No prompt and no completion. Those belong to the run's event log under its
+    own retention; this table is aggregated and kept.
+    """
+
+    __tablename__ = "usage_ledger"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ({})".format(", ".join(f"'{role}'" for role in LLM_ROLES)), name="role_valid"
+        ),
+        CheckConstraint(
+            "tier IN ({})".format(", ".join(f"'{tier}'" for tier in LLM_TIERS)), name="tier_valid"
+        ),
+        CheckConstraint(
+            "status IN ({})".format(", ".join(f"'{s}'" for s in USAGE_STATUSES)),
+            name="status_valid",
+        ),
+        CheckConstraint("(status = 'error') = (error IS NOT NULL)", name="error_matches_status"),
+        CheckConstraint(
+            "input_tokens >= 0 AND output_tokens >= 0", name="token_counts_non_negative"
+        ),
+        Index("ix_usage_ledger_org_id_created_at", "org_id", text("created_at DESC")),
+        Index("ix_usage_ledger_org_id_run_id", "org_id", "run_id"),
+    )
+
+    id: Mapped[UuidPk]
+    org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    #: Phase 7 gives runs a table and this a foreign key.
+    run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    tier: Mapped[str] = mapped_column(String(10), nullable=False)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    model: Mapped[str] = mapped_column(String(200), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    input_tokens: Mapped[int] = mapped_column(nullable=False, server_default=text("0"))
+    output_tokens: Mapped[int] = mapped_column(nullable=False, server_default=text("0"))
+    #: True when the counts are our own arithmetic rather than the provider's, so
+    #: a total can say how much of itself is measured.
+    tokens_estimated: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    #: Null means *not priced*, never free — a model nobody has priced must not
+    #: contribute zero to a total a quota is enforced from.
+    cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(precision=12, scale=6))
+    latency_ms: Mapped[int | None]
+    #: The second call of a parse-then-repair pair.
+    repaired: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
+    #: Sanitized before it arrives: providers raise nothing that has not been.
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[CreatedAt]
+
+
 #: Every tenant-scoped table mapped to the column that identifies its tenant.
 #: ``organizations`` is the exception worth spelling out: it *is* the tenant, so
 #: its key is ``id``, not ``org_id`` — a policy written against ``org_id`` there
@@ -651,4 +731,5 @@ TENANT_TABLES: dict[str, str] = {
     "catalog_relationships": "org_id",
     "query_executions": "org_id",
     "result_artifacts": "org_id",
+    "usage_ledger": "org_id",
 }
