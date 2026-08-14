@@ -587,6 +587,8 @@ Separate append-only `audit_log` table (no UPDATE/DELETE grants for the app role
 
 ## 8.3 Cost controls (§35)
 
+**Implemented ahead of the rest (DECISIONS D-019):** a hard per-run spend ceiling, `LLM_RUN_COST_LIMIT_USD`, checked in the LLM front door before every call against that run's own `usage_ledger` rows. It is narrower than the quota system below and does not replace it: no org-level window, no 80% warning, no run-start check. An unpriced model is refused under a ceiling rather than counted as zero, and exhaustion raises a distinct error so the controller can compose from findings-so-far per 8.5 rather than treat it as failure.
+
 Per-run: the BudgetState caps from 4.4 (all admin-tunable per org within platform ceilings). Per-org: daily/monthly token + query quotas in `usage_ledger`, checked at run start and at each LLM call; soft warn at 80%, hard stop at 100% with a clear user message. Model tiering (4.9) is the biggest lever: intake/observe/critic on the small model routinely cuts run cost ~3–5× vs. all-strong. Caching: metadata snapshot cache (in-process, versioned), embedding cache by content hash, prompt-prefix reuse where providers support it. **Deliberately no cross-request query-result caching in V1** — staleness and tenant-safety complexity outweigh savings; within-run reuse is free via state. Infra cost envelope (dev/demo): ACA ~$0–30, Postgres Flexible B-series ~$15–30, Key Vault/Blob/ACR ~$5–10, App Insights capped ~$5–20 → **≈ $50–100/month + LLM tokens**, which quotas keep bounded.
 
 ## 8.4 Performance architecture (§36)

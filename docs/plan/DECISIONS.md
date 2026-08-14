@@ -4,6 +4,34 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-019 — A per-run spend ceiling, ahead of the per-org quotas 8.3 asks for
+Date: 2026-08-14 · Phase: 6 · PR: WP6.2 · Owner's request
+Context: Architecture 8.3 specifies per-organization daily and monthly token and
+query quotas, checked at run start and at each LLM call, soft warn at 80% and
+hard stop at 100%. That needs a controller, a warning surface and a notion of
+"run start" — all Phase 8 — and is filed as **B-025**. Meanwhile WP6.2 puts real
+spending behind a real key, and the owner asked for eval and gate runs to be
+capped before that happened.
+Options: (a) build 8.3 in full now, in a phase with no controller to hang it on;
+(b) cap nothing until Phase 8 and rely on small models and short prompts;
+(c) a hard per-run ceiling in the front door, leaving the quota system to B-025.
+Decision: (c). `LLM_RUN_COST_LIMIT_USD` is checked before every call against the
+run's own `usage_ledger` rows — the same rows the meter writes, so the ceiling
+cannot drift from what was billed. Unset by default, because a person asking one
+question should not hit a cap; set for evals and demos, where the risk is a loop
+nobody is watching.
+Two properties are deliberate. **A ceiling that cannot see its spend is not a
+ceiling**: an unpriced model records `cost_usd = NULL`, so under a cap such a
+call is refused rather than waved through (`LLM_REFUSE_UNPRICED_WHEN_CAPPED`,
+default on). And **exhaustion is not a failure** (architecture 8.5): it raises
+`RunCostExceededError`, a distinct type, so the Phase 8 controller can catch it
+and compose an answer from the findings so far rather than apologising.
+Consequences: the ceiling is per *run*, so a call with no `run_id` is not capped
+— stated in the module docstring and asserted in a test rather than left to be
+discovered. B-025 still stands for the org-level quotas, the 80% warning and the
+run-start check. Architecture 8.3 updated to note the per-run ceiling and that it
+is narrower than, not a replacement for, the quota system.
+
 ## D-018 — Roles are the architecture's six, and a role names a tier, not a model
 Date: 2026-08-14 · Phase: 6 · PR: WP6.1
 Context: Two documents disagree about what an LLM role is called. Architecture

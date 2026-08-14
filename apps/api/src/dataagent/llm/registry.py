@@ -67,11 +67,23 @@ class ModelChoice:
     model: str
 
 
-#: Providers this build ships. WP6.2 fills it with ``openai`` and ``anthropic``;
-#: it is a table of *factories* rather than instances so that importing the
-#: registry does not open an HTTP client, and so that a provider whose key is
-#: absent fails when something tries to use it rather than at import time.
-_BUILTIN_FACTORIES: dict[str, Callable[[], LLMProvider]] = {}
+def _openai() -> LLMProvider:
+    # Imported inside the factory, not at module scope: the import reads no
+    # configuration, but keeping it here means the registry has no opinion about
+    # which providers exist until something asks for one — and a provider module
+    # that grows a heavy dependency does not add it to every import of this one.
+    from dataagent.llm.openai import OpenAIProvider
+
+    return OpenAIProvider()
+
+
+#: Providers this build ships. ``anthropic`` is the second provider the
+#: architecture calls for and is **not here yet** — see **B-029**; the chain
+#: machinery it will slot into is built and tested regardless.
+#: A table of *factories* rather than instances, so that importing the registry
+#: does not open an HTTP client, and so a provider whose key is absent fails when
+#: something tries to use it rather than at import time.
+_BUILTIN_FACTORIES: dict[str, Callable[[], LLMProvider]] = {"openai": _openai}
 
 #: Registered at runtime — by tests, and by anything that wants to substitute a
 #: provider without editing this module. Checked before the built-ins, so an

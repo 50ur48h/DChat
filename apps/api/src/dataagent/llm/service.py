@@ -4,39 +4,45 @@
 critic, the composer, the eval harness — asks for a *role* and a *shape*, and
 what happens in between is decided here:
 
-* the registry picks the tier and the model, so no call site names one;
-* the provider is asked once, and the wall clock is read around that call;
+* the registry resolves the ordered chain of models that may serve the role;
+* the run's cost ceiling is checked **before** each call, not after;
+* ``fallback.walk`` tries each provider, retrying what is worth retrying;
 * the meter writes a ``usage_ledger`` row **before** the result is returned or
   the failure re-raised, so there is no path that spends tokens without leaving
   a row;
 * structured output is parsed and, if it will not parse, repaired exactly once —
-  and the repair is a second metered call, because it is a second real cost.
+  and the repair is a second metered pass over the chain, because it is a second
+  real cost.
 
 This mirrors ``dal.run`` deliberately. The DAL's rule is that nothing reads
 customer data except through its front door; this package's rule is that nothing
 spends a customer's tokens except through this one. Both are enforced the same
-way — by there being no other function that does the interesting part — and both
-would be undone by a caller reaching for the layer underneath. If a later phase
-needs something this door does not offer, the answer is to widen the door.
+way — by there being no other function that does the interesting part.
 
-What is deliberately *not* here: retries and provider fallback (WP6.2's
-``llm/fallback.py``, which walks the chain ``registry.resolve`` already returns),
-and the run budget from architecture 4.4, which counts across a whole
-investigation and belongs to the Phase 8 controller. ``CallLimits`` bounds one
-call; it is not a budget.
+**The prompt is built per provider, inside the attempt.** Providers disagree
+about whether they can constrain decoding to a schema, so the messages that go
+to the second provider in a chain are not necessarily the ones that went to the
+first. Building the request once, above the chain, would send one of them the
+wrong prompt — a bug that only appears during an outage, which is the worst time
+to find it.
+
+What is deliberately *not* here: the run budget of architecture 4.4, which
+counts iterations and queries across a whole investigation and belongs to the
+Phase 8 controller. ``CallLimits`` bounds one call; ``llm/budget.py`` bounds one
+run's spend; neither is that.
 """
 
 from __future__ import annotations
 
 import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import replace
 
 from pydantic import BaseModel
 
 from dataagent.config import Settings, get_settings
-from dataagent.llm import meter, registry
+from dataagent.llm import budget, fallback, meter, registry
 from dataagent.llm.base import (
     CallLimits,
     Completion,
@@ -49,6 +55,7 @@ from dataagent.llm.base import (
     Usage,
 )
 from dataagent.llm.registry import ModelChoice
+from dataagent.llm.retry import RetryPolicy
 from dataagent.llm.structured import (
     StructuredOutputError,
     instruction_for,
@@ -57,6 +64,10 @@ from dataagent.llm.structured import (
 )
 
 __all__ = ["complete"]
+
+#: Builds the messages for one provider. A function rather than a list because
+#: what to send depends on what the provider can do — see the module docstring.
+PromptFor = Callable[[LLMProvider], list[Message]]
 
 
 async def complete(
@@ -68,46 +79,73 @@ async def complete(
     run_id: uuid.UUID | None = None,
     actor_user_id: uuid.UUID | None = None,
     limits: CallLimits | None = None,
+    retry: RetryPolicy | None = None,
     settings: Settings | None = None,
 ) -> Completion:
     """Call the model configured for ``role``, meter it, and return what it said.
 
-    Raises ``LLMError`` — including ``StructuredOutputError`` when a schema was
-    asked for and two attempts did not produce it — and has written a ledger row
-    for every provider call made before it does.
+    Raises ``LLMError`` — ``StructuredOutputError`` when a schema was asked for
+    and two attempts did not produce it, ``RunCostExceededError`` when the run
+    has spent its ceiling — and has written a ledger row for every provider call
+    made before it does.
     """
     resolved = settings if settings is not None else get_settings()
-    choice = registry.resolve(role, resolved)[0]
-    provider = registry.get_provider(choice.provider, resolved)
-
+    chain = registry.resolve(role, resolved)
     tags = Tags(org_id=org_id, role=role, run_id=run_id, actor_user_id=actor_user_id)
-    prompt = _with_schema_instruction(list(messages), schema, provider)
-    request = LLMRequest(
-        model=choice.model,
-        messages=prompt,
-        tags=tags,
-        schema=schema,
-        limits=limits if limits is not None else CallLimits(),
-    )
+    call_limits = limits if limits is not None else CallLimits()
+    base = list(messages)
 
-    completion = await _call(provider, request, choice, resolved, repaired=False)
+    def first_prompt(provider: LLMProvider) -> list[Message]:
+        return _with_schema_instruction(base, schema, provider)
+
+    def attempt_for(
+        prompt_for: PromptFor, *, repaired: bool
+    ) -> Callable[[ModelChoice], Awaitable[Completion]]:
+        async def attempt(choice: ModelChoice) -> Completion:
+            provider = registry.get_provider(choice.provider, resolved)
+            # Before the call: a ceiling enforced afterwards is a report.
+            await budget.assert_within_limit(
+                org_id=org_id, run_id=run_id, model=choice.model, settings=resolved
+            )
+            request = LLMRequest(
+                model=choice.model,
+                messages=prompt_for(provider),
+                tags=tags,
+                schema=schema,
+                limits=call_limits,
+            )
+            return await _call(provider, request, choice, resolved, repaired=repaired)
+
+        return attempt
+
+    completion = await fallback.walk(
+        chain,
+        attempt_for(first_prompt, repaired=False),
+        policy=retry,
+    )
     if schema is None:
         return completion
 
     try:
         return replace(completion, parsed=parse(schema, completion.text))
     except StructuredOutputError as first:
-        second = await _call(
-            provider,
-            replace(
-                request,
-                messages=repair_messages(
-                    prompt, reply=completion.text, problem=str(first), schema=schema
-                ),
-            ),
-            choice,
-            resolved,
-            repaired=True,
+        # Bound to a local before the closure: Python deletes the `except ... as`
+        # name at the end of the block, and this closure outlives the statement
+        # that made it.
+        problem = str(first)
+
+        def repair_prompt(provider: LLMProvider) -> list[Message]:
+            return repair_messages(
+                first_prompt(provider),
+                reply=completion.text,
+                problem=problem,
+                schema=schema,
+            )
+
+        second = await fallback.walk(
+            chain,
+            attempt_for(repair_prompt, repaired=True),
+            policy=retry,
         )
         try:
             parsed = parse(schema, second.text)
@@ -116,8 +154,8 @@ async def complete(
             # complaint twice means the schema is wrong for the task, two
             # different ones mean the model is guessing.
             raise StructuredOutputError(
-                f"{choice.model} did not produce valid {schema.__name__} in two "
-                f"attempts. First: {first}. After repair: {final}."
+                f"{second.model} did not produce valid {schema.__name__} in two "
+                f"attempts. First: {problem}. After repair: {final}."
             ) from None
         return replace(second, parsed=parsed, repaired=True)
 
@@ -138,7 +176,9 @@ async def _call(
         # Tokens are unknown on a failure — the provider did not report any — so
         # the row records zero of them and says what went wrong. It exists so
         # that "the model was called and it failed" is visible; a quota counts
-        # what was actually spent, which here is nothing we can prove.
+        # what was actually spent, which here is nothing we can prove. With a
+        # chain, this row beside a later `ok` row from another provider is what
+        # makes a fallback visible instead of silently survived.
         await meter.record(
             org_id=request.tags.org_id,
             role=choice.role,
