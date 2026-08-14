@@ -1,18 +1,60 @@
 # STATUS — data-agent build
 
-Current position: **Phases 0–5 complete and signed off; Phase 6 started.** WP6.1
-                  is built: one metered front door to every model call.
-Next step:        Phase 6 / WP6.2 (`p6.2-llm-providers`) — the OpenAI and
-                  Anthropic providers, the fallback chain and the live smoke.
-                  **This is the gate PR and it needs the two API keys plus the
-                  model ids to use per tier**, because this build ships no
-                  default model ids on purpose. See the brief at the end of this
-                  file. Provider choice settled by the owner: OpenAI is primary,
-                  Anthropic second, Azure OpenAI reconsidered at Phase 12
-                  (DECISIONS **D-017**).
+Current position: **Phases 0–5 signed off. Phase 6 built; its gate is partially
+                  met and its PR is still open.** Every model call goes through
+                  one metered front door, and that door now reaches a real
+                  provider — OpenAI, verified live against the owner's account.
+                  ⚠ **WP6.2 lives on `p6.2-llm-providers` in PR #35, which is
+                  NOT merged.** `main` is at WP6.1. Nothing in Phase 6's second
+                  half exists on `main` yet.
+Next step:        **Read the note directly below this block first** — it is the
+                  session-end handoff and it says what to do before any new
+                  work. After that: Phase 7 / WP7.1 (`p7.1-runs-schema`), spec
+                  in the "Next step" section near the end of this file.
 Merge policy: ASK
-Blocked on user: nothing yet — WP6.2 needs the keys before its live smoke
-Last updated: 2026-08-14 by Claude Code (WP6.1)
+Blocked on user: **PR #35 needs a merge decision** (CI green, human review of
+                 `dal/`+`infra/` not required — this PR touches neither).
+                 Separately, an Anthropic API key would close B-029 and the
+                 Phase 6 gate; it blocks neither Phase 7 nor the merge.
+Last updated: 2026-08-14 by Claude Code (WP6.2, session end)
+
+---
+
+## ⚠ Session-end handoff — read this before starting anything
+
+The session that built WP6.2 ended here, deliberately, with the PR open. A new
+session should do these in order and not skip to the build.
+
+1. **Session ritual (plan §7.1), with one addition.** `git fetch --all`, then
+   `gh pr list`. **PR #35 will be open unless the owner merged it.**
+   - *If merged:* `git checkout main && git pull`, confirm `apps/api/src/dataagent/llm/openai.py`
+     is present on `main`, delete the stale local branch, and go to step 3.
+   - *If still open:* do **not** branch off `main` for WP7.1 — you would be
+     building on a tree without the LLM providers. Either wait for the merge or
+     branch from `p6.2-llm-providers`, and say plainly in the PR which you did.
+   - *If it has review comments or red CI:* address those before new work.
+2. **Do not re-verify the provider by calling it.** The live smoke spends real
+   money. It has already been run and its evidence is recorded under Phase 6
+   below. Re-run it only when something about the provider actually changes.
+3. **The Phase 6 gate is not closed.** It is partially met and its checkbox is
+   deliberately empty. Do not tick it, and do not reword the criterion, when
+   Phase 7 work happens to pass — closing it needs a second real provider
+   (**B-029**, P1). Phase 6 cannot be signed off before then; Phase 7 may
+   proceed regardless, because nothing in it needs two providers.
+4. **Local machine state that a fresh clone will not have.** `.env` here carries
+   a working `OPENAI_API_KEY` plus `LLM_PROVIDERS`/`LLM_MODELS`/`LLM_ROLE_MAP`/
+   `LLM_PRICES`/`LLM_RUN_COST_LIMIT_USD`. `ANTHROPIC_API_KEY` exists but is
+   **empty**. `.env.example` documents all of it without the secrets. A new
+   machine needs `make env` and a key before `make llm.smoke` will do anything.
+5. **When the Anthropic key arrives**, verify its three model ids against the
+   account with `GET /v1/models` *before* writing them into `LLM_MODELS` — the
+   same check done for OpenAI. A pricing page says what exists, not what a key
+   may call. That habit is B-027, still unautomated.
+
+One process note worth carrying forward: a patch script that reports success
+without asserting its edit matched will lie to you. This file's header silently
+went un-updated for exactly that reason, and was caught only by reading it back.
+Prefer an edit that fails loudly over one that prints "done".
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
 - [x] WP0.1 Repo, docs, tracking files, branch protection
@@ -240,8 +282,45 @@ Last updated: 2026-08-14 by Claude Code (WP6.1)
       quota built on these rows cannot silently count an unpriced model as zero.
       68 new tests; the LLM package sits at 96–100% per module. Raised
       **B-025**–**B-028**
-- [ ] WP6.2 OpenAI + Anthropic impls + fallback + live smoke  ← gate PR
+- [x] WP6.2 OpenAI + Anthropic impls + fallback + live smoke  ← gate PR
+      — **OpenAI only.** `llm/anthropic.py` is not written; the owner's call on
+      2026-08-14 was to ship the one provider whose credits expire soonest and
+      carry the second-provider proof as **B-029** rather than hold the phase.
+      The three model ids were verified against the live account with
+      `GET /v1/models` *before* being written into configuration, because a
+      pricing page is not proof that a key can use a model — that check is
+      B-027's, done by hand here and still worth automating.
+      `llm/openai.py` is thin on purpose (send, receive, report usage, set
+      `retryable`); everything a second provider could come to disagree about
+      lives outside it — `retry.py` (8.5's three attempts, jitter injected so
+      the backoff is tested without a clock), `fallback.py` (walk the chain, and
+      **only** on retryable failures — a 400 is our bug and would be our bug at
+      the next provider too), `structured.py`, `meter.py`.
+      **D-019**: a hard per-run spend ceiling (`LLM_RUN_COST_LIMIT_USD`) checked
+      before each call against that run's own ledger rows, because the owner
+      asked for eval and gate runs to be capped before real money was behind a
+      real key. An unpriced model is **refused** under a ceiling rather than
+      counted as zero — a ceiling that cannot see its spend is not one — and
+      exhaustion raises its own error type so Phase 8 can compose from
+      findings-so-far per 8.5 instead of apologising. B-025 still owns the
+      org-level quotas.
+      Verified live against the real account: the request shape built from the
+      provider's docs was accepted first time, structured output round-tripped
+      into a pydantic model, and the call left a `usage_ledger` row costing
+      **$0.000048**. 45 new tests; `llm/` at **95%**. Raised **B-029**–**B-031**
+      and strengthened **B-028** with two more sightings
 - [ ] GATE: same suite passes on both providers; tokens metered; sign-off
+      — **PARTIALLY MET, and deliberately left unticked.** Proven: the contract
+      suite passes against the FakeLLM in CI and against **OpenAI** live; tokens
+      are metered on every path including failures and both halves of a repair;
+      an injected 429 walks the chain to a second provider and a 400 does not;
+      keys arrive only through config and never appear in a repr, an error or a
+      request body. Not proven: *"both providers"* — there is one. The criterion
+      is unchanged and this box stays empty until a second real API passes the
+      same suite (**B-029**, P1). What one provider cannot demonstrate is the
+      only thing two providers are for: that the `LLMProvider` shape survives
+      contact with an API that disagrees with the first about system prompts,
+      structured output and usage reporting
 
 ## Phase 7 — Single-shot Q&A (M7)
 - [ ] WP7.1 Conversations/runs/events schema + routes + run status
@@ -285,64 +364,81 @@ Last updated: 2026-08-14 by Claude Code (WP6.1)
 
 ## Next step
 
-Phase 6 / **WP6.2 — real providers + fallback + live smoke** (`p6.2-llm-providers`).
-Plan §6 Phase 6, architecture Part 4.9 and 8.5. **This is the gate PR.**
+Phase 7 / **WP7.1 — conversations, runs and events** (`p7.1-runs-schema`).
+Plan §6 Phase 7, architecture Part 10.1–10.3.
 
-**USER INPUT is needed before the live smoke** (ask at the start of the WP, and
-build everything that does not depend on it first):
-
-1. an **OpenAI** API key from platform.openai.com — the primary provider (D-017);
-2. an **Anthropic** API key — the second provider, which is what actually proves
-   the abstraction is real rather than asserted;
-3. for each of them, **the model id to use for `small`, `mid` and `strong`**.
-   This build ships no default model ids on purpose (D-018), so there is nothing
-   to fall back on and nothing to be quietly stale. If the owner would rather not
-   choose, list each account's available models and recommend three.
-
-CI never uses any of it: the whole suite runs against the FakeLLM.
+**No USER INPUT is needed to start.** The one outstanding ask is an **Anthropic
+API key**, which closes B-029 and the Phase 6 gate; it does not block Phase 7.
+When it arrives: verify its three model ids against the live account with
+`GET /v1/models` *before* writing them into `LLM_MODELS`, exactly as the OpenAI
+ids were — a pricing page is not proof a key can use a model.
 
 Build:
 
-- `llm/openai.py` and `llm/anthropic.py` — thin. Send, receive, report usage,
-  sanitize failures, and raise `LLMError` with `retryable` set correctly, since
-  that flag is the only question the fallback asks. Anthropic takes the system
-  prompt as a top-level parameter rather than as a message, which is exactly
-  what `ProviderCaps.supports_system_message` exists to describe.
-- `llm/fallback.py` — walk the chain `registry.resolve` already returns. Retries
-  with jitter on 429/5xx per arch 8.5, then the next provider, annotating the
-  completion with the provider that answered. The ledger will show the switch on
-  its own: an `error` row followed by an `ok` row from a different provider.
-- `scripts/llm_smoke.py` — local only, real keys, one structured call per
-  provider. Never in CI.
-- Register both in `registry._BUILTIN_FACTORIES`, which is empty and waiting.
+- Revision **0012**: `conversations`, `messages`, `agent_runs`, `agent_events`,
+  `findings` per arch 10.1. All tenant tables, so five RLS policies, five
+  `TENANT_TABLES` lines and five seed/forge pairs in `test_rls_proof.py` — the
+  rule has now bitten three times and the guard has caught it every time.
+  `agent_events` is append-only under the same grant lock as `audit_log`.
+- Routes per arch 10.2, and one `EventWriter` (arch 10.3) that everything the UI
+  will ever show flows through from day one.
+- `agent_runs.id` is the `run_id` that `query_executions` and `usage_ledger`
+  have carried a column for since Phase 5 and 6. **This is the WP that gives
+  both of them their foreign key**, and the WP that makes the per-run cost
+  ceiling (D-019) apply to something real rather than to a uuid the caller
+  invented.
 
-What WP6.1 hands it:
+What Phase 6 hands it:
 
-- **`llm.complete` is the front door and there is no other one.** It resolves the
-  role, calls, meters, parses and repairs. Fallback goes *inside* it — a second
-  entry point that skips the meter would undo the property the whole package is
-  built around. If the door does not offer what fallback needs, widen the door.
-- **The chain already resolves.** `registry.resolve(role)` returns one
-  `ModelChoice` per configured provider in order; WP6.1 only ever uses `[0]`.
-- **`ProviderCaps` is where providers are allowed to differ.** Native structured
-  output, system-message handling, output ceilings. Anything a provider decides
-  for itself beyond that is a place where behaviour can diverge, which is what
-  this abstraction exists to prevent.
-- **Prices are configuration** (`LLM_PRICES`, USD per million tokens). Ask for
-  them with the model ids, or the gate demo will show real tokens against a null
-  cost — which is honest, and much less useful than the real number.
-
-What Phase 5 handed Phase 6, and still holds:
-
-- **Nothing in `dal/` calls an LLM and nothing in `llm/` calls the DAL.**
-  The agent joins them in Phase 7; keeping them ignorant of each other is what
-  makes the FakeLLM able to stand in for a provider without a database, and the
-  DAL testable without a model.
-- **Budgets are not built yet.** `Completion` carries what a budget will need —
-  tokens, model, latency — and `CallLimits` bounds one call. The BudgetState that
-  spends across a run is Phase 8. Do not invent it early.
+- **`llm.complete` is the only way to call a model**, and it already resolves the
+  role, enforces the run's spend ceiling, walks the provider chain, meters every
+  attempt and repairs structured output once. Phase 7's planner calls it and does
+  none of that itself.
+- **A role is a tier, not a model** (D-018). Phase 7 code should name `sql`,
+  `plan` and `compose`, never a model id. If a role needs to be cheaper, that is
+  `LLM_ROLE_MAP` in an env file, not an edit to the agent.
+- **The demo runs small.** `LLM_ROLE_MAP={"compose":"small"}` locally, and every
+  role but `plan` and `sql` is small already. Do not put `sql` on a small model
+  to save money: the DAL refuses SQL it cannot ground, so weaker SQL buys a
+  refusal, a repair round-trip and another billed call.
+- **The FakeLLM is the backbone of every agent test.** Script it by (role,
+  matcher); assert on `calls` rather than on the answer. The Phase 7 e2e is
+  meant to run in CI with no key at all.
+- **Budgets are still not built.** `CallLimits` bounds one call and D-019's
+  ceiling bounds one run's spend. The iteration, query and token caps of arch
+  4.4 are Phase 8's, and B-025 owns the org-level quotas.
 
 ## Notes
+
+- **The Phase 6 gate is partially met, and that is written down rather than
+  smoothed over.** The criterion — *same suite passes on both providers* — is
+  unchanged and its checkbox is empty. One provider is live and proven; the
+  second is **B-029** and is P1. The distinction matters because a gate quietly
+  reworded to match what was built stops being a gate: the whole point of two
+  providers is to find out where the abstraction leaks, and one provider cannot
+  report that.
+
+- **A model id is verified against the account before it is configuration.**
+  The three OpenAI ids were checked with `GET /v1/models` on the real key before
+  being written to `.env.example`. A pricing page lists what exists; it does not
+  say what your organization may call. Do the same for every id added later
+  (B-027 wants this automated as a startup or health check).
+
+- **Spending has a ceiling, and the ceiling refuses what it cannot count**
+  (D-019). `LLM_RUN_COST_LIMIT_USD` is checked before each call against that
+  run's own ledger rows. A model with no price in `LLM_PRICES` records a NULL
+  cost, which would sail past every check — so under a ceiling such a call is
+  refused rather than waved through. Unset the ceiling and nothing changes;
+  that is the right default for a person asking one question and the wrong one
+  for an eval sweep.
+
+- **Test settings are hermetic on purpose, and both halves are load-bearing.**
+  `build_settings` passes `_env_file=None` *and* every LLM field explicitly,
+  because pydantic-settings **deep-merges** dict-typed fields across sources:
+  an explicit `llm_role_map={}` is merged with whatever `.env` holds rather than
+  replacing it, and `llm_models` silently gains every real provider a developer
+  has configured. This was found the hard way — six tests changed their answers
+  the moment real configuration landed in `.env`.
 
 - **Nothing calls a model except through `llm.complete`.** It is the only entry
   point and it meters on every path — the answer, the provider failure, and both
@@ -474,18 +570,19 @@ What Phase 5 handed Phase 6, and still holds:
 
 - **The local demo environment, as this session left it.** Five containers up
   (`platform-pg`, `seed-pizza-pg`, `mssql`, `api`, `web`); platform database at
-  revision **0011**, and the `api` image rebuilt (WP5.1 added sqlglot, so an
-  image from before it cannot import the DAL — rebuild after any dependency
-  change or the container and the host disagree about what exists; WP6.1 added
-  no dependency, so the bind mount was enough). The demo
-  org's `query_executions` holds real rows from the WP5.2b verification: two
-  `ok`, one `refused`, one `error`, and its `usage_ledger` holds four from the
-  WP6.1 one: a priced call, both halves of a repair, and a provider failure
-  costing `NULL`. They are evidence, not fixtures — a reseed
-  does not recreate them; the demo organization `ebfe8139-…` holds two verified data
-  sources, each with an active version 1 catalog, and one hand-set column policy.
-  `make up && make seed` and `make up.mssql && make seed.mssql` rebuild the
-  fixtures from nothing; `make db.setup` brings a fresh database to head.
+  revision **0011**. Rebuild the `api` image after any dependency change or the
+  container and the host disagree about what exists.
+  The demo organization `ebfe8139-…` now carries evidence from three phases, and
+  none of it is fixtures — a reseed does not recreate any of it. Two verified
+  data sources with an active version 1 catalog and one hand-set column policy
+  (Phase 3–4). Four `query_executions` rows from WP5.2b: two `ok`, one
+  `refused`, one `error`. Four `usage_ledger` rows from WP6.1's FakeLLM check —
+  a priced call, both halves of a repair, and a provider failure costing `NULL`
+  — **plus real rows from WP6.2's live OpenAI calls**, which cost actual money
+  (a fraction of a cent) and are the only proof in the repository that the
+  provider works end to end.
+  `make up && make seed`, `make up.mssql && make seed.mssql` and `make db.setup`
+  rebuild the fixtures from nothing; they do not rebuild the evidence above.
   `ops/scripts/set_role.sh` is the escape hatch that exists because the Entra
   account which created that organization can no longer sign in (**B-017**).
 

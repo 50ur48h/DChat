@@ -126,7 +126,7 @@ check.truths: ## Fail if truths.json and the seed generator disagree
 # ---------------------------------------------------------------------------
 # apps/api
 # ---------------------------------------------------------------------------
-.PHONY: install.api lint.api fmt.api typecheck.api test.api test.rls test.dal api.dev build.api
+.PHONY: install.api lint.api fmt.api typecheck.api test.api test.rls test.dal test.llm api.dev build.api llm.smoke
 install.api: ## Sync the API virtualenv from uv.lock
 	uv sync --directory $(API_DIR)
 
@@ -149,6 +149,12 @@ test.rls: ## Tenant-isolation proof suite on its own; fails if it collects nothi
 
 test.dal: ## The security boundary's suite, with its own coverage gate (plan §4.4)
 	$(UV_API) pytest tests/dal --cov=dataagent.dal --cov-report=term-missing --cov-fail-under=90
+
+test.llm: ## The LLM package's suite on its own
+	$(UV_API) pytest tests/llm
+
+llm.smoke: ## Live provider smoke — real keys, real money, NEVER in CI
+	$(UV_API) python ../../scripts/llm_smoke.py $(ARGS)
 
 api.dev: ## uvicorn with reload on :8000
 	$(UV_API) uvicorn dataagent.main:app --host 0.0.0.0 --port 8000 --reload

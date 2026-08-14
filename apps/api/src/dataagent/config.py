@@ -269,6 +269,40 @@ class Settings(BaseSettings):
         ),
     )
 
+    #: SecretStr, like LOCAL_SECRETS_KEY: a provider key is a spending credential,
+    #: and it must not be readable from a repr, a traceback frame, or a settings
+    #: dump. Optional so the app still boots — and the whole test suite still
+    #: runs — with no key at all.
+    openai_api_key: SecretStr | None = Field(
+        default=None,
+        description="Key for the OpenAI provider. From platform.openai.com (D-017).",
+    )
+    anthropic_api_key: SecretStr | None = Field(
+        default=None,
+        description="Key for the Anthropic provider — the second provider in the chain.",
+    )
+
+    llm_run_cost_limit_usd: float | None = Field(
+        default=None,
+        description=(
+            "Hard ceiling on what one run may spend, in USD. Checked before every "
+            "call against what that run has already recorded, so a runaway loop "
+            "stops costing money at roughly this figure rather than at whatever "
+            "it reaches. Unset means no ceiling, which is right for a person "
+            "asking one question and wrong for an eval sweep. The full quota "
+            "system of architecture 8.3 is still B-025."
+        ),
+    )
+    llm_refuse_unpriced_when_capped: bool = Field(
+        default=True,
+        description=(
+            "When a run has a cost ceiling and a model has no configured price, "
+            "refuse rather than proceed. A ceiling that cannot see what it is "
+            "spending is not a ceiling — an unpriced model would accumulate a NULL "
+            "cost and pass every check. Set false to accept that risk knowingly."
+        ),
+    )
+
     artifacts_path: Path = Field(
         default=Path("ops/artifacts"),
         description=(

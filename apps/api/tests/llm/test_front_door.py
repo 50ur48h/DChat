@@ -24,6 +24,7 @@ from dataagent.db import engine as engine_module
 from dataagent.llm import registry, service
 from dataagent.llm.base import LLMError, Message, ProviderCaps, Usage
 from dataagent.llm.fake import FakeLLM
+from dataagent.llm.retry import RetryPolicy
 from dataagent.llm.structured import StructuredOutputError
 from dataagent.tenancy import session as session_module
 
@@ -162,10 +163,14 @@ async def test_a_provider_failure_is_metered_and_re_raised(
             role="sql", org_id=org_id, messages=QUESTION, settings=build_settings()
         )
 
-    (row,) = await _ledger(platform, org_id)
-    assert row["status"] == "error"
-    assert row["error"] == "the provider returned 503"
-    assert row["input_tokens"] == 0
+    # Three rows, not one: architecture 8.5 retries a 503 before giving up, and
+    # every attempt is a real call that has to be visible. A single row here
+    # would mean two attempts went unrecorded.
+    rows = await _ledger(platform, org_id)
+    assert len(rows) == 3
+    assert all(row["status"] == "error" for row in rows)
+    assert all(row["error"] == "the provider returned 503" for row in rows)
+    assert all(row["input_tokens"] == 0 for row in rows)
 
 
 async def test_an_unresolvable_role_never_reaches_a_provider(
@@ -346,9 +351,16 @@ async def test_a_failure_during_the_repair_is_metered_too(
     org_id = await _org(migrated_database)
     fake_llm.script("not json", times=1).script(raises=LLMError("429", retryable=True))
 
+    # One attempt per pass, so this test stays about the repair pairing rather
+    # than about how many times a 429 is retried (test_retry.py owns that).
     with pytest.raises(LLMError, match="429"):
         await service.complete(
-            role="plan", org_id=org_id, messages=QUESTION, schema=Plan, settings=build_settings()
+            role="plan",
+            org_id=org_id,
+            messages=QUESTION,
+            schema=Plan,
+            retry=RetryPolicy(attempts=1),
+            settings=build_settings(),
         )
 
     rows = await _ledger(platform, org_id)
