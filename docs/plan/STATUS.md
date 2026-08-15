@@ -2,19 +2,19 @@
 
 Current position: **Phases 0–5 signed off. Phase 6 merged, its gate partially
                   met and deliberately unticked. Phase 7 is under way: WP7.1
-                  (#36), WP7.2a (#37) and WP7.2b (#38) are merged; WP7.2c
-                  is built with its PR open.** Asking a question over HTTP now
-                  answers 202 and an answer arrives on the run — the product
-                  does the thing it is for, end to end, for the first time.
+                  (#36), WP7.2a (#37), WP7.2b (#38) and WP7.2c (#39) are
+                  merged.** Asking a question over HTTP answers 202 and an
+                  answer arrives on the run — the product does the thing it is
+                  for, end to end. **B-040 is closed and its PR is open.**
 Next step:        Phase 7 / **B-039** (P1, `b039-findable-tables`) — a table must
                   be findable by its own name. Take it **before** WP7.3, so the
-                  chat UI is built against search that works, and it must close
+                  chat UI is built against search that works; it must close
                   before Phase 8 either way. Then WP7.3, the gate PR.
 Merge policy: ASK
-Blocked on user: **WP7.2c's PR needs a review decision.** An Anthropic API key
+Blocked on user: **B-040's PR needs a review decision.** An Anthropic API key
                  would close B-029 and the Phase 6 gate; it blocks no Phase 7
                  work.
-Last updated: 2026-08-15 by Claude Code (WP7.2c)
+Last updated: 2026-08-15 by Claude Code (B-040)
 
 ---
 
@@ -431,6 +431,18 @@ Prefer an edit that fails loudly over one that prints "done".
       19 new tests, including the first true end-to-end: **a question over HTTP
       returns 202 and the answer arrives on the run**. Raised **B-040 (P1)**,
       which this suite found by spending the owner's money
+- [x] **B-040 (P1)** No test may call a real model, and **B-032** with it
+      — taken before B-039 at the owner's direction: a suite that can spend real
+      money is not something to carry into Phase 9's eval harness, which will run
+      many more of these. A session-scoped guard wraps `registry.get_provider`
+      for the whole run. A non-stub provider **raises**, so nothing leaves the
+      machine, *and* is recorded so a per-test check fails the test afterwards.
+      The second half is the one that matters: replaying the original failure
+      with the workaround removed shows the agent runner **swallowing the raise
+      into a `failed` run** — a guard that only raised would have gone green
+      having proved nothing. Opt-out is `@pytest.mark.live_provider`, carried by
+      exactly one test that wants a non-stub on purpose. Four tests exercise the
+      guard itself, because a guard that has never fired is one nobody has tested
 - [ ] **B-039 (P1)** Table cards must be findable by their own name
       — pulled into Phase 7 by the owner on 2026-08-15, and it **must be closed
       before Phase 8 starts**. Not a work package: a backlog item taken as a WP,

@@ -43,10 +43,115 @@ APP_ROLE = "dataagent_app"
 MAINTENANCE_DATABASE = "postgres"
 
 
+# ---------------------------------------------------------------------------
+# No test may call a real model (B-040)
+# ---------------------------------------------------------------------------
+#
+# This is not hypothetical. A WP7.2c test called OpenAI for real and billed for
+# two completions: the route path resolves settings through ``get_settings()``,
+# which reads the developer's ``.env``, so any test that reaches the agent
+# through HTTP uses whatever provider that file configures. **CI never noticed
+# and never could** — it has no key, so the suite passed there while quietly
+# charging every developer who ran it locally.
+#
+# Two mechanisms, because one is not enough:
+#
+# * the guard **raises**, so the call never leaves the machine;
+# * the guard also **records**, and a per-test check fails the test afterwards.
+#
+# The second exists because the agent runner catches broad exceptions and turns
+# them into a failed run — so a guard that only raised would be swallowed by the
+# very code most likely to trip it, and the suite would go green having spent
+# nothing but also having proved nothing.
+
+#: Provider names a test used that were not stubs. Cleared per test.
+_live_provider_uses: list[str] = []
+
+#: Non-empty while the current test carries ``@pytest.mark.live_provider``.
+_live_allowed: list[bool] = []
+
+
+@pytest.fixture(scope="session", autouse=True)
+def forbid_live_providers() -> Iterator[None]:
+    """Wrap the registry for the whole session so no test can escape by ordering."""
+    real = llm_registry.get_provider
+
+    def guarded(name: str, settings: Settings | None = None) -> object:
+        provider = real(name, settings)
+        if provider.capabilities().is_stub or _live_allowed:
+            return provider
+        _live_provider_uses.append(name)
+        raise RuntimeError(
+            f"a test asked for the live provider {name!r}. Tests must use the "
+            "FakeLLM: pass `settings=build_settings()` so configuration comes "
+            "from the fixture rather than from .env, or mark the test "
+            "`@pytest.mark.live_provider` if it genuinely must spend money."
+        )
+
+    llm_registry.get_provider = guarded  # pyright: ignore[reportAttributeAccessIssue]
+    try:
+        yield
+    finally:
+        llm_registry.get_provider = real  # pyright: ignore[reportAttributeAccessIssue]
+
+
+@pytest.fixture
+def expected_live_provider_refusal() -> Iterator[None]:
+    """For the guard's own tests: this one meant to trip it.
+
+    Requested rather than marked, because a marker would be indistinguishable
+    from ``live_provider`` at a glance and these two mean opposite things — one
+    says "let it through", this says "it should have been stopped, and it was".
+
+    Teardown order is what makes it work: an autouse fixture sets up first and so
+    finalises last, which is after this one has cleared the record.
+    """
+    yield
+    _live_provider_uses.clear()
+
+
+@pytest.fixture(autouse=True)
+def no_live_provider_used(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Fail the test if it reached for a real model, however the error was handled."""
+    allowed = request.node.get_closest_marker("live_provider") is not None  # pyright: ignore[reportUnknownMemberType]
+    _live_provider_uses.clear()
+    _live_allowed.clear()
+    if allowed:
+        _live_allowed.append(True)
+
+    yield
+
+    used, _live_provider_uses[:] = list(_live_provider_uses), []
+    _live_allowed.clear()
+    if used and not allowed:
+        pytest.fail(
+            f"this test reached for live provider(s) {sorted(set(used))}, which would "
+            "spend real money. See B-040: pass `settings=build_settings()` so the "
+            "FakeLLM is used, or mark the test `@pytest.mark.live_provider`."
+        )
+
+
 @pytest.fixture
 def settings() -> Settings:
-    """Settings for tests, independent of the developer's environment."""
-    return Settings(env="ci", build_env="dev", git_sha="testsha", log_level="WARNING")
+    """Settings for tests, independent of the developer's environment.
+
+    ``_env_file=None`` is load-bearing and was missing (**B-032**): without it
+    every field this does not pass explicitly comes from the repository's
+    ``.env``, so a developer with real LLM configuration ran different tests from
+    CI — and the *inverse*, a test passing locally and failing in CI, is the
+    version of that which wastes an afternoon.
+
+    It is not sufficient on its own, which is why the live-provider guard above
+    exists: the route path never consults this fixture at all, it calls
+    ``get_settings()``.
+    """
+    return Settings(
+        _env_file=None,  # pyright: ignore[reportCallIssue]
+        env="ci",
+        build_env="dev",
+        git_sha="testsha",
+        log_level="WARNING",
+    )
 
 
 @pytest.fixture
