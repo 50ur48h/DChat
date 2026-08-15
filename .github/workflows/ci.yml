@@ -294,6 +294,22 @@ jobs:
       - name: Build
         if: env.RUN == 'true'
         run: pnpm --dir apps/web build
+      # A real browser, because a jsdom test passed against code the browser
+      # visibly broke on (B-044). Chromium only, against a stub API, so this
+      # needs no compose stack, no database and no key.
+      - name: Install Chromium
+        if: env.RUN == 'true'
+        run: pnpm --dir apps/web exec playwright install --with-deps chromium
+      - name: Browser smoke
+        if: env.RUN == 'true'
+        run: make test.web.e2e
+      - name: Keep the trace of a failure
+        if: failure() && env.RUN == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7
       - name: Nothing to do
         if: env.RUN != 'true'
         run: echo "No changes under apps/web — skipping."

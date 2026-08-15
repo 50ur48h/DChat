@@ -32,7 +32,14 @@ the owner's (#45, and its manual test script is in that PR's body).
 
 1. **Session ritual (plan §7.1) as normal.** `git fetch --all`, `gh pr list`.
    `main` is at #44; **#45 is open and is the gate PR**.
-2. **Run the gate before asking anyone to.** The owner's standing instruction, and
+2. **Confirm the browser is running your code before believing anything.**
+   `next dev` in the web container does not see host edits — file-watch events do
+   not cross the Windows bind mount — so an edited file can sit in the container
+   while the served chunk holds the previous version (**B-045**). This cost a
+   whole gate cycle: a correct fix was reported as broken because it had never
+   run. `docker compose restart web`, then grep the *served* chunk, as CLAUDE.md
+   now shows.
+3. **Run the gate before asking anyone to.** The owner's standing instruction, and
    it earned itself here: running the M7 question live before writing the script
    found **three** blockers a fully green suite could not see (**B-041**,
    **B-042**, **B-043**). Read the run's *trace* rather than its final status —
@@ -40,10 +47,6 @@ the owner's (#45, and its manual test script is in that PR's body).
    before the failure surfaced. Spending a cent of real credit to do this is
    expected, not something to ask about. What is still off-limits is re-running
    `make llm.smoke` for reassurance.
-3. **A new route directory under `apps/web/src/app/` needs the web container
-   restarted.** The bind mount delivers the files; `next dev` does not notice a
-   directory that appeared after it started, and serves a 404 that looks exactly
-   like a routing bug. This cost time again this session.
 4. **The local stack could not answer a question until #44.** The API container
    had no LLM configuration at all (**B-042**) and no writable artifacts path
    (**B-043**). Both are fixed in `ops/docker-compose.yml`, so a stack started
@@ -641,14 +644,29 @@ Prefer an edit that fails loudly over one that prints "done".
       was meant to reload the messages. The backend was right the whole time —
       3,718, correct SQL, correct refusal — which is what made it read as a
       rendering nicety rather than as the gate failing.
-      Two things worth carrying forward. **It was a race, not a logic error**:
-      the first regression test written for it *passed against the broken code*,
-      because a stub resolving in a microtask beats React's commit; only a stub
-      with real latency orders the two the way a browser does. And **a headless
-      check would never have caught it** — the API was correct at every step, so
-      only a person clicking found it.
-      22 new web tests (76 total, all green), `tsc` and `eslint` clean, and both
-      new routes present in the production build.
+      **It then failed the gate a second time, and that is the more useful
+      failure** (**B-045**). The fix was correct; the browser was running the old
+      bundle. File-watch events do not cross the Windows bind mount, so the
+      container had the new `conversation.tsx` and `next dev` never recompiled
+      it — the served chunk still held the previous version. CLAUDE.md had warned
+      about this only for *new route directories*, where the symptom is an
+      obvious 404; for an **edit to an existing file** the page keeps working and
+      silently runs the old code, which is how a fix got reviewed, shipped and
+      tested without ever executing.
+      **So the jsdom tests were retired as evidence.** Twice they were wrong in
+      the same direction: the first regression test *passed against the broken
+      code*, because a stubbed `fetch` resolving in a microtask beats React's
+      commit; the second only bit once given artificial latency, which is a guess
+      about timing rather than a measurement. `apps/web/e2e/` now drives real
+      Chromium against a stub API over real HTTP — **4 tests, all failing against
+      the pre-fix component and all passing against the fix**, proved by swapping
+      the file and rebuilding. It runs in CI on the `web` job, needs no compose
+      stack, no database and no key, and serves a **production build** rather
+      than `next dev`, because on-demand compilation was itself a source of
+      flake. Playwright arrives here rather than in WP11.2 for that reason; the
+      wider smoke over every screen is still Phase 11's.
+      26 new web tests (76 unit + 4 browser, all green), `tsc` and `eslint`
+      clean, and both new routes present in the production build.
       Verified live against the seeded pizza database before writing the script,
       per the owner's standing instruction: *"How many orders were placed in July
       2026?"* → **"3,718 orders were placed in July 2026."** citing execution

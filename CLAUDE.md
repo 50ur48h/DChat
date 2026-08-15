@@ -45,10 +45,19 @@ make evals              # eval harness with FakeLLM (Phase 9+)
 - Windows dev host: GNU make comes from `winget install ezwinports.make` and
   lands on the **user** PATH, so a shell started before the install will not see
   it. Run make from Git Bash — its recipes use `sh`, `grep` and `awk`.
-- A **new** route directory under `apps/web/src/app/` needs the web container
-  restarted (`docker compose restart web`, or `make down && make up`). The bind
-  mount delivers the files, but `next dev` does not notice a directory that
-  appeared after it started, and serves a 404 that looks like a routing bug.
+- **`next dev` in the web container does not see host edits.** File-watch events
+  do not cross the Windows bind mount, so the container has the new bytes and
+  Turbopack never recompiles them. A **new route directory** serves a 404 that
+  looks like a routing bug; an **edit to an existing file** is worse, because the
+  page still works and silently runs the *old* code — this cost a gate
+  (**B-044**), where a fix was reviewed, shipped and tested against a stale
+  bundle. `docker compose restart web` fixes both.
+  Verify what is actually being served rather than trusting the file:
+  ```sh
+  curl -s http://localhost:3000/<a-route> | grep -oE '/_next/static/chunks/src_[^"]+\.js' \
+    | sort -u | while read c; do curl -s "http://localhost:3000$c" | grep -q '<a-token-from-your-change>' \
+    && echo "$c: present" || echo "$c: ABSENT"; done
+  ```
 - Git Bash rewrites any argument starting with `/` into a `C:\...` path, so a
   `docker exec … sh -c '/opt/…'` arrives as nonsense. Start such command strings
   with a word (`exec /opt/…`), as `ops/scripts/seed_mssql.sh` does.

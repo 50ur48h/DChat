@@ -106,3 +106,7 @@ yarn-error.log*
 tmp/
 .scratch/
 coverage-data/
+
+# Playwright: report and per-run traces/screenshots (WP7.3b).
+apps/web/playwright-report/
+apps/web/test-results/
