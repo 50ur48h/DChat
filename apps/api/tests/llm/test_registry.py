@@ -148,8 +148,16 @@ def test_a_stub_provider_is_refused_in_production(
             registry.get_provider("fake", llm_settings.model_copy(update=update))
 
 
+@pytest.mark.live_provider
 def test_a_real_provider_is_not_caught_by_the_stub_guard(llm_settings: Settings) -> None:
-    """The guard must key off the declaration, not off being a test double."""
+    """The guard must key off the declaration, not off being a test double.
+
+    Marked ``live_provider`` because it deliberately obtains a **non-stub**
+    provider, which the session guard otherwise refuses (B-040). No money is at
+    risk — the provider is a local subclass with no network behind it — but the
+    marker is the honest way to say "this test wants the thing the guard stops",
+    and it keeps that decision in the test's own source.
+    """
 
     class NotAStub(FakeLLM):
         def capabilities(self) -> ProviderCaps:

@@ -328,11 +328,12 @@ async def test_asking_over_http_answers_202_and_the_run_completes_behind_it(
     real_schedule = scheduler.schedule_run
 
     async def capture(**kwargs: object) -> object:
-        # `settings` is injected here and nowhere else, because the route has no
-        # seam for it: `schedule_run` from a request uses `get_settings()`, which
-        # reads the developer's `.env`. Without this line an HTTP-level test
-        # calls whatever real provider is configured and bills for it — which is
-        # exactly what happened the first time this test ran (**B-040**).
+        # `settings` is injected here because the route has no seam for it:
+        # `schedule_run` from a request uses `get_settings()`, which reads the
+        # developer's `.env`. Without this the test reaches for the real provider
+        # — it did exactly that once, and billed for it. The session guard in
+        # `tests/conftest.py` now stops that happening silently (**B-040**);
+        # this line is what makes the test *work* rather than merely fail safely.
         task = await real_schedule(**{**kwargs, "settings": build_settings()})  # pyright: ignore[reportArgumentType]
         scheduled.append(task)
         return task

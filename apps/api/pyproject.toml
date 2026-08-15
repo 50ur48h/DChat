@@ -103,6 +103,7 @@ asyncio_mode = "auto"
 addopts = "-q --strict-markers --strict-config"
 markers = [
     "rls_proof: tenant-isolation proof tests — may never be skipped (plan §4.4)",
+    "live_provider: may obtain a non-stub provider, and so may spend real money (B-040)",
 ]
 
 [tool.coverage.run]
