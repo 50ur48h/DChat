@@ -7,8 +7,11 @@ Current position: **Phases 0–5 and 7 signed off. Phase 6 merged, its gate
                   opens into the SQL behind it, and a question the data cannot
                   answer is honestly refused. The product does the thing it is
                   for, in front of a person.
-Next step:        Phase 8 / **WP8.1** (`p8.1-research-loop`) — `ResearchState`,
-                  the bounded loop and the budgets of architecture 4.4. Phase 8's
+Next step:        Phase 8 / **WP8.1b** — the bounded loop itself, wired into
+                  `runner.py` in place of the single-shot middle. **WP8.1a is
+                  open for review**: the state a loop remembers and the ceilings
+                  it will be held to, split off (plan §1.1) because the whole was
+                  heading past 1,200 lines. Phase 8's
                   precondition (**B-039**) is closed, and its flagship refusal —
                   *"Which menu items sell best?"* — was already seen working live
                   during Phase 7's verification, so WP8.2 starts from a known-good
@@ -708,7 +711,46 @@ Prefer an edit that fails loudly over one that prints "done".
       one that fails. Taken in Phase 7 on the owner's call and verified live:
       "menu items" now returns exactly the two `menu_items` tables, so what this
       phase demonstrates will be the capability check rather than a search miss
-- [ ] WP8.1 ResearchState + bounded loop + budgets + duplicate/progress rules
+- [x] WP8.1a ResearchState + budgets (the rules the loop will enforce)
+      — WP8.1 split in two (plan §1.1): the whole was heading past 1,200 lines,
+      and unlike WP7.1's rejected split these two halves are both real on their
+      own. This one is **the decisions**; WP8.1b is the control flow that obeys
+      them. Nothing is wired yet, and that is the trade — but these are not a
+      schema with no consumer: every rule here has behaviour and is tested
+      directly, which is exactly what gets hard once a loop is driving them.
+      `agent/budget.py` holds architecture 4.4's five ceilings — **8 iterations,
+      10 queries, 20 LLM calls, 150k tokens, 240s wall** — and the sentence that
+      matters is 4.4's own: **budgets decrement in the controller, never in the
+      prompt.** A model told it has three calls left may believe it, forget it,
+      or reason about it; none of those is a limit. Nothing here is ever rendered
+      into a message.
+      **Exhaustion is an ending, not an error**, the same distinction WP7.2b drew
+      for refusals: `Exhaustion` is returned rather than raised, and its `reason`
+      is written for the person who asked — *"I reached the time limit for one
+      question"*, never `wall_seconds >= 240`. Time is checked first, because it
+      is the ceiling the person waiting actually feels.
+      An organization may **lower** a ceiling freely and **raise** one only up to
+      `MAX_OVERRIDES`, because a hard cap that configuration can switch off is
+      not one. A typo is ignored rather than raised on — configuration must not
+      fail a run that would otherwise work.
+      `agent/state.py` is 4.2's `ResearchState`. **Raw rows never accumulate**:
+      the state carries a summary and an execution reference, never the result,
+      so the loop cannot grow its own prompt every iteration — and cannot end up
+      holding customer data where nothing masks it. **A finding whose every
+      citation was invented is refused**, not merely trimmed: 4.2 makes `support`
+      the reason to believe an answer, so a claim with nothing real behind it
+      must not sit beside one that has. Repeating a sentence is not progress
+      either, which is what stops a model keeping the loop alive by saying the
+      same thing twice.
+      Fields later phases own — `capability` (WP8.2), `critic` (WP9.1) — are
+      present and empty, so a checkpoint written today stays readable by the code
+      that fills them. The budget is stored in `agent_runs.budget` beside the
+      state rather than nested inside it, matching 10.1's two columns.
+      24 tests, **100% on both modules**, no database and no model in any of them
+      — if one of these ever needs a fixture, something has moved into the prompt
+      that should not have
+- [ ] WP8.1b The bounded loop itself (understand → plan → act → observe →
+      reflect), wired into `runner.py` in place of the single-shot middle
 - [ ] WP8.2 Capability check (join-graph) + honest refusal path
 - [ ] WP8.3 SSE streaming + durable replay + trace UI               ← gate PR
 - [ ] GATE: pizza scenario ≤8 iters; menu-items → honest refusal; sign-off
