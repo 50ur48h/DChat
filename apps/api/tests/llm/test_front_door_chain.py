@@ -15,7 +15,6 @@ import uuid
 from collections.abc import AsyncIterator
 
 import pytest
-from llm_fixture import FAKE_MODELS, build_settings, seed_run
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -26,6 +25,7 @@ from dataagent.llm.budget import RunCostExceededError
 from dataagent.llm.fake import FakeLLM
 from dataagent.llm.retry import RetryPolicy
 from dataagent.tenancy import session as session_module
+from llm_fixture import FAKE_MODELS, build_settings, seed_run
 
 QUESTION = [Message(role="system", content="platform rules"), Message(role="user", content="ask")]
 

@@ -8,7 +8,6 @@ what happens when configuration cannot answer.
 from __future__ import annotations
 
 import pytest
-from llm_fixture import FAKE_MODELS
 
 from dataagent.config import Settings
 from dataagent.db import models
@@ -16,6 +15,7 @@ from dataagent.llm import registry
 from dataagent.llm.base import DEFAULT_ROLE_TIERS, ROLES, TIERS, ProviderCaps
 from dataagent.llm.fake import FakeLLM
 from dataagent.llm.registry import ProviderNotConfiguredError
+from llm_fixture import FAKE_MODELS
 
 
 def test_every_role_resolves_to_the_tier_the_architecture_assigns(llm_settings: Settings) -> None:

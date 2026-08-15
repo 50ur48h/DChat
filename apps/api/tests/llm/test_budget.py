@@ -18,7 +18,6 @@ from collections.abc import AsyncIterator
 from decimal import Decimal
 
 import pytest
-from llm_fixture import build_settings, seed_run
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -27,6 +26,7 @@ from dataagent.llm import budget, meter
 from dataagent.llm.base import Usage
 from dataagent.llm.budget import RunCostExceededError
 from dataagent.tenancy import session as session_module
+from llm_fixture import build_settings, seed_run
 
 PRICES = {"fake-strong": {"input": 10.0, "output": 30.0}}
 
