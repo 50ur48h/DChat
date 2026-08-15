@@ -1,60 +1,71 @@
 # STATUS — data-agent build
 
 Current position: **Phases 0–5 signed off. Phase 6 merged, its gate partially
-                  met and deliberately unticked. Phase 7 is one work package
-                  from its gate:** WP7.1 (#36), WP7.2a (#37), WP7.2b (#38),
-                  WP7.2c (#39), B-040 (#40) and B-039 (#41) are merged, and
-                  **WP7.3a is open for review**. WP7.3 was split in two (plan
-                  §1.1): 7.3a is the API the UI is written against — a
-                  conversation names its data source (D-022, revision 0014), the
-                  evidence route that opens a citation (B-034), and the phase's
-                  end-to-end test. **The whole path now works over HTTP against a
-                  real database, with the model as the only stub.**
-Next step:        Phase 7 / **WP7.3b** (`p7.3b-chat-ui`) — the chat UI.
-                  **This is the Phase 7 gate PR**, so it ends with a manual test
-                  script. Everything it needs from the API exists as of 7.3a,
-                  and as of **B-041/B-042/B-043** the stack can actually answer a
-                  question: the gate question was verified end to end and
-                  returned the database's own number.
+                  met and deliberately unticked. Phase 7 is complete and its
+                  gate PR is open:** WP7.1 (#36), WP7.2a (#37), WP7.2b (#38),
+                  WP7.2c (#39), B-040 (#40), B-039 (#41), WP7.3a (#43) and
+                  B-041/042/043 (#44) are merged, and **WP7.3b is open as the
+                  Phase 7 gate PR**. WP7.3 was split in two (plan §1.1): 7.3a is
+                  the API — a conversation names its data source (D-022,
+                  revision 0014) and a citation opens (B-034); 7.3b is the chat
+                  UI. **A person can now ask a question in a browser and read
+                  the SQL behind the answer.**
+Next step:        **The Phase 7 GATE is yours** — the manual test script is in
+                  #45's body. Once signed off, Phase 8 / **WP8.1**
+                  (`p8.1-research-loop`): `ResearchState`, the bounded loop and
+                  the budgets of arch 4.4. Phase 8's precondition (B-039) is
+                  already closed, and its flagship refusal was seen working
+                  during this phase's verification.
 Merge policy: ASK
-Blocked on user: the B-041 PR is open and MERGE_POLICY is ASK; it touches
-                 `ops/docker-compose.yml`, which needs human review either way.
-                 WP7.3b is built on it. An Anthropic API key would close B-029
-                 and the Phase 6 gate; it blocks no Phase 7 work.
-Last updated: 2026-08-15 by Claude Code (B-041/B-042/B-043)
+Blocked on user: **the Phase 7 gate sign-off** (#45). An Anthropic API key would
+                 close B-029 and the Phase 6 gate; it blocks no Phase 8 work.
+                 **B-005 (P1) blocks the start of Phase 9** and should be raised
+                 before evals are written against a drifting window.
+Last updated: 2026-08-15 by Claude Code (WP7.3b, the Phase 7 gate PR)
 
 ---
 
 ## ⚠ Session-end handoff — read this before starting anything
 
-This session took Phase 7 from an empty schema to a working product: WP7.1
-through WP7.2c, plus two P1 backlog items the work itself uncovered. It ended
-deliberately, with nothing in flight — no open PR, no branch, no dirty tree.
+Phase 7 is built. The one thing outstanding is **the gate sign-off**, which is
+the owner's (#45, and its manual test script is in that PR's body).
 
 1. **Session ritual (plan §7.1) as normal.** `git fetch --all`, `gh pr list`.
-   Both should be quiet. `main` is at #41.
-2. **Both of WP7.3's non-UI decisions are now made, in WP7.3a.** The evidence
-   route exists (**B-034**, closed) and a conversation names its data source
-   (**D-022**), so the demo org's two sources are no longer a blocker. What is
-   left of WP7.3 is UI, and it is **WP7.3b**.
-3. **WP7.3b is the gate PR**, so it ends with a **manual test script**: numbered
-   steps, what the user should see at each, and the failure case. That is a hard
-   rule (CLAUDE.md), and the Phase 7 gate is *"July-orders question answered in
-   the UI with a real citation"* — so the script has to walk the browser.
-4. **A new route directory under `apps/web/src/app/` needs the web container
-   restarted.** The bind mount delivers the files; `next dev` does not notice a
-   directory that appeared after it started, and serves a 404 that looks exactly
-   like a routing bug. This has cost time before.
-5. **Two P1 items are closed but their lessons are live.** No test may call a
-   real provider (**B-040**) — keep the e2e on the FakeLLM, and if a new test
-   ever trips the guard, the guard is right. And a table is findable by its own
-   name (**B-039**) — search now works for every table rather than for the lucky
-   ones, so build against it with confidence.
-6. **Two P1 items remain open, and neither blocks WP7.3.** **B-029** — a second
-   real provider — is what closes the Phase 6 gate, and needs an Anthropic key
-   from the owner. **B-005** — the seed dataset's fixed end date — blocks the
-   *start of Phase 9*, not Phase 7, and is the one to raise before evals are
-   written against a window that drifts.
+   `main` is at #44; **#45 is open and is the gate PR**.
+2. **Confirm the browser is running your code before believing anything.**
+   `next dev` in the web container does not see host edits — file-watch events do
+   not cross the Windows bind mount — so an edited file can sit in the container
+   while the served chunk holds the previous version (**B-045**). This cost a
+   whole gate cycle: a correct fix was reported as broken because it had never
+   run. `docker compose restart web`, then grep the *served* chunk, as CLAUDE.md
+   now shows.
+3. **Run the gate before asking anyone to.** The owner's standing instruction, and
+   it earned itself here: running the M7 question live before writing the script
+   found **three** blockers a fully green suite could not see (**B-041**,
+   **B-042**, **B-043**). Read the run's *trace* rather than its final status —
+   the useful diagnosis was `context_selected {"tables": []}`, several steps
+   before the failure surfaced. Spending a cent of real credit to do this is
+   expected, not something to ask about. What is still off-limits is re-running
+   `make llm.smoke` for reassurance.
+4. **The local stack could not answer a question until #44.** The API container
+   had no LLM configuration at all (**B-042**) and no writable artifacts path
+   (**B-043**). Both are fixed in `ops/docker-compose.yml`, so a stack started
+   before that commit will still fail — `make down && make up` after pulling.
+5. **Search has now been wrong twice, in the same shape** (**B-039**, then
+   **B-041**), and both times it worked for what a person typed by hand and not
+   for how the product calls it. `search_tables` is the agent's only way to find
+   anything; when something downstream looks like a model problem, check what the
+   model was actually given first.
+6. **Two P1 items remain open.** **B-029** — a second real provider — closes the
+   Phase 6 gate and needs an Anthropic key from the owner. **B-005** — the seed
+   dataset's fixed end date — **blocks the start of Phase 9** and is the one to
+   raise before evals are written against a window that drifts. Neither blocks
+   Phase 8.
+7. **B-020 is still open and is now visible to users.** An unaliased projection
+   renders as `_col_1` in the evidence panel. The planner asks the model to alias
+   its columns, which handles the common case and is **not** the fix; the
+   deterministic pass in `dal/validator.py` is still owed, in its own reviewed
+   PR.
 
 One trap in this very file, which cost a red CI run to find. **A backlog id that
 appears as a checkbox in two phases is one key to the STATUS guard, and the last
@@ -599,7 +610,68 @@ Prefer an edit that fails loudly over one that prints "done".
       2026?"* → **"3,718 orders were placed in July 2026."**, citing execution
       `5175e4f4-…`, and `SELECT count(*)` against the seed database directly
       returns **3718**. Two model calls, a fraction of a cent
-- [ ] WP7.3b Chat UI with citation + manual test script              ← gate PR
+- [x] WP7.3b Chat UI with citation + manual test script              ← gate PR
+      — the screen the whole build has been pointing at. A conversation names its
+      database when it starts, a question goes in, and an answer comes back whose
+      citation **opens** into the SQL that produced it and the rows it returned.
+      **The screen adds no behaviour.** Everything it shows was already a row in
+      the platform database; three routes and a poll are the whole of it, which
+      is what architecture 3.1 means by a deliberately thin frontend.
+      **The picker never guesses, and says why.** One registered source is
+      preselected because there is nothing to choose; with several, nothing is
+      selected and Start stays disabled, because choosing the first would be
+      exactly the guess the scheduler refuses to make (WP7.2c, D-022). With none,
+      the form is replaced by a sentence pointing at the data sources screen
+      rather than a control that can only fail.
+      **A refusal renders as an answer, not as an error** — a run that could not
+      answer *completes* (WP7.2b), and dressing that up as a failure would send
+      people hunting for a bug in their question. `failed` is the different
+      thing and says something went wrong on our side.
+      Three smaller decisions worth keeping. The **live run shows what it is
+      doing** in words — "Reading the catalog", "Running the query" — because
+      10.3's type names are ours and a person waiting two minutes should not read
+      `query_executed`; the full timeline is WP8.3's. The **send button cannot
+      bill twice**: a fresh idempotency key per draft, held across retries, so a
+      resend replays the same question (D-019). And the **answer is not printed
+      twice** — in single-shot the finding statement *is* the answer, so the card
+      shows the evidence affordance and not a restatement; a test caught that.
+      **The first attempt at this PR failed its own gate, and the record says
+      so** (**B-044**, P1). The owner walked the script in a browser and found
+      every reply rendering one message behind: the card showed a confidence
+      badge and an openable citation and **no answer text**, because nothing
+      re-read the thread when a run finished. The poll effect depended on the
+      whole `run` object, so `setRun` inside a tick cancelled the very tick that
+      was meant to reload the messages. The backend was right the whole time —
+      3,718, correct SQL, correct refusal — which is what made it read as a
+      rendering nicety rather than as the gate failing.
+      **It then failed the gate a second time, and that is the more useful
+      failure** (**B-045**). The fix was correct; the browser was running the old
+      bundle. File-watch events do not cross the Windows bind mount, so the
+      container had the new `conversation.tsx` and `next dev` never recompiled
+      it — the served chunk still held the previous version. CLAUDE.md had warned
+      about this only for *new route directories*, where the symptom is an
+      obvious 404; for an **edit to an existing file** the page keeps working and
+      silently runs the old code, which is how a fix got reviewed, shipped and
+      tested without ever executing.
+      **So the jsdom tests were retired as evidence.** Twice they were wrong in
+      the same direction: the first regression test *passed against the broken
+      code*, because a stubbed `fetch` resolving in a microtask beats React's
+      commit; the second only bit once given artificial latency, which is a guess
+      about timing rather than a measurement. `apps/web/e2e/` now drives real
+      Chromium against a stub API over real HTTP — **4 tests, all failing against
+      the pre-fix component and all passing against the fix**, proved by swapping
+      the file and rebuilding. It runs in CI on the `web` job, needs no compose
+      stack, no database and no key, and serves a **production build** rather
+      than `next dev`, because on-demand compilation was itself a source of
+      flake. Playwright arrives here rather than in WP11.2 for that reason; the
+      wider smoke over every screen is still Phase 11's.
+      26 new web tests (76 unit + 4 browser, all green), `tsc` and `eslint`
+      clean, and both new routes present in the production build.
+      Verified live against the seeded pizza database before writing the script,
+      per the owner's standing instruction: *"How many orders were placed in July
+      2026?"* → **"3,718 orders were placed in July 2026."** citing execution
+      `5175e4f4-…`, against `SELECT count(*)` = **3718**; and *"Which menu items
+      sell best?"* → an honest refusal naming the missing link, in one model call
 - [ ] GATE: "orders in July?" answered with citation; user sign-off
 
 ## Phase 8 — Research loop + trace (M8)
@@ -645,81 +717,57 @@ Prefer an edit that fails loudly over one that prints "done".
 
 ## Next step
 
-Phase 7 / **WP7.3b — the chat UI** (`p7.3b-chat-ui`).
-Plan §6 Phase 7, architecture Part 10.2 and 3.1. **This is the Phase 7 gate PR.**
+**First: the Phase 7 gate is the owner's.** The manual test script is in #45's
+body — numbered steps, what to see at each, and the failure case. Nothing in
+Phase 8 starts before it is signed off (plan §1.7), unless STATUS records an
+explicit instruction to overlap. When it is signed off, tick the GATE line in
+the first Phase 8 PR, the way every phase before it did.
+
+Then Phase 8 / **WP8.1 — the research loop** (`p8.1-research-loop`).
+Plan §6 Phase 8, architecture Part 4.4 (diagram 5) and 11.2.
 
 Build:
 
-- Web: a conversation page — message list, composer, run status, and an answer
-  card with expandable evidence (the SQL, a rows preview, the execution). It
-  polls `GET …/runs/{id}` and `GET …/runs/{id}/events`, and opens a citation with
-  `GET …/runs/{r}/executions/{q}`. All three routes exist and are tested.
-- Starting a conversation must let the user **pick the database** — the demo org
-  has two, and a conversation that names none refuses by design (D-022). The
-  picker is `GET …/data-sources`, which the data sources screen already uses, and
-  the chosen id goes in the `POST …/conversations` body.
-- **A manual test script** — numbered steps, what the user should see at each,
-  and the failure case. Every gate PR ends with one (CLAUDE.md).
-
-Three things worth knowing before drawing anything:
-
-- **A new route directory under `apps/web/src/app/` needs the web container
-  restarted** (`docker compose restart web`). The bind mount delivers the files;
-  `next dev` does not notice a directory that appeared after it started, and
-  serves a 404 that looks exactly like a routing bug. This has cost time twice.
-- **`_col_1` may appear as a column name in the evidence panel** (**B-020**). The
-  planner now asks the model to alias its projections, which handles the common
-  case and is explicitly *not* the fix; the deterministic pass in `dal/` is still
-  owed. If it shows up in the gate demo, that is the known item, not a new bug.
-- **The refusal path is worth showing, not hiding.** A conversation that names no
-  database, in an org with two, completes with a readable message listing them.
-  It reads well and it is the honest half of D-022.
-
-What WP7.3a hands it:
-
-- **A conversation carries its data source** (D-022), returned as
-  `data_source_id` and `data_source_name` on every conversation read.
-- **A citation opens.** `GET …/runs/{r}/executions/{q}` returns the SQL, the
-  tables and columns, the row count, the duration and up to 50 already-masked
-  rows — and for a refused execution, the violation code instead.
-- **The whole path is proved end to end on every commit**
-  (`tests/agent/test_single_shot_e2e.py`), so the UI is built on behaviour that
-  is already known to work rather than on hope.
+- `agent/state.py`: `ResearchState` per arch 4.4 — question, plan, hypotheses,
+  executed query hashes, findings, iteration and budget counters — checkpointed
+  to `agent_runs.state_json` every transition. WP7.2b already checkpoints a
+  smaller `_State` at every step boundary, so this is a widening rather than a
+  new mechanism.
+- `agent/loop.py`: the bounded state machine — understand → plan → act → observe
+  → reflect — replacing the middle of `runner.py`. **The shape of the ends does
+  not change**; that is why WP7.2b built them.
+- `agent/budget.py`: 8 iterations, 10 queries, 20 LLM calls, 150k tokens, 240s
+  wall (arch 4.4), org-overridable, hard-stop. Duplicate-query rejection by hash,
+  and the monotone-progress rule — no new finding in two consecutive iterations
+  forces finalize. **Guaranteed finalize-with-caveats on any exhaustion**: never
+  a dangling run, which `runner.py`'s `finally` already establishes.
 
 What Phase 7 hands it:
 
-- **The whole path works headlessly.** `POST …/messages` schedules a run, the
-  runner answers or honestly refuses, and the answer, findings and trace are on
-  the run. WP7.3 renders what is already there rather than adding behaviour.
-- **`search_tables` now finds a table by its own name** (B-039), so the UI is
-  built against search that works rather than search that worked for `orders`.
-- **No test may call a real model** (B-040). Keep it that way: the e2e scripts
-  the FakeLLM, and CI has no key.
-
-What Phase 6 hands it:
-
-- **`llm.complete` is the only way to call a model**, and it already resolves the
-  role, enforces the run's spend ceiling, walks the provider chain, meters every
-  attempt and repairs structured output once. Phase 7's planner calls it and does
-  none of that itself.
-- **A role is a tier, not a model** (D-018). Phase 7 code should name `sql`,
-  `plan` and `compose`, never a model id. If a role needs to be cheaper, that is
-  `LLM_ROLE_MAP` in an env file, not an edit to the agent.
-- **The demo runs small.** `LLM_ROLE_MAP={"compose":"small"}` locally, and every
-  role but `plan` and `sql` is small already. Do not put `sql` on a small model
-  to save money: the DAL refuses SQL it cannot ground, so weaker SQL buys a
-  refusal, a repair round-trip and another billed call.
-- **The FakeLLM is the backbone of every agent test.** Script it by (role,
-  matcher); assert on `calls` rather than on the answer. The Phase 7 e2e is
-  meant to run in CI with no key at all.
+- **The whole path works in a browser**, so Phase 8 changes how an answer is
+  reached rather than whether one arrives.
+- **`search_tables` finally works the way the agent calls it** (B-041). The loop
+  will call it far more often than the single-shot runner did, and on rephrased
+  questions each iteration.
+- **The trace is already the UI's source of truth.** The conversation screen
+  renders live steps from `agent_events`; WP8.3 turns that one line into the full
+  timeline, over the same durable rows (10.3).
+- **Its flagship refusal already works.** *"Which menu items sell best?"* was run
+  live during WP7.3b's verification and refused honestly, naming the missing
+  link, in one model call — so WP8.2's capability check has a known-good starting
+  point rather than a hypothesis.
 - **Budgets are still not built.** `CallLimits` bounds one call and D-019's
-  ceiling bounds one run's spend. The iteration, query and token caps of arch
-  4.4 are Phase 8's, and B-025 owns the org-level quotas.
-- **Two backlog items are due to be felt in WP7.2**, and both were filed so the
-  response is a decision rather than a reflex: **B-024** (the first legitimate
-  engine function the validator refuses — add the one name, with a reason, never
-  widen the rule) and **B-020** (an unaliased projection comes back as
-  `_col_1`, which becomes visible the moment a result is shown to a person).
+  ceiling bounds one run's spend; the iteration, query and token caps are this
+  phase's, and B-025 owns the org-level quotas.
+
+Two things to watch:
+
+- **B-020 (`_col_1`) is now user-visible** and still open. The planner asks for
+  aliased projections; that is a mitigation, not the fix.
+- **B-038** — `agent_configs` and `skills` have no storage, so L1–L3 of the
+  layered prompt render as nothing. It carries `budget_overrides`, which is
+  exactly what WP8.1's org-overridable caps need, so this phase is where it
+  stops being deferrable.
 
 ## Notes
 

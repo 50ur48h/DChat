@@ -184,6 +184,110 @@ export interface CardHit {
   rank: number;
 }
 
+/**
+ * A thread of questions about one database (architecture 10.1, D-022).
+ *
+ * `data_source_id` is null for a conversation that named none. That is legal,
+ * not broken: the run resolves the organization's single source, or refuses and
+ * names the choices. `data_source_name` is null for the same reason, and also
+ * when the source has since been removed.
+ */
+export interface Conversation {
+  id: string;
+  title: string | null;
+  created_at: string;
+  message_count: number;
+  last_run_id: string | null;
+  data_source_id: string | null;
+  data_source_name: string | null;
+}
+
+export interface ConversationMessage {
+  id: string;
+  /** user | assistant */
+  role: string;
+  content: string;
+  run_id: string | null;
+  created_at: string;
+}
+
+/** What `POST …/messages` answers with: the run, not the answer. */
+export interface Accepted202 {
+  run_id: string;
+  message_id: string;
+  status: string;
+  /** False when an idempotency key matched an earlier send of this question. */
+  created: boolean;
+}
+
+/**
+ * A claim the run made, and the executions backing it.
+ *
+ * `support` holds `query_executions.id` values — the citation trail. Every id in
+ * it was verified by the runner against what this run actually executed, so each
+ * one resolves through `GET …/runs/{r}/executions/{q}`.
+ */
+export interface Finding {
+  id: string;
+  statement: string;
+  support: string[];
+  confidence: string;
+}
+
+export interface Run {
+  id: string;
+  conversation_id: string;
+  /** queued | running | validating | completed | interrupted | failed | budget_exhausted */
+  status: string;
+  question: string;
+  answer: string | null;
+  findings: Finding[];
+  started_at: string | null;
+  finished_at: string | null;
+  failure_reason: string | null;
+}
+
+export interface RunEvent {
+  seq: number;
+  type: string;
+  payload: Record<string, unknown>;
+  ts: string;
+}
+
+export interface RunEvents {
+  run_id: string;
+  events: RunEvent[];
+  /** Pass back as `?after=` to fetch only what has happened since. */
+  last_seq: number;
+}
+
+/**
+ * The query behind a citation (architecture 10.2, B-034).
+ *
+ * `sample_rows` was masked before it was ever stored (WP5.2b), so there is no
+ * unmasked copy for this screen to have asked for. A `refused` execution reached
+ * no engine: it has no rows and no duration, and carries the violation code that
+ * stopped it instead.
+ */
+export interface Execution {
+  id: string;
+  run_id: string;
+  /** ok | error | refused */
+  status: string;
+  sql: string;
+  tables: string[];
+  columns: string[];
+  row_count: number | null;
+  duration_ms: number | null;
+  violation_code: string | null;
+  error: string | null;
+  sensitive_accessed: boolean;
+  masked_columns: string[];
+  sample_rows: unknown[][];
+  truncated: boolean;
+  created_at: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -357,5 +461,106 @@ export function isInvitation(value: unknown): value is Invitation {
     typeof value.token === "string" &&
     typeof value.role === "string" &&
     typeof value.expires_at === "string"
+  );
+}
+
+export function isConversation(value: unknown): value is Conversation {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    isNullableString(value.title) &&
+    typeof value.created_at === "string" &&
+    isNullableString(value.data_source_id) &&
+    isNullableString(value.data_source_name)
+  );
+}
+
+export function isConversationMessage(value: unknown): value is ConversationMessage {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.role === "string" &&
+    typeof value.content === "string" &&
+    isNullableString(value.run_id) &&
+    typeof value.created_at === "string"
+  );
+}
+
+export function isAccepted202(value: unknown): value is Accepted202 {
+  return (
+    isRecord(value) &&
+    typeof value.run_id === "string" &&
+    typeof value.message_id === "string" &&
+    typeof value.status === "string" &&
+    typeof value.created === "boolean"
+  );
+}
+
+function isFinding(value: unknown): value is Finding {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.statement === "string" &&
+    typeof value.confidence === "string" &&
+    Array.isArray(value.support) &&
+    value.support.every((id) => typeof id === "string")
+  );
+}
+
+export function isRun(value: unknown): value is Run {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.conversation_id === "string" &&
+    typeof value.status === "string" &&
+    typeof value.question === "string" &&
+    isNullableString(value.answer) &&
+    isNullableString(value.failure_reason) &&
+    Array.isArray(value.findings) &&
+    value.findings.every(isFinding)
+  );
+}
+
+function isRunEvent(value: unknown): value is RunEvent {
+  return (
+    isRecord(value) &&
+    typeof value.seq === "number" &&
+    typeof value.type === "string" &&
+    typeof value.ts === "string" &&
+    isRecord(value.payload)
+  );
+}
+
+export function isRunEvents(value: unknown): value is RunEvents {
+  return (
+    isRecord(value) &&
+    typeof value.run_id === "string" &&
+    typeof value.last_seq === "number" &&
+    Array.isArray(value.events) &&
+    value.events.every(isRunEvent)
+  );
+}
+
+function isNullableNumber(value: unknown): value is number | null {
+  return value === null || typeof value === "number";
+}
+
+export function isExecution(value: unknown): value is Execution {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.run_id === "string" &&
+    typeof value.status === "string" &&
+    typeof value.sql === "string" &&
+    isNullableNumber(value.row_count) &&
+    isNullableNumber(value.duration_ms) &&
+    isNullableString(value.violation_code) &&
+    isNullableString(value.error) &&
+    typeof value.sensitive_accessed === "boolean" &&
+    typeof value.truncated === "boolean" &&
+    Array.isArray(value.columns) &&
+    Array.isArray(value.masked_columns) &&
+    Array.isArray(value.sample_rows) &&
+    value.sample_rows.every((row) => Array.isArray(row))
   );
 }

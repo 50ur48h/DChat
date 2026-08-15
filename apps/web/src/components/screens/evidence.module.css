@@ -1,0 +1,94 @@
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+/* The statement runs wide more often than not, so it scrolls inside its own
+   well rather than widening the thread. */
+.sql {
+  margin: var(--space-4) 0 0;
+  padding: var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 20px;
+  white-space: pre;
+}
+
+.tableWrap {
+  margin-top: var(--space-4);
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+  line-height: 20px;
+  /* Columns of numbers line up, per docs/design.md. */
+  font-variant-numeric: tabular-nums;
+}
+
+.table th,
+.table td {
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table th {
+  background: var(--surface-sunken);
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.table th > * + * {
+  margin-left: var(--space-2);
+}
+
+.table tbody tr + tr td {
+  border-top: 1px solid var(--border);
+}
+
+.columnName {
+  vertical-align: middle;
+}
+
+.refused {
+  margin-top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.refusedText {
+  margin: 0;
+  color: var(--fg);
+}
+
+.note {
+  margin: var(--space-3) 0 0;
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 20px;
+  max-width: 68ch;
+}
+
+.error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 20px;
+}

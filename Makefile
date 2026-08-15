@@ -177,7 +177,7 @@ lint.seed: ## ruff check the seed scripts
 # ---------------------------------------------------------------------------
 # apps/web
 # ---------------------------------------------------------------------------
-.PHONY: install.web lint.web typecheck.web test.web web.dev build.web
+.PHONY: install.web lint.web typecheck.web test.web test.web.e2e web.dev build.web
 install.web: ## Install web dependencies from the lockfile
 	$(PNPM_WEB) install --frozen-lockfile
 
@@ -189,6 +189,9 @@ typecheck.web: ## next typegen + tsc --noEmit
 
 test.web: ## vitest
 	$(PNPM_WEB) test
+
+test.web.e2e: ## Playwright: the chat screen in a real browser, against a stub API
+	$(PNPM_WEB) test:e2e
 
 web.dev: ## next dev on :3000
 	$(PNPM_WEB) dev

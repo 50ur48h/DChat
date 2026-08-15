@@ -22,6 +22,11 @@ export default function OrgPage({ params }: { params: Promise<{ orgId: string }>
         subtitle="Who belongs here, and what they may do."
         action={
           <Row>
+            {/* The one primary action on this page: asking is what the product
+                is for, and every role may do it (architecture 6.2). */}
+            <Link href={`/orgs/${orgId}/conversations`}>
+              <Button variant="primary">Ask</Button>
+            </Link>
             <Link href={`/orgs/${orgId}/data-sources`}>
               <Button>Data sources</Button>
             </Link>
