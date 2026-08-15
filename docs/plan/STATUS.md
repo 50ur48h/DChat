@@ -1,37 +1,35 @@
 # STATUS — data-agent build
 
-Current position: **Phases 0–5 signed off. Phase 6 merged, its gate partially
-                  met and deliberately unticked. Phase 7 is complete and its
-                  gate PR is open:** WP7.1 (#36), WP7.2a (#37), WP7.2b (#38),
-                  WP7.2c (#39), B-040 (#40), B-039 (#41), WP7.3a (#43) and
-                  B-041/042/043 (#44) are merged, and **WP7.3b is open as the
-                  Phase 7 gate PR**. WP7.3 was split in two (plan §1.1): 7.3a is
-                  the API — a conversation names its data source (D-022,
-                  revision 0014) and a citation opens (B-034); 7.3b is the chat
-                  UI. **A person can now ask a question in a browser and read
-                  the SQL behind the answer.**
-Next step:        **The Phase 7 GATE is yours** — the manual test script is in
-                  #45's body. Once signed off, Phase 8 / **WP8.1**
-                  (`p8.1-research-loop`): `ResearchState`, the bounded loop and
-                  the budgets of arch 4.4. Phase 8's precondition (B-039) is
-                  already closed, and its flagship refusal was seen working
-                  during this phase's verification.
+Current position: **Phases 0–5 and 7 signed off. Phase 6 merged, its gate
+                  partially met and deliberately unticked. Phase 8 starts now.**
+                  The **Phase 7 gate was signed off on 2026-08-16** (#45): a
+                  question asked in a browser is answered with a citation that
+                  opens into the SQL behind it, and a question the data cannot
+                  answer is honestly refused. The product does the thing it is
+                  for, in front of a person.
+Next step:        Phase 8 / **WP8.1** (`p8.1-research-loop`) — `ResearchState`,
+                  the bounded loop and the budgets of architecture 4.4. Phase 8's
+                  precondition (**B-039**) is closed, and its flagship refusal —
+                  *"Which menu items sell best?"* — was already seen working live
+                  during Phase 7's verification, so WP8.2 starts from a known-good
+                  position rather than a hypothesis. Build spec in the "Next step"
+                  section near the end of this file.
 Merge policy: ASK
-Blocked on user: **the Phase 7 gate sign-off** (#45). An Anthropic API key would
-                 close B-029 and the Phase 6 gate; it blocks no Phase 8 work.
-                 **B-005 (P1) blocks the start of Phase 9** and should be raised
-                 before evals are written against a drifting window.
-Last updated: 2026-08-15 by Claude Code (WP7.3b, the Phase 7 gate PR)
+Blocked on user: nothing for Phase 8. An Anthropic API key would close B-029 and
+                 the Phase 6 gate. **B-005 (P1) blocks the start of Phase 9** and
+                 is the one to raise before evals are written against a window
+                 that drifts — worth deciding during Phase 8 rather than at its
+                 end.
+Last updated: 2026-08-16 by Claude Code (Phase 7 gate signed off; B-046–B-048 filed)
 
 ---
 
 ## ⚠ Session-end handoff — read this before starting anything
 
-Phase 7 is built. The one thing outstanding is **the gate sign-off**, which is
-the owner's (#45, and its manual test script is in that PR's body).
+Phase 7 is signed off (#45). Phase 8 is next, and nothing is in flight.
 
 1. **Session ritual (plan §7.1) as normal.** `git fetch --all`, `gh pr list`.
-   `main` is at #44; **#45 is open and is the gate PR**.
+   Both should be quiet; `main` is at the Phase 7 gate sign-off.
 2. **Confirm the browser is running your code before believing anything.**
    `next dev` in the web container does not see host edits — file-watch events do
    not cross the Windows bind mount — so an edited file can sit in the container
@@ -672,7 +670,35 @@ Prefer an edit that fails loudly over one that prints "done".
       2026?"* → **"3,718 orders were placed in July 2026."** citing execution
       `5175e4f4-…`, against `SELECT count(*)` = **3718**; and *"Which menu items
       sell best?"* → an honest refusal naming the missing link, in one model call
-- [ ] GATE: "orders in July?" answered with citation; user sign-off
+- [x] GATE: "orders in July?" answered with citation; user sign-off
+      — **signed off 2026-08-16**, on the third attempt, and the two failures are
+      the more instructive half. Confirmed in the browser: *"How many orders were
+      placed in July 2026?"* answered **"3,718 orders were placed in July 2026."**
+      on its own, with no further interaction, and the citation opened into the
+      SQL and the single row holding **3718** — the number `SELECT count(*)`
+      returns against the seed database directly. *"Which menu items sell best?"*
+      completed as an **honest refusal** naming the missing link, green rather
+      than red, with nothing to expand.
+      **What the gate caught that nothing else did.** Every reply rendered one
+      message behind, so an answer arrived as a confidence badge and an openable
+      citation with **no words** (**B-044**). The API was correct at every step —
+      the right number, the right SQL, the right refusal — so no headless check
+      could have seen it; only a person clicking through. Then the fix was
+      reported as working while the browser still ran the **old bundle**
+      (**B-045**), because file-watch events do not cross the Windows bind mount.
+      Both are P1 and both are closed.
+      Two habits came out of it and are worth more than the fix. **jsdom is not
+      evidence for anything timing-dependent** — the first regression test passed
+      against the broken code, so the suite now drives real Chromium against a
+      stub API over real HTTP, in CI, proved to fail against the pre-fix
+      component and pass against the fix. And **"is my code running" is a
+      question to answer, not assume**: CLAUDE.md carries a one-liner that greps
+      the *served* chunks for a token from your change.
+      What the phase leaves behind: a person can ask a question in a browser and
+      read the SQL behind the answer. `dal.run` is still the only way to customer
+      data, `llm.complete` still the only way to a model, every attempt is on
+      `query_executions` including the refusals, and every claim points at a row
+      that exists.
 
 ## Phase 8 — Research loop + trace (M8)
 - [x] **B-039 (P1) was this phase's precondition, and it is closed** (#41)
@@ -701,9 +727,24 @@ Prefer an edit that fails loudly over one that prints "done".
 
 ## Phase 11 — Charts + polish (M11)
 - [ ] WP11.1 Chart tool (validated Vega-Lite) + client renderer
+      — carries **B-048** (owner, at the Phase 7 sign-off): the chart belongs
+      **inside the answer card**, and its spec must be openable the way the SQL
+      is. A chart nobody can trace back to the query behind it is decoration that
+      looks like evidence — the same claim Phase 7 made for answers, extended to
+      pictures. Filed before the tool is designed rather than retrofitted after
 - [ ] WP11.2 History/catalog/members polish + Playwright smoke      ← gate PR
       — carries **B-017**: recovery when an org has no Admin who can sign in
       (owner's call 2026-08-12, moved forward from Phase 12)
+      — and **B-046** and **B-047**, both owner requests at the Phase 7 sign-off:
+      fold the status and confidence badges *into* the answer bubble rather than
+      a separate box below it, and highlight the numbers, dates and names in an
+      answer so it can be read at a glance. All three of these plus B-048 are one
+      idea — **an answer should read as one object** — so they are best done
+      together. B-047 has a real design question inside it: emphasis is a claim
+      about what matters, so the composer should return structure rather than the
+      UI pattern-matching prose a model wrote
+      — the Playwright smoke this WP plans is now a **widening** rather than a
+      start: WP7.3b already added `apps/web/e2e/` with Chromium in CI (B-044)
 - [ ] GATE: trend question → rendered chart; smoke green; sign-off
 
 ## Phase 12 — Azure deploy + hardening (M12)  ⚠ human review on every PR
