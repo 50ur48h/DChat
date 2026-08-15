@@ -28,6 +28,8 @@ import customer_db
 from customer_db import CustomerDatabase
 from dataagent.config import Settings
 from dataagent.datasources import service as datasource_service
+from dataagent.llm import registry as llm_registry
+from dataagent.llm.fake import FakeLLM
 from dataagent.main import create_app
 from dataagent.secrets.local import LocalSecretsProvider
 
@@ -245,3 +247,22 @@ def app_database(migrated_database: URL, app_role_password: str) -> URL:
 
     asyncio.run(_grant_login())
     return migrated_database.set(username=APP_ROLE, password=app_role_password)
+
+
+@pytest.fixture
+def fake_llm() -> Iterator[FakeLLM]:
+    """A FakeLLM registered as the provider named ``fake``, and unregistered after.
+
+    At the root rather than in one suite: the agent tests need the same provider
+    the LLM tests do, and two definitions of one fixture drift.
+
+    The teardown matters more than it looks. A provider left in the registry
+    would answer the next test's calls, which is exactly the cross-test coupling
+    that makes a deterministic harness stop being deterministic.
+    """
+    fake = FakeLLM()
+    llm_registry.register_provider("fake", lambda: fake)
+    try:
+        yield fake
+    finally:
+        llm_registry.clear_provider_cache()
