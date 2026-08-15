@@ -4,6 +4,40 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-021 — Runs execute in-process, with checkpoints, and there is no queue
+Date: 2026-08-15 · Phase: 7 · PR: WP7.2c · Owner's decision
+Context: WP7.2b left one question open and said so rather than guessing: what
+picks up a `queued` run. A research run takes thirty seconds to four minutes, so
+holding the request open is not available; the three candidates were inline in
+the request, an in-process background task, and a real queue with a worker.
+**This entry records a choice, not a deviation.** Architecture 0.2.4 already
+answers it — "the API runs agent runs as in-process async tasks, persists state
+to Postgres at every step boundary" — and Part 8.2's table lists Service Bus as
+✗ with "in-process tasks + checkpoints" as the V1 answer. It is written down
+because the question was genuinely open at the point of building, an owner
+confirmed it on 2026-08-15, and a future reader asking "why is there no worker?"
+should find the reasoning rather than infer it from the absence of one.
+Options: (a) inline — simplest, and holds an HTTP connection for minutes;
+(b) in-process background task plus checkpoints — zero infrastructure, and a
+redeploy kills in-flight runs; (c) Service Bus and a worker — durable, and buys
+a second deployable, a queue to operate and cross-version message contracts
+before there is any measured need.
+Decision: (b), and no architecture edit, because the document already says so.
+Two constraints follow and are honoured in code. **The runner never assumes it is
+inside an HTTP request** — `execute_run` takes ids and returns a `RunOutcome` —
+which is what makes 0.2.4's V1.5 promotion path free rather than a rewrite. And
+**orphans are reconciled** rather than left: the lifespan sweeps anything left
+`queued`, `running` or `validating` to `interrupted`, a status the schema already
+carried for exactly this.
+Consequences: a redeploy interrupts in-flight runs, visibly and with a reason
+that says a restart happened rather than implying the question was at fault. A
+per-org semaphore (2, arch 8.4) bounds concurrency, because questions would
+otherwise be a way to spawn unbounded tasks in the API process. The trigger for
+revisiting is the one 0.2.4 names — sustained multi-org concurrent runs
+contending for one container, **measured, not assumed**; if it turns out wrong
+before that, it gets recorded as a deviation rather than absorbed by widening
+scope.
+
 ## D-020 — A run is ordered by when it was asked, not by when it started
 Date: 2026-08-15 · Phase: 7 · PR: WP7.1
 Context: Architecture 10.1 gives `agent_runs` in full SQL — the one table it

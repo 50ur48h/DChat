@@ -1,23 +1,65 @@
 # STATUS — data-agent build
 
 Current position: **Phases 0–5 signed off. Phase 6 merged, its gate partially
-                  met and deliberately unticked. Phase 7 is under way: WP7.1
-                  (#36), WP7.2a (#37), WP7.2b (#38) and WP7.2c (#39) are
-                  merged, and B-040 (#40) with them.** Asking a question over HTTP
-                  answers 202 and an answer arrives on the run — the product
-                  does the thing it is for, end to end. **B-039 is closed and
-                  its PR is open**; only the UI is missing.
+                  met and deliberately unticked. Phase 7 is one work package
+                  from its gate:** WP7.1 (#36), WP7.2a (#37), WP7.2b (#38),
+                  WP7.2c (#39), B-040 (#40) and B-039 (#41) are all merged and
+                  `main` is green. Asking a question over HTTP answers 202 and
+                  an answer arrives on the run — the product does the thing it
+                  is for, end to end. **Only the UI is missing.**
 Next step:        Phase 7 / **WP7.3** (`p7.3-chat-ui`) — the chat UI and the
                   e2e. **This is the Phase 7 gate PR**, so it ends with a manual
-                  test script. Spec in the "Next step" section near the end of
-                  this file.
+                  test script. Read the session-end handoff directly below this
+                  block first; the build spec is in the "Next step" section near
+                  the end of this file.
 Merge policy: ASK
-Blocked on user: **B-039's PR needs a review decision.** An Anthropic API key
-                 would close B-029 and the Phase 6 gate; it blocks no Phase 7
-                 work.
-Last updated: 2026-08-15 by Claude Code (B-039)
+Blocked on user: nothing. An Anthropic API key would close B-029 and the Phase 6
+                 gate; it blocks no Phase 7 work.
+Last updated: 2026-08-15 by Claude Code (session end, after B-039)
 
 ---
+
+## ⚠ Session-end handoff — read this before starting anything
+
+This session took Phase 7 from an empty schema to a working product: WP7.1
+through WP7.2c, plus two P1 backlog items the work itself uncovered. It ended
+deliberately, with nothing in flight — no open PR, no branch, no dirty tree.
+
+1. **Session ritual (plan §7.1) as normal.** `git fetch --all`, `gh pr list`.
+   Both should be quiet. `main` is at #41.
+2. **Do not start WP7.3 by writing UI.** Two things belong to it that are not
+   UI and will shape it, and both are in the "Next step" section: the missing
+   `GET …/runs/{r}/executions/{q}` route (**B-034**, which the evidence panel
+   needs), and the fact that the demo org has **two data sources**, so a
+   question there refuses by design until the UI names one. Decide both before
+   drawing anything.
+3. **WP7.3 is the gate PR**, so it ends with a **manual test script**: numbered
+   steps, what the user should see at each, and the failure case. That is a hard
+   rule (CLAUDE.md), and the Phase 7 gate is *"July-orders question answered in
+   the UI with a real citation"* — so the script has to walk the browser.
+4. **A new route directory under `apps/web/src/app/` needs the web container
+   restarted.** The bind mount delivers the files; `next dev` does not notice a
+   directory that appeared after it started, and serves a 404 that looks exactly
+   like a routing bug. This has cost time before.
+5. **Two P1 items are closed but their lessons are live.** No test may call a
+   real provider (**B-040**) — keep the e2e on the FakeLLM, and if a new test
+   ever trips the guard, the guard is right. And a table is findable by its own
+   name (**B-039**) — search now works for every table rather than for the lucky
+   ones, so build against it with confidence.
+6. **Two P1 items remain open, and neither blocks WP7.3.** **B-029** — a second
+   real provider — is what closes the Phase 6 gate, and needs an Anthropic key
+   from the owner. **B-005** — the seed dataset's fixed end date — blocks the
+   *start of Phase 9*, not Phase 7, and is the one to raise before evals are
+   written against a window that drifts.
+
+Two working habits this session earned the hard way, both worth keeping:
+
+- **Run `ruff check . --no-cache` before pushing.** A warm ruff cache passed
+  locally while CI failed on the same tree, after a file moved and its import
+  classification changed with it.
+- **A patch script must assert its edit matched before writing.** One printed
+  "ok" having changed nothing, which is the exact failure the note below this
+  section warns about. Prefer an edit that fails loudly.
 
 ## Standing notes for a new session
 
@@ -815,9 +857,10 @@ What Phase 6 hands it:
   primitives in `src/components/ui/`. A raw hex value anywhere else is a bug,
   and adding a component library needs a DECISIONS entry first.
 
-- **The local demo environment, as this session left it.** Five containers up
-  (`platform-pg`, `seed-pizza-pg`, `mssql`, `api`, `web`); platform database at
-  revision **0012**. Rebuild the `api` image after any dependency change or the
+- **The local demo environment, as this session left it.** Four containers up
+  (`platform-pg`, `seed-pizza-pg`, `api`, `web`) — **`mssql` is stopped**, so 20
+  SQL Server tests skip locally; `make up.mssql` starts it and CI's `mssql` job
+  runs them regardless. Platform database at revision **0013**. Rebuild the `api` image after any dependency change or the
   container and the host disagree about what exists.
   The demo organization `ebfe8139-…` now carries evidence from three phases, and
   none of it is fixtures — a reseed does not recreate any of it. Two verified
@@ -830,6 +873,12 @@ What Phase 6 hands it:
   provider works end to end.
   `make up && make seed`, `make up.mssql && make seed.mssql` and `make db.setup`
   rebuild the fixtures from nothing; they do not rebuild the evidence above.
+  **The demo org has no conversations, runs or events.** WP7.1's HTTP check wrote
+  some and they were removed at the owner's request on 2026-08-15, along with the
+  `alice`/`bob` test users — WP7.1's evidence was the schema, not rows. The four
+  `query_executions` and five `usage_ledger` rows are untouched, and their
+  `run_id` is NULL because revision 0012's foreign key cleared uuids that named
+  no run.
   `ops/scripts/set_role.sh` is the escape hatch that exists because the Entra
   account which created that organization can no longer sign in (**B-017**).
 
