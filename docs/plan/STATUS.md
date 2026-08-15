@@ -3,19 +3,24 @@
 Current position: **Phases 0–5 signed off. Phase 6 merged, its gate partially
                   met and deliberately unticked. Phase 7 is one work package
                   from its gate:** WP7.1 (#36), WP7.2a (#37), WP7.2b (#38),
-                  WP7.2c (#39), B-040 (#40) and B-039 (#41) are all merged and
-                  `main` is green. Asking a question over HTTP answers 202 and
-                  an answer arrives on the run — the product does the thing it
-                  is for, end to end. **Only the UI is missing.**
-Next step:        Phase 7 / **WP7.3** (`p7.3-chat-ui`) — the chat UI and the
-                  e2e. **This is the Phase 7 gate PR**, so it ends with a manual
-                  test script. Read the session-end handoff directly below this
-                  block first; the build spec is in the "Next step" section near
-                  the end of this file.
+                  WP7.2c (#39), B-040 (#40) and B-039 (#41) are merged, and
+                  **WP7.3a is open for review**. WP7.3 was split in two (plan
+                  §1.1): 7.3a is the API the UI is written against — a
+                  conversation names its data source (D-022, revision 0014), the
+                  evidence route that opens a citation (B-034), and the phase's
+                  end-to-end test. **The whole path now works over HTTP against a
+                  real database, with the model as the only stub.**
+Next step:        Phase 7 / **WP7.3b** (`p7.3b-chat-ui`) — the chat UI.
+                  **This is the Phase 7 gate PR**, so it ends with a manual test
+                  script. Everything it needs from the API exists as of 7.3a;
+                  the build spec is in the "Next step" section near the end of
+                  this file.
 Merge policy: ASK
-Blocked on user: nothing. An Anthropic API key would close B-029 and the Phase 6
-                 gate; it blocks no Phase 7 work.
-Last updated: 2026-08-15 by Claude Code (session end, after B-039)
+Blocked on user: WP7.3a is open and MERGE_POLICY is ASK, so 7.3b waits on that
+                 review — it is built directly on 7.3a's routes. An Anthropic API
+                 key would close B-029 and the Phase 6 gate; it blocks no Phase 7
+                 work.
+Last updated: 2026-08-15 by Claude Code (WP7.3a)
 
 ---
 
@@ -27,13 +32,11 @@ deliberately, with nothing in flight — no open PR, no branch, no dirty tree.
 
 1. **Session ritual (plan §7.1) as normal.** `git fetch --all`, `gh pr list`.
    Both should be quiet. `main` is at #41.
-2. **Do not start WP7.3 by writing UI.** Two things belong to it that are not
-   UI and will shape it, and both are in the "Next step" section: the missing
-   `GET …/runs/{r}/executions/{q}` route (**B-034**, which the evidence panel
-   needs), and the fact that the demo org has **two data sources**, so a
-   question there refuses by design until the UI names one. Decide both before
-   drawing anything.
-3. **WP7.3 is the gate PR**, so it ends with a **manual test script**: numbered
+2. **Both of WP7.3's non-UI decisions are now made, in WP7.3a.** The evidence
+   route exists (**B-034**, closed) and a conversation names its data source
+   (**D-022**), so the demo org's two sources are no longer a blocker. What is
+   left of WP7.3 is UI, and it is **WP7.3b**.
+3. **WP7.3b is the gate PR**, so it ends with a **manual test script**: numbered
    steps, what the user should see at each, and the failure case. That is a hard
    rule (CLAUDE.md), and the Phase 7 gate is *"July-orders question answered in
    the UI with a real citation"* — so the script has to walk the browser.
@@ -515,7 +518,55 @@ Prefer an edit that fails loudly over one that prints "done".
       "menu items" now returns exactly the two `menu_items` tables and nothing
       else. Three migration tests cover real rows, because an empty database
       proves nothing about a data migration
-- [ ] WP7.3 e2e vs seed DB + minimal chat UI with citation          ← gate PR
+- [x] WP7.3a Conversation names its data source + evidence route + e2e
+      — WP7.3 split in two (plan §1.1): the whole was well past the ~600-line
+      target, and the split is by *what it is*: this half is the API the UI will
+      be written against, the other half is the UI and the gate. The gate stays
+      at the end where it belongs rather than landing in the first PR.
+      **A conversation names the database it is about** (revision **0014**,
+      DECISIONS **D-022**). WP7.2c made the scheduler refuse rather than guess
+      with more than one source registered, which meant every question in the
+      demo org refused — and the Phase 7 gate is a question answered in the
+      browser. The column is on the *conversation*, not the message: a follow-up
+      must reach the same source as the question it follows, or two answers in
+      one thread come from two databases with nothing saying so. **The refusal is
+      kept, not replaced** — what closed the ambiguity is a caller saying which
+      database it means, never permission to guess, so a thread that names none
+      still refuses and still lists the choices.
+      The foreign key is **not** the tenant check: a constraint check does not
+      consult row-level security, so another organization's source id satisfies
+      the database perfectly well. The source is looked up through the org
+      session and refused as 404, proved by a test that registers a second
+      organization's source and hands its id to the first.
+      **B-034 is closed**: `GET …/runs/{r}/executions/{q}` turns a citation into
+      something a person can open — canonical SQL, tables and columns, row count,
+      duration, and up to 50 already-masked sample rows. A **refused** execution
+      has no artifact and answers with its violation code and the statement that
+      earned it, rather than an empty result that would read as "your data has no
+      answer". The execution is read **through** the run — `run_id` is in the
+      WHERE clause, not just the path — so one belonging to another run is not
+      found, and there is no second access rule to drift from the run's own.
+      **The e2e is the piece with the most in it and the least stubbed.** A real
+      conversation naming a real source, a real discovered catalog, the real
+      validator and executor against real rows, the real routes, and the FakeLLM
+      as the only substitution (B-040 — CI needs no key). The composing script is
+      a **callable** that reads the execution id out of its own prompt and cites
+      it, because a constant would prove the plumbing while assuming away the one
+      property 4.2 rests on. Tampering with the expected count fails it on the
+      database's own number, which is what separates this from a mock.
+      13 new tests; `runs/routes.py` at **100%**, `runs/service.py` at **99%**,
+      1046 passing overall at **94%**. **B-020 was decided rather than deferred
+      by omission** — see its backlog row: the planner now asks for aliased
+      projections, which is a mitigation, and the deterministic naming pass in
+      `dal/` is still owed in its own reviewed PR.
+      **On size, recorded rather than passed over** (plan §1.1). Hand-written
+      source is **383 lines**, comfortably inside the ~600 target; tests are 815
+      more, so the whole is over it. Splitting again was considered and rejected:
+      the cut would be "data source" and "evidence route", and the e2e exercises
+      both — it would have to go with one half and stop proving the other, which
+      is the one test in this PR worth the most. Say so if you would rather have
+      had two, and 7.3b can be cut differently
+- [ ] WP7.3b Chat UI with citation + manual test script              ← gate PR
 - [ ] GATE: "orders in July?" answered with citation; user sign-off
 
 ## Phase 8 — Research loop + trace (M8)
@@ -561,31 +612,46 @@ Prefer an edit that fails loudly over one that prints "done".
 
 ## Next step
 
-Phase 7 / **WP7.3 — the chat UI and the e2e** (`p7.3-chat-ui`).
-Plan §6 Phase 7, architecture Part 10.2. **This is the Phase 7 gate PR.**
+Phase 7 / **WP7.3b — the chat UI** (`p7.3b-chat-ui`).
+Plan §6 Phase 7, architecture Part 10.2 and 3.1. **This is the Phase 7 gate PR.**
 
 Build:
 
 - Web: a conversation page — message list, composer, run status, and an answer
-  card with expandable evidence (the SQL, a rows preview, a link to the
-  execution). Polls `GET …/runs/{id}` and `GET …/runs/{id}/events`; everything it
-  needs is already on those two routes.
-- An API-level e2e with the FakeLLM scripted to the known-good SQL: the full HTTP
-  flow from user to answer, asserting the DAL execution really ran against seed
-  data and that the citation resolves.
+  card with expandable evidence (the SQL, a rows preview, the execution). It
+  polls `GET …/runs/{id}` and `GET …/runs/{id}/events`, and opens a citation with
+  `GET …/runs/{r}/executions/{q}`. All three routes exist and are tested.
+- Starting a conversation must let the user **pick the database** — the demo org
+  has two, and a conversation that names none refuses by design (D-022). The
+  picker is `GET …/data-sources`, which the data sources screen already uses, and
+  the chosen id goes in the `POST …/conversations` body.
 - **A manual test script** — numbered steps, what the user should see at each,
   and the failure case. Every gate PR ends with one (CLAUDE.md).
 
-Two things to settle early:
+Three things worth knowing before drawing anything:
 
-- **`GET …/runs/{r}/executions/{q}` does not exist** (**B-034**). It is in
-  architecture 10.2 and it is what turns a citation into something a person can
-  click. The evidence panel needs it, so it belongs in this WP.
-- **The demo org has two data sources, so a question there refuses** by design
-  (WP7.2c). Either the UI passes a source or the refusal stays visible — it
-  reads well as a message, but the gate demo has to account for it. A new route
-  directory under `apps/web/src/app/` needs the web container restarted
-  (CLAUDE.md), or it 404s in a way that looks like a routing bug.
+- **A new route directory under `apps/web/src/app/` needs the web container
+  restarted** (`docker compose restart web`). The bind mount delivers the files;
+  `next dev` does not notice a directory that appeared after it started, and
+  serves a 404 that looks exactly like a routing bug. This has cost time twice.
+- **`_col_1` may appear as a column name in the evidence panel** (**B-020**). The
+  planner now asks the model to alias its projections, which handles the common
+  case and is explicitly *not* the fix; the deterministic pass in `dal/` is still
+  owed. If it shows up in the gate demo, that is the known item, not a new bug.
+- **The refusal path is worth showing, not hiding.** A conversation that names no
+  database, in an org with two, completes with a readable message listing them.
+  It reads well and it is the honest half of D-022.
+
+What WP7.3a hands it:
+
+- **A conversation carries its data source** (D-022), returned as
+  `data_source_id` and `data_source_name` on every conversation read.
+- **A citation opens.** `GET …/runs/{r}/executions/{q}` returns the SQL, the
+  tables and columns, the row count, the duration and up to 50 already-masked
+  rows — and for a refused execution, the violation code instead.
+- **The whole path is proved end to end on every commit**
+  (`tests/agent/test_single_shot_e2e.py`), so the UI is built on behaviour that
+  is already known to work rather than on hope.
 
 What Phase 7 hands it:
 

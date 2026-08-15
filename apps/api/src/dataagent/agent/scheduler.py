@@ -8,11 +8,14 @@ this module is the only place that assumes a process.
 
 Four things it is responsible for, and each has a failure it exists to prevent.
 
-**Choosing the data source, or refusing to.** Exactly one registered source is
-used; anything else refuses and names the choices. A silently wrong database is
-the worst failure this product can produce — the answer looks right, cites a real
-execution, and is about someone else's data. There is no default, and adding one
-later should take an argument from the user rather than a guess from us.
+**Choosing the data source, or refusing to.** The conversation's own choice wins
+(D-022): a thread names the database it is about, and every question in it goes
+there. When it named none, exactly one registered source is used, and anything
+else refuses and names the choices. A silently wrong database is the worst
+failure this product can produce — the answer looks right, cites a real
+execution, and is about someone else's data. So the fallback stayed a refusal
+rather than becoming a tie-break: what closed the gap is a caller *saying* which
+database it means, which is the only thing that could.
 
 **Bounding concurrency.** A per-organization semaphore, default 2 per
 architecture 8.4. Without it, sending questions is a way to spawn unbounded tasks
@@ -93,11 +96,12 @@ class AmbiguousDataSourceError(Exception):
 async def resolve_data_source(org_id: uuid.UUID) -> uuid.UUID:
     """The one data source to answer from, or a refusal that says why not.
 
-    Deliberately no default and no ranking. With two databases registered, the
+    Reached only when the conversation named none (D-022). Deliberately no
+    default and no ranking even here: with two databases registered, the
     "obvious" choice is obvious only to whoever wrote the tie-break — and being
     wrong produces a confident, well-cited answer about the wrong company's
-    data. A later WP can let the question or the conversation name one; until
-    then this asks.
+    data. The refusal names the choices, because "pick one" is useful advice
+    only to a reader told what there is to pick from.
     """
     sources = await datasources.list_data_sources(org_id)
     if not sources:
@@ -108,8 +112,9 @@ async def resolve_data_source(org_id: uuid.UUID) -> uuid.UUID:
     if len(sources) > 1:
         names = [source.name for source in sources]
         raise AmbiguousDataSourceError(
-            "This organization has more than one data source and I was not told "
-            f"which to use: {', '.join(names)}. Ask again naming the one you mean.",
+            "This organization has more than one data source and this conversation "
+            f"is not tied to one of them: {', '.join(names)}. Start a conversation "
+            "that names the database you mean.",
             candidates=names,
         )
     return sources[0].id

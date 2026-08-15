@@ -722,7 +722,12 @@ verified_queries(id, org_id, data_source_id, question, sql, approved_by, created
 skills(id, scope global|org, org_id null, name, version, spec_md text, tags text[], enabled)
 agent_configs(org_id PK, instructions text, budget_overrides jsonb, model_overrides jsonb,
               tool_toggles jsonb)
-conversations(id, org_id, user_id, title, created_at)
+conversations(id, org_id, user_id, data_source_id NULL ON DELETE SET NULL, title, created_at)
+              -- data_source_id is the database this thread is about (D-022).
+              -- On the conversation rather than the message, because a
+              -- follow-up must reach the same source as the question it
+              -- follows. Null is a thread that named none: the run uses the
+              -- org's single source, or refuses and names the choices
 messages(id, org_id, conversation_id, role user|assistant, content, run_id null,
          idempotency_key null, created_at)
          -- idempotency_key is 10.2's field on POST …/messages, kept here because
@@ -778,7 +783,9 @@ PATCH /v1/orgs/{o}/catalog/columns/{c}       set policy allow|mask|deny [admin]
 POST /v1/orgs/{o}/documents                  upload → ingest job [contributor+]
 CRUD /v1/orgs/{o}/semantic-definitions       [contributor+]
 CRUD /v1/orgs/{o}/verified-queries           [contributor+]
-POST /v1/orgs/{o}/conversations              [any]
+POST /v1/orgs/{o}/conversations              body{title?, data_source_id?}
+                                             the database this thread is about,
+                                             optional (D-022)   [any]
 POST /v1/orgs/{o}/conversations/{c}/messages body{content, idempotency_key}
                                              → 202 {run_id}   [any]
 GET  /v1/orgs/{o}/runs/{r}                   status + composed answer + findings

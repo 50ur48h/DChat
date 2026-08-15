@@ -4,6 +4,43 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-022 — A conversation names the database it is about
+Date: 2026-08-15 · Phase: 7 · PR: WP7.3a
+Context: WP7.2c made the scheduler **refuse rather than guess** when an
+organization has more than one registered data source, because a silently wrong
+database produces a confident, correctly-cited answer about somebody else's
+data — the worst output this product can generate, and the only one with nothing
+about it that looks wrong. That refusal was always meant to be temporary: the
+demo organization has two sources, so *every* question there refuses, and the
+Phase 7 gate is a question answered in the browser. Something has to name the
+source, and nothing could.
+Options: (a) a tie-break in the scheduler — the first source, the most recently
+used — which is guessing with extra steps and reintroduces exactly the failure
+7.2c refused; (b) the **message** carries a `data_source_id`, so each question
+names its own; (c) the **conversation** carries it, chosen when the thread
+starts; (d) infer it from the question by searching every catalog, which makes a
+wrong answer depend on the model's phrasing.
+Decision: (c). A thread is about one database. A follow-up question in Phase 8
+must reach the same source as the question it follows, or two answers in one
+conversation are drawn from different databases with nothing saying so — and (b)
+makes that a per-message accident rather than a property. Revision **0014** adds
+`conversations.data_source_id`, nullable, `ON DELETE SET NULL`. Null is not an
+error: it is every conversation written before this revision, and it still
+resolves an organization's single source and still refuses when there is a
+choice. **The refusal is kept, not replaced** — what closed the ambiguity is a
+caller *saying* which database it means, not permission to guess.
+Consequences: `docs/architecture.md` 10.1 gains the column on `conversations` and
+10.2 gains the field on `POST …/conversations`. The foreign key is **not** the
+tenant check — a constraint check does not consult row-level security, so
+another organization's source id would satisfy the database perfectly well —
+so `runs/service.py` looks the source up through the org session and answers 404,
+and a test registers a second organization's source and proves it. A conversation
+whose source is later removed behaves like one that named none, which is the
+same trade D-016 makes one table over: the record of what was asked outlives the
+registration of what it was asked about. What this does **not** do is let a
+question override its thread; if that is ever wanted it is a new decision, not a
+parameter.
+
 ## D-021 — Runs execute in-process, with checkpoints, and there is no queue
 Date: 2026-08-15 · Phase: 7 · PR: WP7.2c · Owner's decision
 Context: WP7.2b left one question open and said so rather than guessing: what

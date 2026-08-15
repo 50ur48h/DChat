@@ -16,6 +16,15 @@ which is a different job.
 lets a provider constrain decoding natively where it can (B-033); where it
 cannot, `llm.complete` renders the schema into the prompt and repairs once. Both
 paths end at the same pydantic object, which is the point of the front door.
+
+**The task asks for aliased projections, and that is a mitigation rather than a
+fix.** Canonicalising runs sqlglot's qualifier, which names an unaliased output
+column `_col_1` — stable, unambiguous, and meaningless to the person now being
+shown it in WP7.3's evidence panel (**B-020**). A model that aliases its own
+columns produces a better name than any pass we could write, so it is asked to.
+It may forget, and then `_col_1` is what a person sees: the deterministic naming
+pass in `dal/validator.py` is still owed, and asking nicely here does not close
+that item.
 """
 
 from __future__ import annotations
@@ -70,6 +79,9 @@ class Plan(BaseModel):
 _TASK = """\
 Write one SQL SELECT that answers the question, using only the tables and columns
 in the reference data above.
+
+Give every column you select a short, readable alias — `count(*) AS order_count`,
+not a bare `count(*)`. The person who asked will be shown these column names.
 
 Before you write it: if the reference data does not contain what the question
 needs, set answerable to false and say what is missing in reason. Do not invent a

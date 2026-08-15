@@ -303,6 +303,117 @@ async def test_a_colleague_cannot_read_your_conversation_even_knowing_its_id(api
     assert bobs == []
 
 
+# ---------------------------------------------------------------------------
+# The database a conversation is about (D-022)
+# ---------------------------------------------------------------------------
+
+
+async def _register_source(org_id: str, name: str) -> uuid.UUID:
+    """A data source row, written directly.
+
+    Directly rather than through ``POST …/data-sources``, because that route
+    reaches a secrets provider and a live socket to verify credentials, and none
+    of what is being tested here is about either. What matters is that the row
+    exists in this organization and can be named.
+    """
+    from sqlalchemy import text as sql_text
+
+    from dataagent.tenancy.session import org_session
+
+    data_source_id = uuid.uuid4()
+    async with org_session(uuid.UUID(org_id)) as session:
+        await session.execute(
+            sql_text(
+                "INSERT INTO data_sources (id, org_id, name, engine, host_display, "
+                "settings, secret_ref) VALUES (:i, :o, :n, 'pg', '127.0.0.1:1/probe', "
+                "'{}'::jsonb, :r)"
+            ),
+            {"i": data_source_id, "o": org_id, "n": name, "r": f"ds/{org_id}/{data_source_id}/c"},
+        )
+    return data_source_id
+
+
+async def test_a_conversation_remembers_the_database_it_is_about(api: Api) -> None:
+    """Named once, when the thread starts, and readable on every view of it.
+
+    The alternative — naming a source per message — would let one thread's two
+    answers come from two databases with nothing saying so.
+    """
+    org_id = await _org(api)
+    data_source_id = await _register_source(org_id, "Pizza (PostgreSQL)")
+
+    status, conversation = await api.call(
+        "POST",
+        f"/v1/orgs/{org_id}/conversations",
+        "alice",
+        {"data_source_id": str(data_source_id)},
+    )
+
+    assert status == 201
+    assert conversation["data_source_id"] == str(data_source_id)
+    assert conversation["data_source_name"] == "Pizza (PostgreSQL)"
+
+    # Both read routes, because the sidebar uses one and the thread uses the
+    # other, and a choice visible in only one of them is half a feature.
+    _, detail = await api.call(
+        "GET", f"/v1/orgs/{org_id}/conversations/{conversation['id']}", "alice"
+    )
+    assert detail["data_source_id"] == str(data_source_id)
+    assert detail["data_source_name"] == "Pizza (PostgreSQL)"
+
+    _, listed = await api.call("GET", f"/v1/orgs/{org_id}/conversations", "alice")
+    assert listed[0]["data_source_id"] == str(data_source_id)
+    assert listed[0]["data_source_name"] == "Pizza (PostgreSQL)"
+
+
+async def test_a_conversation_may_name_no_database_at_all(api: Api) -> None:
+    """Null is the shape every conversation written before revision 0014 has.
+
+    It is not an error and must not become one: the run still resolves an
+    organization's single source, and still refuses when there is a choice.
+    """
+    org_id = await _org(api)
+
+    status, conversation = await api.call("POST", f"/v1/orgs/{org_id}/conversations", "alice", {})
+
+    assert status == 201
+    assert conversation["data_source_id"] is None
+    assert conversation["data_source_name"] is None
+
+
+async def test_a_conversation_cannot_name_a_database_that_does_not_exist(api: Api) -> None:
+    org_id = await _org(api)
+
+    status, _ = await api.call(
+        "POST", f"/v1/orgs/{org_id}/conversations", "alice", {"data_source_id": str(uuid.uuid4())}
+    )
+
+    assert status == 404
+
+
+async def test_a_conversation_cannot_name_another_organizations_database(api: Api) -> None:
+    """The check the foreign key cannot make.
+
+    A constraint check does not consult row-level security, so Globex's data
+    source id satisfies the database perfectly well from inside Acme. Only a read
+    through the org session can tell, which is why there is an explicit lookup
+    rather than a reliance on the FK. Alice is a member of both organizations,
+    which is the sharper case: she is not guessing at an id, she has it.
+    """
+    acme = await _org(api)
+    _, globex = await api.call("POST", "/v1/orgs", "alice", {"name": "Globex"})
+    theirs = await _register_source(str(globex["org_id"]), "Globex warehouse")
+
+    status, _ = await api.call(
+        "POST", f"/v1/orgs/{acme}/conversations", "alice", {"data_source_id": str(theirs)}
+    )
+
+    assert status == 404
+
+    _, conversations = await api.call("GET", f"/v1/orgs/{acme}/conversations", "alice")
+    assert conversations == [], "a refused conversation must not have been written"
+
+
 async def test_a_run_from_another_organization_is_not_found(api: Api) -> None:
     """The tenant boundary, over HTTP. Alice is in both, which is the sharper case."""
     acme = await _org(api)

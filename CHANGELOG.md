@@ -37,6 +37,13 @@ under "Unreleased", only for changes a user would notice.
   knowing its address.
 
 ### Added
+- A conversation is started against a chosen database, and every question in it
+  is answered from that one. An organization with a single database needs no
+  choice; one with several will say so rather than pick for you.
+- The evidence behind an answer can be opened: the exact query that was run, the
+  tables it read, how many rows came back and how long it took, and a preview of
+  those rows with any masked column still masked. A query the platform refused to
+  send shows what refused it instead of an empty result.
 - Conversations: ask a question and get back a run to follow. Each run carries
   its status, its answer when there is one, the findings behind it, and a
   step-by-step trace you can re-read from any point — so a refreshed page picks

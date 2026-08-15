@@ -59,6 +59,11 @@
     "contributor": "allow",
     "reader": "allow"
   },
+  "GET /v1/orgs/{org_id}/runs/{run_id}/executions/{execution_id}": {
+    "admin": "allow",
+    "contributor": "allow",
+    "reader": "allow"
+  },
   "PATCH /v1/orgs/{org_id}/data-sources/{data_source_id}": {
     "admin": "allow",
     "contributor": "deny(403)",
