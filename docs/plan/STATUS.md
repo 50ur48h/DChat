@@ -2,21 +2,19 @@
 
 Current position: **Phases 0–5 signed off. Phase 6 merged, its gate partially
                   met and deliberately unticked. Phase 7 is under way: WP7.1
-                  (#36) and WP7.2a (#37) are merged; WP7.2b is built with
-                  its PR open.** The agent can now answer a question end to end
-                  — context, SQL, one repair, a cited answer — driven by a
-                  direct call. What is missing is the thing that *makes* that
-                  call when somebody asks.
-Next step:        Phase 7 / **WP7.2c** (`p7.2c-background-runs`) — an in-process
-                  background task per the owner's 2026-08-15 decision, the
-                  orphan sweep, route wiring and the live smoke. Spec in the
-                  "Next step" section near the end of this file. **B-039 must
-                  close before Phase 8.**
+                  (#36), WP7.2a (#37) and WP7.2b (#38) are merged; WP7.2c
+                  is built with its PR open.** Asking a question over HTTP now
+                  answers 202 and an answer arrives on the run — the product
+                  does the thing it is for, end to end, for the first time.
+Next step:        Phase 7 / **B-039** (P1, `b039-findable-tables`) — a table must
+                  be findable by its own name. Take it **before** WP7.3, so the
+                  chat UI is built against search that works, and it must close
+                  before Phase 8 either way. Then WP7.3, the gate PR.
 Merge policy: ASK
-Blocked on user: **WP7.2b's PR needs a review decision.** An Anthropic API key
+Blocked on user: **WP7.2c's PR needs a review decision.** An Anthropic API key
                  would close B-029 and the Phase 6 gate; it blocks no Phase 7
                  work.
-Last updated: 2026-08-15 by Claude Code (WP7.2b)
+Last updated: 2026-08-15 by Claude Code (WP7.2c)
 
 ---
 
@@ -412,7 +410,27 @@ Prefer an edit that fails loudly over one that prints "done".
       17 new tests; `runner.py` at **99%**, `agent/` at **96%**. `fake_llm` and
       `llm_fixture` moved to the tests root so the agent suite and the LLM suite
       share one definition rather than drifting apart
-- [ ] WP7.2c Background execution + orphan sweep + route wiring + live smoke
+- [x] WP7.2c Background execution + orphan sweep + route wiring + live smoke
+      — a queued run now actually starts. `POST …/messages` schedules an
+      **in-process background task** and still answers 202 immediately
+      (architecture 0.2.4, owner's decision 2026-08-15). No queue.
+      **The data source is never guessed at.** One registered source is used;
+      anything else refuses and names the choices, because a silently wrong
+      database produces a confident, correctly-cited answer about somebody
+      else's data — the worst output this product can generate, and the only one
+      with nothing about it that looks wrong. The demo org has two sources, so
+      asking there refuses until a later WP lets the conversation carry one;
+      `scripts/agent_smoke.py` takes `--source` for exactly that reason.
+      **A restart leaves no run claiming to run.** The lifespan sweeps anything
+      left `queued`, `running` or `validating` to **`interrupted`** — never
+      `failed` — with a reason that says the service restarted and that nothing
+      was wrong with the question, so nobody goes hunting for a bug in their SQL.
+      A per-org semaphore (2, arch 8.4) stops questions being a way to spawn
+      unbounded tasks, and the scheduler keeps strong references to its tasks
+      because asyncio does not — a collected task is a run that simply stops.
+      19 new tests, including the first true end-to-end: **a question over HTTP
+      returns 202 and the answer arrives on the run**. Raised **B-040 (P1)**,
+      which this suite found by spending the owner's money
 - [ ] **B-039 (P1)** Table cards must be findable by their own name
       — pulled into Phase 7 by the owner on 2026-08-15, and it **must be closed
       before Phase 8 starts**. Not a work package: a backlog item taken as a WP,
@@ -466,87 +484,38 @@ Prefer an edit that fails loudly over one that prints "done".
 
 ## Next step
 
-Phase 7 / **WP7.2c — making a queued run actually start**
-(`p7.2c-background-runs`). Plan §6 Phase 7; architecture 0.2.4 and Part 8.2.
+Phase 7 / **B-039 — a table must be findable by its own name**
+(`b039-findable-tables`), then **WP7.3** the gate PR.
 
-Build:
+**B-039 first, and before WP7.3.** It is P1, it blocks Phase 8, and taking it
+now means the chat UI is built against search that works rather than against
+search that happens to work for `orders`. PostgreSQL's English parser reads
+`public.shops` as one *host* token, so a card is findable by its own name only
+when that name also appears as plain English in its prose — 6 of 13 rows fail on
+the live demo catalogs, `menu_items` among them.
 
-- **An in-process background task**, per the owner's decision of 2026-08-15 and
-  architecture 0.2.4. `POST …/messages` schedules `execute_run` and still answers
-  202 immediately. No queue. If this turns out wrong, record it as a deviation
-  rather than expanding scope.
-- **A per-org concurrency limit** (architecture 8.4 suggests 2). Without one,
-  a client can spawn unbounded tasks in the API process by sending questions.
-- **The orphan sweep.** A redeploy kills in-flight runs — architecture 0.2.4 says
-  so plainly and calls for them to be reconciled. On startup, any run left
-  `running` or `validating` becomes `interrupted`, which is already in the status
-  set for exactly this. Without it a killed run spins forever in the UI.
-- **Choosing the data source.** `execute_run` takes one and nothing yet picks it.
-  With one registered source the choice is trivial; with two it is a real
-  decision, and guessing silently is the wrong answer. Simplest honest rule: if
-  the org has exactly one, use it; otherwise refuse with a message naming the
-  choices, until a later WP lets the question or the conversation carry one.
-- **Live smoke** `scripts/agent_smoke.py`: "How many orders were placed in July
-  2026?" against the seed database, local and manual only, never in CI. Note
-  `orders` is one of the tables that *is* findable today (B-039), so this works.
+- Fix in `catalog/cards.py`: emit the bare table name and its
+  underscore-separated parts as plain words in the card body.
+- `card_tsv` is a **generated** column, so existing cards need their `card_text`
+  rewritten — a data migration over `catalog_tables`, not just new code.
+- `tests/agent/test_tools_live.py::test_a_table_is_not_yet_findable_by_its_own_name`
+  pins today's behaviour and **will fail** when this lands. Replace it with its
+  opposite rather than deleting it.
+- Verify against both live demo catalogs: all 13 rows findable by their own name.
 
-What WP7.2b hands it:
+Then WP7.3 — the chat UI and the e2e, per plan §6.
 
-- **`execute_run(org_id, run_id, data_source_id, …)`** — takes ids, returns a
-  `RunOutcome`, never raises for the question's sake, and always ends the run.
-  It does not know what an HTTP request is, which is the property to preserve.
-- **The run is already transitioned inside `execute_run`** — `running` on entry,
-  a terminal status in a `finally`. The scheduler must not transition it too.
-- **3 model calls, hard capped.** A background task cannot be watched, so this is
-  the bound that matters most until Phase 8's budgets arrive.
+What WP7.2c hands them:
 
-What WP7.2a hands it:
-
-- **`build_context` and `render`.** The bundle knows what it selected, so
-  `context_selected` gets a real table list rather than "some cards". Do not
-  assemble a prompt anywhere else.
-- **`default_registry()` and `ToolResult`.** One shape at every call site:
-  `ok` is the only branch, and `repairable` is the flag the single repair
-  attempt keys off — it is set for a hallucinated column, an unknown table and
-  bad arguments, and clear for an engine failure, which rewriting cannot fix.
-- **`Execution.execution_id`**, so a finding's `support` names a row somebody
-  can look up. Populate it from `RunSqlOut.execution_id`, never from anything
-  the model said.
-- **The registry emits `tool_called` and `error` itself** when handed an
-  `EventWriter`. The runner owns `plan_created`, `sql_validated` /
-  `sql_rejected`, `query_executed` and `answer_composed`; `run_started` and
-  `run_finished` come from `runs.service.transition`. Do not double-emit.
-- **B-039 is P1 and lands in this phase.** A table is not reliably findable by
-  its own name, `menu_items` among the misses, which is the table Phase 8's
-  refusal demo is about. `orders` happens to work, so the M7 smoke is safe — but
-  fix it before Phase 8 rather than after.
-
-What WP7.1 hands it:
-
-- **A run exists and has a shape.** `runs.service.transition` is the only thing
-  that may set a status, the legal moves are in `ALLOWED_TRANSITIONS`, and a
-  finished run can never move again. The runner's job is to call `transition` to
-  `running` when it picks a run up and to a terminal status exactly once — it
-  does not touch the row itself.
-- **`EventWriter` is the only way to write a trace**, bound to one run, and its
-  twenty types are closed (arch 10.3). The runner emits `plan_created`,
-  `tool_called`, `sql_validated` / `sql_rejected`, `query_executed` and
-  `answer_composed`; `run_started` and `run_finished` are already written by
-  `transition`, so do not emit them again.
-- **Payloads are built for eyes.** Short public strings out of structured tool
-  output — never raw model reasoning, never an unmasked value. Nothing enforces
-  this (**B-035**); it is a review question, so keep payload construction next to
-  the code that knows what it is saying.
-- **`record_answer` and `add_finding` exist and write their own events.** A
-  finding's `support` is a list of `query_executions.id` — that list is the
-  citation the M7 gate is about, so populate it from `dal.run`'s result rather
-  than from anything the model said.
-- **The per-run ceiling now applies to something real.** `run_id` is a foreign
-  key, so passing the run's id to `llm.complete` is what makes D-019 bound this
-  question's spend. Pass it on every call.
-- **Nothing runs a run.** `POST …/messages` leaves it `queued` and returns 202.
-  Deciding *what* picks it up — inline in the request, a background task, a
-  queue — is WP7.2's first design choice and is not settled here.
+- **Asking works end to end.** `POST …/messages` schedules a background run and
+  the answer lands on the run; the UI's job is to poll `GET …/runs/{id}` and
+  `GET …/runs/{id}/events` and render what is already there.
+- **The demo org has two data sources, so asking it refuses.** That is the
+  designed behaviour, not a bug, and WP7.3 should either let the UI pass a source
+  or leave the refusal visible — it reads perfectly well.
+- **B-040 (P1) is open and sharp**: a test with no injected settings calls a real
+  provider through the route path. Fix it with B-032 before the eval harness,
+  which will run many more of these.
 
 What Phase 6 hands it:
 

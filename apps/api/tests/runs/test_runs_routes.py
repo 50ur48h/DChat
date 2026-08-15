@@ -99,6 +99,21 @@ async def _org_with_a_reader(api: Api) -> str:
     return org_id
 
 
+async def _user_id(org_id: uuid.UUID) -> uuid.UUID:
+    """The one member of a freshly created organization."""
+    from sqlalchemy import text as sql_text
+
+    from dataagent.tenancy.session import org_session
+
+    async with org_session(org_id) as session:
+        return (
+            await session.execute(
+                sql_text("SELECT user_id FROM org_memberships WHERE org_id = :org LIMIT 1"),
+                {"org": org_id},
+            )
+        ).scalar_one()
+
+
 async def _ask(
     api: Api,
     org_id: str,
@@ -208,9 +223,23 @@ async def test_the_conversation_list_carries_what_a_sidebar_needs(api: Api) -> N
 
 
 async def test_the_trace_polls_from_where_the_client_left_off(api: Api) -> None:
-    """``?after=`` is the whole replay contract, and Phase 8's SSE reuses it."""
+    """``?after=`` is the whole replay contract, and Phase 8's SSE reuses it.
+
+    The run is created through the service rather than the route, so that nothing
+    schedules it: from WP7.2c a posted message starts a background run, and this
+    test is about the polling contract rather than about what a run does. Driving
+    the transitions by hand is what keeps the sequence under the test's control.
+    """
     org_id = await _org(api)
-    _, run_id = await _ask(api, org_id)
+    _, conversation = await api.call("POST", f"/v1/orgs/{org_id}/conversations", "alice", {})
+    asked = await service.post_message(
+        org_id=uuid.UUID(org_id),
+        user_id=await _user_id(uuid.UUID(org_id)),
+        conversation_id=uuid.UUID(str(conversation["id"])),
+        content="How many orders?",
+        idempotency_key="poll-1",
+    )
+    run_id = str(asked.run_id)
 
     status, empty = await api.call("GET", f"/v1/orgs/{org_id}/runs/{run_id}/events", "alice")
     assert status == 200
