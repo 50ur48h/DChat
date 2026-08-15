@@ -42,6 +42,11 @@ under "Unreleased", only for changes a user would notice.
   description, so a real question matched nothing at all.
 
 ### Added
+- A question is now investigated rather than answered in one shot: the agent can
+  run several queries, build on what each one told it, and stop by itself when it
+  has enough. It is bounded — a question cannot run away with your money or your
+  time — and if a limit stops it, the answer says so instead of quietly presenting
+  a partial result as a complete one.
 - Ask a question of your data in the browser and read the answer with the query
   behind it. Pick the database, type the question, watch the run report what it
   is doing, and expand any answer to see the SQL that produced it and the rows it

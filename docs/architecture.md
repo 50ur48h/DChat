@@ -264,10 +264,18 @@ class ResearchState(BaseModel):
     findings: list[Finding]           # id, statement, support: [execution_ids], confidence
     hypotheses: list[Hypothesis]      # text, status: open|supported|rejected, tested_by
     open_questions: list[str]
-    budget: BudgetState               # iterations, queries, llm_calls, tokens, wall_seconds — used/max
     critic: CriticVerdict | None
     answer: ComposedAnswer | None     # text, cited finding ids, assumptions, limitations, chart specs
 ```
+
+**The budget is stored beside this state, not inside it** (DECISIONS **D-023**).
+`BudgetState` — iterations, queries, llm_calls, tokens, wall_seconds, used against
+max — lives in `agent_runs.budget`, the column 10.1 already gives it, while
+everything above lives in `agent_runs.state`. They answer different questions and
+have different trust levels: the research state is a scratchpad the agent fills,
+whereas the budget is the ceiling the agent is *held to*, and a limit that
+travels inside the thing it limits is one bad deserialization away from being
+editable.
 
 `Finding.support` is the spine of trust: the composer may only cite findings, and findings may only cite real `query_execution` rows. This is what makes "evidence-backed" checkable rather than rhetorical.
 
@@ -298,9 +306,10 @@ stateDiagram-v2
 - **Intake** (cheap model): classify question kind; extract metrics/dimensions/time range; detect ambiguity → either proceed with a *stated assumption* or ask one clarifying question (configurable; default: proceed with stated assumptions, per your §25 principle).
 - **Context** (deterministic + retrieval): top-k schema cards by embedding + FK-neighbor expansion; semantic definitions by name/synonym; knowledge chunks; 0–2 matching skills; verified-query examples. Capability check runs here.
 - **Execute:** pick next plan step → choose tool → for SQL: generate (grounded) → **validate against catalog and policy** → repair loop (≤2) on parser/DB errors → run via DAL.
-- **Observe:** summarize result into a compact, typed summary (cheap model) — raw rows never accumulate in the prompt; the state carries summaries + execution refs.
-- **Reflect** (strong model, structured output): update findings/hypotheses/open questions; propose next step or `finish(reason)`.
+- **Observe (deterministic, in the controller):** turn the typed tool result into a compact one-line summary and an execution ref, and put *those* in the state. **Raw rows never accumulate**: a result is shown in full to exactly one prompt — the Reflect call that immediately follows it — and never again, so the prompt does not grow with the length of the investigation. No model call (DECISIONS **D-024**): this is a mechanical transformation of a typed value, and a model doing it would cost a call, vary between runs, and be able to put a number in the summary that was never in the result.
+- **Reflect** (strong model, structured output): shown the result of the step just taken, update findings/hypotheses/open questions; propose next step or `finish(reason)`. This is where a result is *interpreted*, which is why Observe does not need to be.
 - **Loop-safety (deterministic, §16 "prevent infinite loops"):** hard caps (defaults: 8 iterations, 10 queries, 20 LLM calls, 150k tokens, 240s wall); **duplicate-query hash** rejection; **monotone-progress rule** — two consecutive iterations adding no finding and resolving no open question forces Validate; malformed model output at any decision point defaults to `finish`. Budgets decrement in the controller, never in the prompt.
+- **The caps and the loop must agree, and they are checked against each other.** An iteration costs **two** model calls — Plan and Reflect — so a run that uses every iteration spends `8 × 2 = 16`, plus Intake and Compose, giving **18 against a ceiling of 20**. That headroom is the point: if a stage is ever added to the loop, or Observe is ever given a model, the iteration ceiling and the call ceiling stop fitting and one of them has to move. Three model calls per iteration would need 26 and the loop would be cut short by its own call budget rather than by its iteration budget — which is the failure D-024 was written after finding.
 
 ## 4.5 Critic / validator design (§17)
 

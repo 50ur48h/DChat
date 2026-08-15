@@ -157,8 +157,19 @@ class ResearchState(BaseModel):
     barren_iterations: int = 0
 
     def execution_ids(self) -> tuple[str, ...]:
-        """Every id this run really produced — what a citation is checked against."""
-        return tuple(reference.execution_id for reference in self.executions)
+        """The ids a citation may name — successful executions only.
+
+        A refused statement is recorded here as well, because the next planner
+        needs to know it was refused and the duplicate rule needs its hash. But
+        it produced no result, so **nothing may cite it**: a claim resting on a
+        query that never ran would be exactly the unverifiable evidence 4.2's
+        support list exists to prevent.
+        """
+        return tuple(
+            reference.execution_id
+            for reference in self.executions
+            if reference.ok and reference.execution_id
+        )
 
     def has_run(self, sql_hash: str) -> bool:
         """Whether this exact statement has already been sent (4.4).

@@ -24,6 +24,7 @@ from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from dataagent.agent import scheduler
+from dataagent.agent.loop import Reflection
 from dataagent.agent.planner import Plan
 from dataagent.agent.scheduler import (
     INTERRUPTED_REASON,
@@ -344,6 +345,12 @@ async def test_asking_over_http_answers_202_and_the_run_completes_behind_it(
             sql="SELECT count(*) AS n FROM shops", purpose="count", answerable=True, reason=""
         ).model_dump_json(),
         role="sql",
+    )
+    fake_llm.script(
+        Reflection(
+            findings=[], open_questions=[], next_purpose="", done=True, rationale="answered"
+        ).model_dump_json(),
+        role="plan",
     )
     fake_llm.script(
         FinalizeIn(
