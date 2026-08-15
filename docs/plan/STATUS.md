@@ -1,21 +1,22 @@
 # STATUS — data-agent build
 
 Current position: **Phases 0–5 signed off. Phase 6 merged, its gate partially
-                  met and deliberately unticked. Phase 7 is under way: WP7.1 is
-                  merged (#36) and WP7.2a is built with its PR open.** The
-                  product has its own record — conversations, runs, an
-                  append-only trace, findings — and now the agent has a prompt
-                  and a set of tools. Nothing drives them yet; WP7.2b does.
-Next step:        Phase 7 / **WP7.2b** (`p7.2b-single-shot`) — planner-lite, the
-                  runner, repair-or-refuse, and the live smoke. Spec in the
-                  "Next step" section near the end of this file. It is the WP
-                  that first moves a run out of `queued`.
+                  met and deliberately unticked. Phase 7 is under way: WP7.1
+                  (#36) and WP7.2a (#37) are merged; WP7.2b is built with
+                  its PR open.** The agent can now answer a question end to end
+                  — context, SQL, one repair, a cited answer — driven by a
+                  direct call. What is missing is the thing that *makes* that
+                  call when somebody asks.
+Next step:        Phase 7 / **WP7.2c** (`p7.2c-background-runs`) — an in-process
+                  background task per the owner's 2026-08-15 decision, the
+                  orphan sweep, route wiring and the live smoke. Spec in the
+                  "Next step" section near the end of this file. **B-039 must
+                  close before Phase 8.**
 Merge policy: ASK
-Blocked on user: **WP7.2a's PR needs a review decision, and it touches `dal/`**
-                 (`Execution.execution_id`), which always needs human review.
-                 Separately, an Anthropic API key would close B-029 and the
-                 Phase 6 gate; it blocks neither WP7.2b nor this merge.
-Last updated: 2026-08-15 by Claude Code (WP7.2a)
+Blocked on user: **WP7.2b's PR needs a review decision.** An Anthropic API key
+                 would close B-029 and the Phase 6 gate; it blocks no Phase 7
+                 work.
+Last updated: 2026-08-15 by Claude Code (WP7.2b)
 
 ---
 
@@ -386,11 +387,50 @@ Prefer an edit that fails loudly over one that prints "done".
       reference.
       45 new tests; `agent/` at **95%**. Raised **B-038** and **B-039** — the
       second is **P1** and was found by this suite
-- [ ] WP7.2b Planner-lite + runner + repair-or-refuse + live smoke
+- [x] WP7.2b Planner-lite + runner + repair-or-refuse
+      — WP7.2's second third. `agent/planner.py` is one `sql`-role call with a
+      closed schema; `agent/runner.py` is the single-shot state machine:
+      context -> plan -> `run_sql` -> **at most one** repair -> finalize, with a
+      hard cap of 3 model calls enforced in the controller and never in the
+      prompt (4.4).
+      Four rules, each against a specific way an agent goes wrong. **The repair
+      happens once and only for what rewriting can fix** — `ToolResult.repairable`
+      is the flag and the runner never second-guesses it, so a database that is
+      down does not buy a second billed call. **A refusal is an ending, not a
+      failure**: a run that could not answer *completes* with `answered=false`,
+      and `failed` is reserved for the platform breaking — conflating them would
+      hide real outages among honest refusals. **Citations are verified before
+      they are stored**: the model may only cite executions this run produced,
+      anything else is dropped and the trace says so, because an unresolvable
+      citation looks like evidence while being none. **Every exit ends the run
+      exactly once**, in a `finally`, because a dangling run has no symptom until
+      somebody notices a page spinning.
+      State is checkpointed at every step boundary per architecture 0.2.4, so an
+      interrupted run is explicable and Phase 8 has something to resume from.
+      The runner takes ids and never touches a request — the constraint that
+      keeps the V1.5 move behind a worker free.
+      17 new tests; `runner.py` at **99%**, `agent/` at **96%**. `fake_llm` and
+      `llm_fixture` moved to the tests root so the agent suite and the LLM suite
+      share one definition rather than drifting apart
+- [ ] WP7.2c Background execution + orphan sweep + route wiring + live smoke
+- [ ] **B-039 (P1)** Table cards must be findable by their own name
+      — pulled into Phase 7 by the owner on 2026-08-15, and it **must be closed
+      before Phase 8 starts**. Not a work package: a backlog item taken as a WP,
+      the way B-013 was in Phase 3. The reason it cannot wait is that
+      `menu_items` is one of the tables that cannot be found, and it is the table
+      Phase 8's flagship refusal demo is about — so the M8 gate would pass while
+      demonstrating nothing, which is worse than failing. Fix in the card builder
+      (emit the bare name and its underscore-separated parts as plain words) plus
+      a rebuild of the generated `card_tsv` over existing cards
 - [ ] WP7.3 e2e vs seed DB + minimal chat UI with citation          ← gate PR
 - [ ] GATE: "orders in July?" answered with citation; user sign-off
 
 ## Phase 8 — Research loop + trace (M8)
+- [ ] **B-039 (P1) must be closed before this phase starts** — the menu-items
+      refusal demo is this phase's flagship, and today the run would refuse
+      because it could not *find* `menu_items` rather than because no join path
+      exists. A gate that passes for the wrong reason is worse than one that
+      fails. Scheduled into Phase 7 (owner's call, 2026-08-15)
 - [ ] WP8.1 ResearchState + bounded loop + budgets + duplicate/progress rules
 - [ ] WP8.2 Capability check (join-graph) + honest refusal path
 - [ ] WP8.3 SSE streaming + durable replay + trace UI               ← gate PR
@@ -426,30 +466,39 @@ Prefer an edit that fails loudly over one that prints "done".
 
 ## Next step
 
-Phase 7 / **WP7.2b — the runner, and repair-or-refuse**
-(`p7.2b-single-shot`). Plan §6 Phase 7, architecture Part 4.3, 4.4 and M7.
-
-**No USER INPUT is needed to start.** The one outstanding ask is an **Anthropic
-API key**, which closes B-029 and the Phase 6 gate; it does not block Phase 7.
-When it arrives: verify its three model ids against the live account with
-`GET /v1/models` *before* writing them into `LLM_MODELS`, exactly as the OpenAI
-ids were — a pricing page is not proof a key can use a model.
+Phase 7 / **WP7.2c — making a queued run actually start**
+(`p7.2c-background-runs`). Plan §6 Phase 7; architecture 0.2.4 and Part 8.2.
 
 Build:
 
-- `agent/runner.py`, single-shot: plan (one `sql`-role call with structured
-  output, grounded in the bundle) -> `run_sql` -> on a **repairable** tool result
-  exactly **one** corrected attempt with the failure fed back -> finalize.
-  Hard cap of 3 LLM calls, enforced in the controller and never in the prompt.
-- The `finalize` tool, and the refusal path: when the repair also fails, the run
-  ends with an honest answer that names what was refused rather than an apology.
-- Whatever picks a `queued` run up. **This is WP7.2b's first design decision and
-  it is not settled** — inline in the request, a background task, or a queue.
-  Inline is the smallest thing that works and blocks a request for the length of
-  a run; a background task frees the request and needs the run to be resumable,
-  which is Phase 8's `state_json` arriving early.
-- Live smoke `scripts/agent_smoke.py`: "How many orders were placed in July
-  2026?" against the seed database, local and manual only, never in CI.
+- **An in-process background task**, per the owner's decision of 2026-08-15 and
+  architecture 0.2.4. `POST …/messages` schedules `execute_run` and still answers
+  202 immediately. No queue. If this turns out wrong, record it as a deviation
+  rather than expanding scope.
+- **A per-org concurrency limit** (architecture 8.4 suggests 2). Without one,
+  a client can spawn unbounded tasks in the API process by sending questions.
+- **The orphan sweep.** A redeploy kills in-flight runs — architecture 0.2.4 says
+  so plainly and calls for them to be reconciled. On startup, any run left
+  `running` or `validating` becomes `interrupted`, which is already in the status
+  set for exactly this. Without it a killed run spins forever in the UI.
+- **Choosing the data source.** `execute_run` takes one and nothing yet picks it.
+  With one registered source the choice is trivial; with two it is a real
+  decision, and guessing silently is the wrong answer. Simplest honest rule: if
+  the org has exactly one, use it; otherwise refuse with a message naming the
+  choices, until a later WP lets the question or the conversation carry one.
+- **Live smoke** `scripts/agent_smoke.py`: "How many orders were placed in July
+  2026?" against the seed database, local and manual only, never in CI. Note
+  `orders` is one of the tables that *is* findable today (B-039), so this works.
+
+What WP7.2b hands it:
+
+- **`execute_run(org_id, run_id, data_source_id, …)`** — takes ids, returns a
+  `RunOutcome`, never raises for the question's sake, and always ends the run.
+  It does not know what an HTTP request is, which is the property to preserve.
+- **The run is already transitioned inside `execute_run`** — `running` on entry,
+  a terminal status in a `finally`. The scheduler must not transition it too.
+- **3 model calls, hard capped.** A background task cannot be watched, so this is
+  the bound that matters most until Phase 8's budgets arrive.
 
 What WP7.2a hands it:
 

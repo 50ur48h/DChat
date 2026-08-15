@@ -17,11 +17,11 @@ from typing import Any
 
 import httpx
 import pytest
-from llm_fixture import build_settings
 from pydantic import BaseModel, ConfigDict
 
 from dataagent.llm.base import CallLimits, LLMError, LLMRequest, Message, Tags
 from dataagent.llm.openai import OpenAIProvider, strict_safe
+from llm_fixture import build_settings
 
 ORG = uuid.uuid4()
 
