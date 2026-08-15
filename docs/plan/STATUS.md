@@ -3,18 +3,19 @@
 Current position: **Phases 0–5 signed off. Phase 6 merged, its gate partially
                   met and deliberately unticked. Phase 7 is under way: WP7.1
                   (#36), WP7.2a (#37), WP7.2b (#38) and WP7.2c (#39) are
-                  merged.** Asking a question over HTTP answers 202 and an
-                  answer arrives on the run — the product does the thing it is
-                  for, end to end. **B-040 is closed and its PR is open.**
-Next step:        Phase 7 / **B-039** (P1, `b039-findable-tables`) — a table must
-                  be findable by its own name. Take it **before** WP7.3, so the
-                  chat UI is built against search that works; it must close
-                  before Phase 8 either way. Then WP7.3, the gate PR.
+                  merged, and B-040 (#40) with them.** Asking a question over HTTP
+                  answers 202 and an answer arrives on the run — the product
+                  does the thing it is for, end to end. **B-039 is closed and
+                  its PR is open**; only the UI is missing.
+Next step:        Phase 7 / **WP7.3** (`p7.3-chat-ui`) — the chat UI and the
+                  e2e. **This is the Phase 7 gate PR**, so it ends with a manual
+                  test script. Spec in the "Next step" section near the end of
+                  this file.
 Merge policy: ASK
-Blocked on user: **B-040's PR needs a review decision.** An Anthropic API key
+Blocked on user: **B-039's PR needs a review decision.** An Anthropic API key
                  would close B-029 and the Phase 6 gate; it blocks no Phase 7
                  work.
-Last updated: 2026-08-15 by Claude Code (B-040)
+Last updated: 2026-08-15 by Claude Code (B-039)
 
 ---
 
@@ -443,15 +444,27 @@ Prefer an edit that fails loudly over one that prints "done".
       having proved nothing. Opt-out is `@pytest.mark.live_provider`, carried by
       exactly one test that wants a non-stub on purpose. Four tests exercise the
       guard itself, because a guard that has never fired is one nobody has tested
-- [ ] **B-039 (P1)** Table cards must be findable by their own name
-      — pulled into Phase 7 by the owner on 2026-08-15, and it **must be closed
-      before Phase 8 starts**. Not a work package: a backlog item taken as a WP,
-      the way B-013 was in Phase 3. The reason it cannot wait is that
-      `menu_items` is one of the tables that cannot be found, and it is the table
-      Phase 8's flagship refusal demo is about — so the M8 gate would pass while
-      demonstrating nothing, which is worse than failing. Fix in the card builder
-      (emit the bare name and its underscore-separated parts as plain words) plus
-      a rebuild of the generated `card_tsv` over existing cards
+- [x] **B-039 (P1)** Table cards are findable by their own name
+      — pulled into Phase 7 by the owner on 2026-08-15 and closed before Phase 8,
+      because `menu_items` was one of the tables that could not be found and it
+      is the table Phase 8's flagship refusal demo is about: the M8 gate would
+      have passed while demonstrating nothing, which is worse than failing.
+      **The fix was smaller than the plan assumed, because the tokenizer was
+      measured rather than guessed at.** A *bare* `menu_items` already splits to
+      `'menu'`+`'item'` — PostgreSQL only makes a host token out of the
+      *qualified* `public.menu_items`. So no underscore-splitting was needed:
+      `build_card` opens `shops (public.shops) is a table …` and that is the
+      whole change. Putting the name first also ranks it higher, since
+      `ts_rank_cd` weighs proximity.
+      Revision **0013** rewrites cards written before it — a guarded SQL
+      transformation rather than a regeneration, because a migration that
+      imports `build_card` stops meaning the same thing the moment that code
+      moves on. `card_tsv` is generated, so writing `card_text` rebuilt the
+      index, which is what revision 0009 introduced it for.
+      Live: **6 of 13** findable by their own name became **13 of 13**, and
+      "menu items" now returns exactly the two `menu_items` tables and nothing
+      else. Three migration tests cover real rows, because an empty database
+      proves nothing about a data migration
 - [ ] WP7.3 e2e vs seed DB + minimal chat UI with citation          ← gate PR
 - [ ] GATE: "orders in July?" answered with citation; user sign-off
 
@@ -496,38 +509,41 @@ Prefer an edit that fails loudly over one that prints "done".
 
 ## Next step
 
-Phase 7 / **B-039 — a table must be findable by its own name**
-(`b039-findable-tables`), then **WP7.3** the gate PR.
+Phase 7 / **WP7.3 — the chat UI and the e2e** (`p7.3-chat-ui`).
+Plan §6 Phase 7, architecture Part 10.2. **This is the Phase 7 gate PR.**
 
-**B-039 first, and before WP7.3.** It is P1, it blocks Phase 8, and taking it
-now means the chat UI is built against search that works rather than against
-search that happens to work for `orders`. PostgreSQL's English parser reads
-`public.shops` as one *host* token, so a card is findable by its own name only
-when that name also appears as plain English in its prose — 6 of 13 rows fail on
-the live demo catalogs, `menu_items` among them.
+Build:
 
-- Fix in `catalog/cards.py`: emit the bare table name and its
-  underscore-separated parts as plain words in the card body.
-- `card_tsv` is a **generated** column, so existing cards need their `card_text`
-  rewritten — a data migration over `catalog_tables`, not just new code.
-- `tests/agent/test_tools_live.py::test_a_table_is_not_yet_findable_by_its_own_name`
-  pins today's behaviour and **will fail** when this lands. Replace it with its
-  opposite rather than deleting it.
-- Verify against both live demo catalogs: all 13 rows findable by their own name.
+- Web: a conversation page — message list, composer, run status, and an answer
+  card with expandable evidence (the SQL, a rows preview, a link to the
+  execution). Polls `GET …/runs/{id}` and `GET …/runs/{id}/events`; everything it
+  needs is already on those two routes.
+- An API-level e2e with the FakeLLM scripted to the known-good SQL: the full HTTP
+  flow from user to answer, asserting the DAL execution really ran against seed
+  data and that the citation resolves.
+- **A manual test script** — numbered steps, what the user should see at each,
+  and the failure case. Every gate PR ends with one (CLAUDE.md).
 
-Then WP7.3 — the chat UI and the e2e, per plan §6.
+Two things to settle early:
 
-What WP7.2c hands them:
+- **`GET …/runs/{r}/executions/{q}` does not exist** (**B-034**). It is in
+  architecture 10.2 and it is what turns a citation into something a person can
+  click. The evidence panel needs it, so it belongs in this WP.
+- **The demo org has two data sources, so a question there refuses** by design
+  (WP7.2c). Either the UI passes a source or the refusal stays visible — it
+  reads well as a message, but the gate demo has to account for it. A new route
+  directory under `apps/web/src/app/` needs the web container restarted
+  (CLAUDE.md), or it 404s in a way that looks like a routing bug.
 
-- **Asking works end to end.** `POST …/messages` schedules a background run and
-  the answer lands on the run; the UI's job is to poll `GET …/runs/{id}` and
-  `GET …/runs/{id}/events` and render what is already there.
-- **The demo org has two data sources, so asking it refuses.** That is the
-  designed behaviour, not a bug, and WP7.3 should either let the UI pass a source
-  or leave the refusal visible — it reads perfectly well.
-- **B-040 (P1) is open and sharp**: a test with no injected settings calls a real
-  provider through the route path. Fix it with B-032 before the eval harness,
-  which will run many more of these.
+What Phase 7 hands it:
+
+- **The whole path works headlessly.** `POST …/messages` schedules a run, the
+  runner answers or honestly refuses, and the answer, findings and trace are on
+  the run. WP7.3 renders what is already there rather than adding behaviour.
+- **`search_tables` now finds a table by its own name** (B-039), so the UI is
+  built against search that works rather than search that worked for `orders`.
+- **No test may call a real model** (B-040). Keep it that way: the e2e scripts
+  the FakeLLM, and CI has no key.
 
 What Phase 6 hands it:
 

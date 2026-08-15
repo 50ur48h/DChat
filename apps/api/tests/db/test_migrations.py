@@ -134,3 +134,128 @@ def test_there_is_exactly_one_head(alembic_config: Config) -> None:
     script = ScriptDirectory.from_config(alembic_config)
 
     assert len(script.get_heads()) == 1
+
+
+# ---------------------------------------------------------------------------
+# Revision 0013 rewrites data, so an empty database proves nothing about it
+# ---------------------------------------------------------------------------
+
+
+def _write(url: URL, statements: list[tuple[str, dict[str, object]]]) -> None:
+    async def run() -> None:
+        engine = create_async_engine(url)
+        try:
+            async with engine.begin() as connection:
+                for statement, params in statements:
+                    await connection.execute(text(statement), params)
+        finally:
+            await engine.dispose()
+
+    asyncio.run(run())
+
+
+def _seed_a_card(url: URL, card_text: str) -> str:
+    """One catalogued table carrying a card, written as revision 0012 left it."""
+    org = "11111111-1111-1111-1111-111111111111"
+    _write(
+        url,
+        [
+            ("SELECT set_config('app.org_id', :org, false)", {"org": org}),
+            ("INSERT INTO organizations (id, name) VALUES (:org, 'Cards')", {"org": org}),
+            (
+                "INSERT INTO data_sources (id, org_id, name, engine, host_display, secret_ref) "
+                "VALUES ('22222222-2222-2222-2222-222222222222', :org, 'src', 'pg', "
+                "'db:5432/x', 'ref')",
+                {"org": org},
+            ),
+            (
+                "INSERT INTO catalog_snapshots (id, org_id, data_source_id, version, status) "
+                "VALUES ('33333333-3333-3333-3333-333333333333', :org, "
+                "'22222222-2222-2222-2222-222222222222', 1, 'active')",
+                {"org": org},
+            ),
+            (
+                "INSERT INTO catalog_tables (org_id, snapshot_id, schema_name, table_name, "
+                "kind, structural_hash, card_text) VALUES (:org, "
+                "'33333333-3333-3333-3333-333333333333', 'public', 'menu_items', 'table', "
+                "'hash', :card)",
+                {"org": org, "card": card_text},
+            ),
+        ],
+    )
+    return org
+
+
+def _card_of(url: URL, org: str) -> tuple[str, bool]:
+    """The stored card, and whether its index matches the table's own name."""
+
+    async def run() -> tuple[str, bool]:
+        engine = create_async_engine(url)
+        try:
+            async with engine.connect() as connection:
+                await connection.execute(
+                    text("SELECT set_config('app.org_id', :org, false)"), {"org": org}
+                )
+                row = (
+                    await connection.execute(
+                        text(
+                            "SELECT card_text, "
+                            "card_tsv @@ websearch_to_tsquery('english', table_name) AS findable "
+                            "FROM catalog_tables"
+                        )
+                    )
+                ).one()
+                return row.card_text, row.findable
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(run())
+
+
+OLD_CARD = "public.menu_items is a table with about 40 rows.\nColumns (2):"
+NEW_CARD = "menu_items (public.menu_items) is a table with about 40 rows.\nColumns (2):"
+
+
+def test_0013_makes_an_existing_card_findable_by_its_own_name(
+    alembic_config: Config, temp_database: URL
+) -> None:
+    """The whole point of the revision, and an empty database cannot show it.
+
+    A card written before B-039 named its table only in qualified form, which
+    PostgreSQL's English parser reads as one host token — so the card could not
+    be found by searching for the table's name.
+    """
+    command.upgrade(alembic_config, "0012")
+    org = _seed_a_card(temp_database, OLD_CARD)
+
+    _, findable_before = _card_of(temp_database, org)
+    assert findable_before is False, "the fixture is not reproducing the defect"
+
+    command.upgrade(alembic_config, "0013")
+
+    card_after, findable_after = _card_of(temp_database, org)
+    assert card_after == NEW_CARD
+    assert findable_after is True
+
+
+def test_0013_leaves_a_card_that_is_already_correct_alone(
+    alembic_config: Config, temp_database: URL
+) -> None:
+    """The LIKE guard. Re-running must not prepend the name a second time, and a
+    database that already holds new-format cards must come through untouched."""
+    command.upgrade(alembic_config, "0012")
+    org = _seed_a_card(temp_database, NEW_CARD)
+
+    command.upgrade(alembic_config, "0013")
+
+    assert _card_of(temp_database, org)[0] == NEW_CARD
+
+
+def test_0013_can_be_undone(alembic_config: Config, temp_database: URL) -> None:
+    command.upgrade(alembic_config, "0012")
+    org = _seed_a_card(temp_database, OLD_CARD)
+    command.upgrade(alembic_config, "0013")
+
+    command.downgrade(alembic_config, "0012")
+
+    assert _card_of(temp_database, org)[0] == OLD_CARD

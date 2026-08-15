@@ -40,25 +40,38 @@ async def test_search_tables_finds_tables_by_ordinary_words(context: ToolContext
     assert all(match.card for match in result.data.matches)
 
 
-async def test_a_table_is_not_yet_findable_by_its_own_name(context: ToolContext) -> None:
-    """A defect this suite found, pinned so that fixing it fails here (**B-039**).
+async def test_a_table_is_findable_by_its_own_name(context: ToolContext) -> None:
+    """The opposite of the test this replaces (**B-039**, closed).
 
-    A card's headline names its table as ``public.shops``, and PostgreSQL's
+    A card used to name its table only as ``public.shops``, and PostgreSQL's
     English parser reads ``word.word`` as a single *host* token — so
-    ``to_tsvector('english','public.shops')`` is ``'public.shops'`` while
+    ``to_tsvector('english','public.shops')`` was ``'public.shops'`` while
     ``websearch_to_tsquery('english','shops')`` is ``'shop'``, and the two never
-    match. A table is findable by its own name only when that name happens to
-    appear as a plain English word somewhere else in its prose.
+    met. Six of thirteen cards in the demo catalogs were unfindable by their own
+    name, ``menu_items`` among them; the rest worked only because the word
+    appeared again in their prose.
 
-    On the live demo catalogs that is 7 tables of 13; the misses include
-    ``menu_items``, which is the table Phase 8's flagship refusal demo is about.
-    When B-039 lands, this test should start failing and be replaced by its
-    opposite.
+    Cards now open with the bare name, so this holds for every table rather than
+    for the lucky ones.
     """
-    result = await default_registry().call(context, "search_tables", {"query": "shops"})
+    for table in ("shops", "regions", "products", "people", "busy_shops"):
+        result = await default_registry().call(context, "search_tables", {"query": table})
+
+        assert isinstance(result.data, SearchTablesOut)
+        assert table in {match.table_name for match in result.data.matches}, (
+            f"{table} cannot be found by its own name"
+        )
+
+
+async def test_the_best_match_for_a_name_is_the_table_with_that_name(
+    context: ToolContext,
+) -> None:
+    """Findable is not enough if it ranks below three tables that merely mention
+    it — the agent is given the top few, so position is what decides."""
+    result = await default_registry().call(context, "search_tables", {"query": "regions"})
 
     assert isinstance(result.data, SearchTablesOut)
-    assert "shops" not in {match.table_name for match in result.data.matches}
+    assert result.data.matches[0].table_name == "regions"
 
 
 async def test_a_search_that_matches_nothing_says_so_rather_than_returning_silence(
