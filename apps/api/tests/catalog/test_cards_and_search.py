@@ -114,7 +114,9 @@ async def test_a_card_describes_the_table_in_words(
 
     card = await _card(org_id, source_id, "shops")
 
-    assert card.startswith("public.shops is a table")
+    # The bare name first, then the qualified one (B-039). A card that named its
+    # table only as `public.shops` could not be found by searching for "shops".
+    assert card.startswith("shops (public.shops) is a table")
     assert "Columns (4):" in card
     assert "- name (text, required)" in card
     assert "Trading name." in card, "a column comment is the best sentence in a card"

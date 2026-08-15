@@ -145,9 +145,25 @@ def _relationship_lines(card: CardInput) -> list[str]:
 
 def build_card(card: CardInput) -> str:
     """The card, as text. Deterministic: the same catalog always renders the same
-    words, so a re-profile that changed nothing changes no card either."""
+    words, so a re-profile that changed nothing changes no card either.
+
+    **The bare table name comes first, and that is load-bearing** (B-039).
+    PostgreSQL's English parser reads ``public.shops`` as a single *host* token,
+    so a card that named its table only in qualified form could not be found by
+    searching for ``shops`` — ``to_tsvector('english','public.shops')`` is
+    ``'public.shops'`` while ``websearch_to_tsquery('english','shops')`` is
+    ``'shop'``, and the two never meet. Six of the thirteen cards in the demo
+    catalogs were unfindable by their own name; the ones that worked did so only
+    because the word happened to appear again in their prose.
+
+    The bare form needs no help beyond being bare: ``menu_items`` on its own
+    tokenises to ``'menu'`` and ``'item'``, because the parser splits on the
+    underscore once there is no host to mistake it for. Putting it first also
+    ranks it higher — ``ts_rank_cd`` weighs proximity, and the name is the most
+    on-topic thing a card says about itself.
+    """
     name = _qualified(card.schema_name, card.table_name)
-    opening = f"{name} is a {card.kind}"
+    opening = f"{card.table_name} ({name}) is a {card.kind}"
     if card.row_estimate is not None:
         opening += f" with about {card.row_estimate:,} rows"
     opening += "."
