@@ -46,6 +46,16 @@ class Execution:
 
     validated: Validated
     frame: MaskedFrame
+    #: The ``query_executions`` row this became. Filled in by ``service.run``
+    #: after it records, and **None from the executor alone** — which is honest,
+    #: because the executor does not write the row and nothing but the front door
+    #: should be calling it.
+    #:
+    #: It is here because a citation has to name something a person can look up
+    #: (architecture 4.2: findings may only cite real ``query_execution`` rows).
+    #: The alternative was for the agent to re-find its own row by hash, which
+    #: would be a guess dressed as a reference.
+    execution_id: uuid.UUID | None = None
 
     @property
     def sql(self) -> str:

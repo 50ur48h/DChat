@@ -17,6 +17,7 @@ from catalog_fixture import build_source
 
 from dataagent.connectors.base import ConnectorError, ResultFrame
 from dataagent.dal import service
+from dataagent.dal.audit_hook import Recorded
 from dataagent.dal.errors import PolicyViolation, ViolationCode
 from dataagent.dal.executor import Execution
 from dataagent.dal.masking import mask_frame, styles_for
@@ -28,11 +29,15 @@ class Recorder:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
+        #: What the stubbed ``record_success`` hands back. `dal.run` puts this on
+        #: the returned `Execution` so a citation can name a row (WP7.2a), so a
+        #: stub returning None would be a stub of the wrong shape.
+        self.execution_id = uuid.uuid4()
 
     def hook(self, name: str) -> Any:
         async def record(**kwargs: Any) -> Any:
             self.calls.append((name, kwargs))
-            return None
+            return Recorded(execution_id=self.execution_id)
 
         return record
 
@@ -89,6 +94,34 @@ async def test_a_query_that_ran_is_recorded_as_a_success(
 
     assert recorder.names == ["record_success"]
     assert execution.row_count == 1
+
+
+async def test_the_recorded_row_id_comes_back_on_the_execution(
+    recorder: Recorder, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What makes a citation checkable (architecture 4.2, WP7.2a).
+
+    A finding may only cite a real ``query_executions`` row, so the agent has to
+    learn the id of the row this call just wrote. The executor cannot supply it —
+    it does not do the writing — so the front door is the only layer that can,
+    and the alternative was the agent re-finding its own row by hash, which is a
+    guess dressed as a reference.
+    """
+    _executes(monkeypatch, _execution())
+
+    execution = await run(store=object())  # pyright: ignore[reportArgumentType]
+
+    assert execution.execution_id == recorder.execution_id
+
+
+async def test_an_execution_the_front_door_did_not_record_has_no_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """None is the honest answer, not a placeholder: the executor on its own
+    wrote no row, and nothing but the front door should be calling it."""
+    _executes(monkeypatch, _execution())
+
+    assert _execution().execution_id is None
 
 
 async def test_a_refusal_is_recorded_and_then_re_raised(
