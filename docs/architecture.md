@@ -664,19 +664,26 @@ CREATE TABLE agent_runs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   org_id UUID NOT NULL REFERENCES organizations(id),
   conversation_id UUID NOT NULL REFERENCES conversations(id),
-  user_id UUID NOT NULL REFERENCES users(id),
+  user_id UUID REFERENCES users(id),
   status TEXT NOT NULL CHECK (status IN
     ('queued','running','validating','completed','interrupted','failed','budget_exhausted')),
   question TEXT NOT NULL,
   budget JSONB NOT NULL, state JSONB NOT NULL,
   model_usage JSONB NOT NULL DEFAULT '{}', cost_estimate NUMERIC(10,4),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   started_at TIMESTAMPTZ, finished_at TIMESTAMPTZ, failure_reason TEXT
 );
 ALTER TABLE agent_runs ENABLE ROW LEVEL SECURITY;
 CREATE POLICY org_isolation ON agent_runs
   USING (org_id = current_setting('app.org_id')::uuid);
-CREATE INDEX ON agent_runs (org_id, conversation_id, started_at DESC);
+CREATE INDEX ON agent_runs (org_id, conversation_id, created_at DESC);
 ```
+
+`created_at` is when the question was asked and `started_at` is when work on it
+began; they are different moments because a run is created `queued` and executed
+afterwards, and the gap between them is the queue wait. Ordering is therefore by
+`created_at` — a run still waiting has no `started_at` to sort by, and those are
+precisely the runs a user is watching (DECISIONS **D-020**).
 
 Full table catalog (key columns only):
 
@@ -716,15 +723,23 @@ skills(id, scope global|org, org_id null, name, version, spec_md text, tags text
 agent_configs(org_id PK, instructions text, budget_overrides jsonb, model_overrides jsonb,
               tool_toggles jsonb)
 conversations(id, org_id, user_id, title, created_at)
-messages(id, org_id, conversation_id, role user|assistant, content, run_id null, created_at)
+messages(id, org_id, conversation_id, role user|assistant, content, run_id null,
+         idempotency_key null, created_at)
+         -- idempotency_key is 10.2's field on POST …/messages, kept here because
+         -- a retried send is the same question; unique per conversation, and
+         -- null for anything the agent writes (D-020)
 agent_events(id bigserial, org_id, run_id, seq, ts, type, payload jsonb, UNIQ(run_id,seq))
+              -- append-only: UPDATE and DELETE are revoked from the app role,
+              -- the same grant lock audit_log carries
 query_executions(id, org_id, run_id, data_source_id NULL ON DELETE SET NULL, actor_user_id,
                  sql_text, sql_hash, tables jsonb, columns jsonb,
                  status ok|error|refused, violation_code NULL, row_count, duration_ms,
                  error, sensitive_accessed bool, created_at)
 result_artifacts(id, org_id, query_execution_id, summary jsonb, sample_rows jsonb masked,
                  truncated bool, storage_ref NULL, expires_at, created_at)
-findings(id, org_id, run_id, statement, support jsonb, confidence)
+findings(id, org_id, run_id, statement, support jsonb, confidence high|medium|low,
+         created_at)   -- support holds query_executions.id values: the citation
+                       -- trail from a claim back to the SQL that produced it
 audit_log(id bigserial, org_id, actor_user_id, action, object_type, object_id,
           details jsonb, sensitive bool, ts)   -- append-only; no UPDATE/DELETE grants
 usage_ledger(id, org_id, ts, kind tokens|queries|runs, model, amount, cost_estimate, run_id)

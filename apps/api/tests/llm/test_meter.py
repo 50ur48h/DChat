@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from decimal import Decimal
 
 import pytest
-from llm_fixture import build_settings
+from llm_fixture import build_settings, seed_run
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -139,7 +139,7 @@ async def test_a_successful_call_records_role_tier_model_and_tokens(
     architecture 8.3's central claim rests on.
     """
     org_id, user_id = await _org(migrated_database)
-    run_id = uuid.uuid4()
+    run_id = await seed_run(migrated_database, org_id)
 
     await meter.record(
         org_id=org_id,

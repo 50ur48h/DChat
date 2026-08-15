@@ -103,6 +103,20 @@ PROBES: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
     # Searching reads cards, whose examples were masked before they were stored,
     # so it is member work like browsing.
     ("GET", "/v1/orgs/{org_id}/catalog/search", None),
+    # Asking questions and reading your own traces is granted to every role
+    # (architecture 6.2). Each role probes *its own* conversation and run — see
+    # the note on `conversations` in the Matrix fixture for why that matters.
+    ("POST", "/v1/orgs/{org_id}/conversations", {"title": "Probe"}),
+    ("GET", "/v1/orgs/{org_id}/conversations", None),
+    ("GET", "/v1/orgs/{org_id}/conversations/{conversation_id}", None),
+    ("GET", "/v1/orgs/{org_id}/conversations/{conversation_id}/messages", None),
+    (
+        "POST",
+        "/v1/orgs/{org_id}/conversations/{conversation_id}/messages",
+        {"content": "How many orders?", "idempotency_key": "probe"},
+    ),
+    ("GET", "/v1/orgs/{org_id}/runs/{run_id}", None),
+    ("GET", "/v1/orgs/{org_id}/runs/{run_id}/events", None),
     ("DELETE", "/v1/orgs/{org_id}/data-sources/{data_source_id}", None),
 )
 
@@ -132,6 +146,14 @@ class Matrix:
     users: dict[str, uuid.UUID]
     data_source_id: uuid.UUID
     column_id: uuid.UUID
+    #: A conversation and a run **per role**, because a conversation belongs to
+    #: the person who started it (architecture 6.2 grants "view *own*
+    #: conversations"). Sharing one across the three roles would record
+    #: ``deny(404)`` for two of them and make an ownership rule look like a role
+    #: rule — which is the one confusion this file exists to prevent. Ownership
+    #: itself is proved in ``tests/runs/test_runs_routes.py``.
+    conversations: dict[str, uuid.UUID]
+    runs: dict[str, uuid.UUID]
 
 
 @pytest.fixture
@@ -155,6 +177,8 @@ async def matrix_app(
     data_source_id = uuid.uuid4()
     column_id = uuid.uuid4()
     users: dict[str, uuid.UUID] = {}
+    conversations: dict[str, uuid.UUID] = {}
+    runs: dict[str, uuid.UUID] = {}
     async with owner.begin() as connection:
         await connection.execute(
             text("SELECT set_config('app.org_id', :org, true)"), {"org": str(org_id)}
@@ -180,6 +204,25 @@ async def matrix_app(
                 text("INSERT INTO org_memberships (org_id, user_id, role) VALUES (:o, :u, :r)"),
                 {"o": org_id, "u": user_id, "r": role},
             )
+            # Each probing role gets a conversation of its own, and a run in it.
+            # `spare-admin` never probes, so it needs neither.
+            if subject in ROLES:
+                conversation_id, run_id = uuid.uuid4(), uuid.uuid4()
+                conversations[subject], runs[subject] = conversation_id, run_id
+                await connection.execute(
+                    text(
+                        "INSERT INTO conversations (id, org_id, user_id, title) "
+                        "VALUES (:i, :o, :u, 'Probe')"
+                    ),
+                    {"i": conversation_id, "o": org_id, "u": user_id},
+                )
+                await connection.execute(
+                    text(
+                        "INSERT INTO agent_runs (id, org_id, conversation_id, user_id, status, "
+                        "question) VALUES (:i, :o, :c, :u, 'queued', 'How many orders?')"
+                    ),
+                    {"i": run_id, "o": org_id, "c": conversation_id, "u": user_id},
+                )
         # Port 1 is refused instantly, so the /test probe never waits on a socket.
         await connection.execute(
             text(
@@ -234,6 +277,8 @@ async def matrix_app(
             users=users,
             data_source_id=data_source_id,
             column_id=column_id,
+            conversations=conversations,
+            runs=runs,
         )
     finally:
         await owner.dispose()
@@ -256,15 +301,20 @@ async def test_the_role_matrix_matches_its_snapshot(matrix_app: Matrix) -> None:
     """Observe who may do what, then compare with the committed record."""
     observed: dict[str, dict[str, str]] = {}
     for method, template, body in PROBES:
-        path = template.format(
-            org_id=matrix_app.org_id,
-            user_id=matrix_app.users["spare-admin"],
-            data_source_id=matrix_app.data_source_id,
-            column_id=matrix_app.column_id,
-        ) + QUERIES.get(template, "")
         key = f"{method} {template}"
         observed[key] = {}
         for role in ROLES:
+            # Formatted per role rather than once: the conversation and run ids
+            # differ by caller, so that what is recorded here is the *role*
+            # decision and never an ownership 404 wearing its clothes.
+            path = template.format(
+                org_id=matrix_app.org_id,
+                user_id=matrix_app.users["spare-admin"],
+                data_source_id=matrix_app.data_source_id,
+                column_id=matrix_app.column_id,
+                conversation_id=matrix_app.conversations[role],
+                run_id=matrix_app.runs[role],
+            ) + QUERIES.get(template, "")
             status = await _probe(matrix_app.app, method, path, role, body)
             observed[key][role] = "allow" if status < 400 else f"deny({status})"
 
@@ -293,6 +343,16 @@ async def test_the_snapshot_says_what_the_architecture_says(matrix_app: Matrix) 
         "GET /v1/orgs/{org_id}/members",
         "GET /v1/orgs/{org_id}/data-sources",
         "GET /v1/orgs/{org_id}/data-sources/{data_source_id}",
+        # "Ask questions / view own conversations & traces" is the one line of
+        # 6.2's table that grants a Reader anything, so a Reader who cannot ask
+        # is a broken product rather than a tightened one.
+        "POST /v1/orgs/{org_id}/conversations",
+        "GET /v1/orgs/{org_id}/conversations",
+        "GET /v1/orgs/{org_id}/conversations/{conversation_id}",
+        "GET /v1/orgs/{org_id}/conversations/{conversation_id}/messages",
+        "POST /v1/orgs/{org_id}/conversations/{conversation_id}/messages",
+        "GET /v1/orgs/{org_id}/runs/{run_id}",
+        "GET /v1/orgs/{org_id}/runs/{run_id}/events",
     ):
         assert recorded[readable] == {
             "admin": "allow",

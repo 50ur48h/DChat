@@ -68,6 +68,8 @@ class SeededOrgs:
     b_snapshot: uuid.UUID
     b_table: uuid.UUID
     b_execution: uuid.UUID
+    b_conversation: uuid.UUID
+    b_run: uuid.UUID
 
 
 async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
@@ -223,12 +225,73 @@ async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
                     ),
                     {"org": org_id},
                 )
+                # The product's own record (WP7.1): a conversation, the run one
+                # question started, the message that asked it, one trace event
+                # and one finding. Seeded here because this chain is the most
+                # sensitive thing in the platform database — it holds what a
+                # customer asked and what the agent concluded, in their own
+                # words, which is worse to leak than the schema it was asked
+                # about.
+                conversation_id = (
+                    await connection.execute(
+                        text(
+                            "INSERT INTO conversations (org_id, user_id, title) VALUES "
+                            "(:org, :user, :title) RETURNING id"
+                        ),
+                        {"org": org_id, "user": user_id, "title": f"{name} questions"},
+                    )
+                ).scalar_one()
+                run_id = (
+                    await connection.execute(
+                        text(
+                            "INSERT INTO agent_runs "
+                            "(org_id, conversation_id, user_id, status, question) VALUES "
+                            "(:org, :conversation, :user, 'queued', :question) RETURNING id"
+                        ),
+                        {
+                            "org": org_id,
+                            "conversation": conversation_id,
+                            "user": user_id,
+                            "question": f"How many orders did {name} take?",
+                        },
+                    )
+                ).scalar_one()
+                await connection.execute(
+                    text(
+                        "INSERT INTO messages "
+                        "(org_id, conversation_id, role, content, run_id, idempotency_key) VALUES "
+                        "(:org, :conversation, 'user', :content, :run, :key)"
+                    ),
+                    {
+                        "org": org_id,
+                        "conversation": conversation_id,
+                        "content": f"How many orders did {name} take?",
+                        "run": run_id,
+                        "key": uuid.uuid4().hex,
+                    },
+                )
+                await connection.execute(
+                    text(
+                        "INSERT INTO agent_events (org_id, run_id, seq, type) VALUES "
+                        "(:org, :run, 1, 'run_started')"
+                    ),
+                    {"org": org_id, "run": run_id},
+                )
+                await connection.execute(
+                    text(
+                        "INSERT INTO findings (org_id, run_id, statement, confidence) VALUES "
+                        "(:org, :run, :statement, 'high')"
+                    ),
+                    {"org": org_id, "run": run_id, "statement": f"{name} took 41 orders"},
+                )
                 if org_id == org_b:
                     catalog.update(
                         data_source=data_source_id,
                         snapshot=snapshot_id,
                         table=table_id,
                         execution=execution_id,
+                        conversation=conversation_id,
+                        run=run_id,
                     )
     finally:
         await engine.dispose()
@@ -240,6 +303,8 @@ async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
         b_snapshot=catalog["snapshot"],
         b_table=catalog["table"],
         b_execution=catalog["execution"],
+        b_conversation=catalog["conversation"],
+        b_run=catalog["run"],
     )
 
 
@@ -309,6 +374,32 @@ def _forged_insert(table: str, seeded: SeededOrgs) -> str:
             "INSERT INTO column_policies "
             "(org_id, data_source_id, schema_name, table_name, column_name, policy) VALUES "
             f"('{other_org}', '{seeded.b_data_source}', 'public', 'forged', 'email', 'allow')"
+        ),
+        # Same rule as the catalog chain: every parent named here is a real row
+        # belonging to the other organization, so a foreign key cannot refuse
+        # these for the wrong reason. Only the policy is in the way.
+        "conversations": (
+            "INSERT INTO conversations (org_id, user_id, title) VALUES "
+            f"('{other_org}', '{user_id}', 'forged')"
+        ),
+        "agent_runs": (
+            "INSERT INTO agent_runs (org_id, conversation_id, user_id, status, question) VALUES "
+            f"('{other_org}', '{seeded.b_conversation}', '{user_id}', 'queued', 'forged?')"
+        ),
+        "messages": (
+            "INSERT INTO messages (org_id, conversation_id, role, content, run_id) VALUES "
+            f"('{other_org}', '{seeded.b_conversation}', 'user', 'forged', '{seeded.b_run}')"
+        ),
+        # seq 2, because the seed already wrote seq 1 for this run: a forged row
+        # that collided on the unique constraint would be refused before the
+        # policy was ever consulted.
+        "agent_events": (
+            "INSERT INTO agent_events (org_id, run_id, seq, type) VALUES "
+            f"('{other_org}', '{seeded.b_run}', 2, 'error')"
+        ),
+        "findings": (
+            "INSERT INTO findings (org_id, run_id, statement) VALUES "
+            f"('{other_org}', '{seeded.b_run}', 'forged')"
         ),
     }
     return statements[table]
@@ -609,4 +700,42 @@ async def test_audit_log_is_append_only_for_the_api_role(
         await connection.engine.dispose()
 
     for forbidden in ("UPDATE audit_log SET action = 'rewritten'", "DELETE FROM audit_log"):
+        await _expect_failure(app_database, forbidden, org_id=seeded.a, match="permission denied")
+
+
+async def test_agent_events_is_append_only_for_the_api_role(
+    app_database: URL, migrated_database: URL
+) -> None:
+    """A trace that could be edited afterwards would be a story, not a record.
+
+    ``agent_events`` is what the product shows a user as proof of how an answer
+    was reached (architecture 10.3), so it carries the same grant lock
+    ``audit_log`` has: the application role may append and may never rewrite.
+    Without this the honesty claim would rest on nobody having written an UPDATE.
+    """
+    seeded = await _seed_two_orgs(migrated_database)
+
+    connection = await _connect(app_database, seeded.a)
+    try:
+        run_id = (
+            await connection.execute(
+                text("SELECT id FROM agent_runs LIMIT 1"),
+            )
+        ).scalar_one()
+        await connection.execute(
+            text(
+                "INSERT INTO agent_events (org_id, run_id, seq, type) VALUES "
+                "(:org, :run, 2, 'run_finished')"
+            ),
+            {"org": seeded.a, "run": run_id},
+        )
+        await connection.commit()
+    finally:
+        await connection.close()
+        await connection.engine.dispose()
+
+    for forbidden in (
+        "UPDATE agent_events SET payload = '{\"tampered\": true}'::jsonb",
+        "DELETE FROM agent_events",
+    ):
         await _expect_failure(app_database, forbidden, org_id=seeded.a, match="permission denied")

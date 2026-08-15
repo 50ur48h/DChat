@@ -18,7 +18,7 @@ from collections.abc import AsyncIterator
 from decimal import Decimal
 
 import pytest
-from llm_fixture import build_settings
+from llm_fixture import build_settings, seed_run
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -121,7 +121,8 @@ async def test_a_call_with_no_run_is_not_capped(platform: URL, migrated_database
 async def test_a_run_under_its_ceiling_may_keep_going(
     platform: URL, migrated_database: URL
 ) -> None:
-    org_id, run_id = await _org(migrated_database), uuid.uuid4()
+    org_id = await _org(migrated_database)
+    run_id = await seed_run(migrated_database, org_id)
     await _spend(org_id, run_id, model="fake-strong", tokens=1000)  # $0.01
 
     await budget.assert_within_limit(
@@ -133,7 +134,8 @@ async def test_a_run_under_its_ceiling_may_keep_going(
 
 
 async def test_a_run_at_its_ceiling_is_stopped(platform: URL, migrated_database: URL) -> None:
-    org_id, run_id = await _org(migrated_database), uuid.uuid4()
+    org_id = await _org(migrated_database)
+    run_id = await seed_run(migrated_database, org_id)
     await _spend(org_id, run_id, model="fake-strong", tokens=1_000_000)  # $10.00
 
     with pytest.raises(RunCostExceededError) as raised:
@@ -155,7 +157,8 @@ async def test_only_this_run_counts_towards_this_run_s_ceiling(
     """An organization's total spend is B-025's business. A ceiling that counted
     a neighbouring run would stop work for reasons its own trace cannot explain."""
     org_id = await _org(migrated_database)
-    expensive, cheap = uuid.uuid4(), uuid.uuid4()
+    expensive = await seed_run(migrated_database, org_id)
+    cheap = await seed_run(migrated_database, org_id)
     await _spend(org_id, expensive, model="fake-strong", tokens=1_000_000)  # $10.00
 
     await budget.assert_within_limit(
@@ -169,7 +172,8 @@ async def test_only_this_run_counts_towards_this_run_s_ceiling(
 async def test_spend_is_read_back_with_its_unpriced_count(
     platform: URL, migrated_database: URL
 ) -> None:
-    org_id, run_id = await _org(migrated_database), uuid.uuid4()
+    org_id = await _org(migrated_database)
+    run_id = await seed_run(migrated_database, org_id)
     await _spend(org_id, run_id, model="fake-strong", tokens=1000)  # priced: $0.01
     await _spend(org_id, run_id, model="mystery-model", tokens=1000)  # unpriced: NULL
 
@@ -205,7 +209,8 @@ async def test_a_run_holding_unpriced_calls_cannot_be_capped_honestly(
 ) -> None:
     """Even for a priced model: part of this run's spend is unknown, so the
     remaining headroom is unknown too."""
-    org_id, run_id = await _org(migrated_database), uuid.uuid4()
+    org_id = await _org(migrated_database)
+    run_id = await seed_run(migrated_database, org_id)
     await _spend(org_id, run_id, model="mystery-model", tokens=1000)
 
     with pytest.raises(RunCostExceededError, match="unknown cost"):
