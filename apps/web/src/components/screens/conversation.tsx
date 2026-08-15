@@ -223,7 +223,16 @@ function RunProgress({ run, step }: { run: Run; step: string | null }) {
  * completed, and the reply explains why the data could not answer. What is
  * absent then is the findings list, because a refusal concluded nothing.
  */
-function AnswerCard({ orgId, run }: { orgId: string; run: Run }) {
+function AnswerCard({
+  orgId,
+  run,
+  replied,
+}: {
+  orgId: string;
+  run: Run;
+  /** Whether this run's reply is already in the thread above. */
+  replied: boolean;
+}) {
   const failed = run.status === "failed";
   return (
     <Card tone="sunken">
@@ -241,7 +250,14 @@ function AnswerCard({ orgId, run }: { orgId: string; run: Run }) {
             "Something went wrong on our side while answering this. Nothing was wrong with the question."}
         </p>
       ) : (
-        <Findings orgId={orgId} runId={run.id} findings={run.findings} answer={run.answer} />
+        <>
+          {/* The run carries its own answer, so a card is never wordless even if
+              the thread has not caught up or its fetch failed. Suppressed once
+              the reply is in the list above, which is where it belongs — the
+              gate found this card showing a citation and no words at all. */}
+          {!replied && run.answer && <p className={styles.findingStatement}>{run.answer}</p>}
+          <Findings orgId={orgId} runId={run.id} findings={run.findings} answer={run.answer} />
+        </>
       )}
     </Card>
   );
@@ -267,6 +283,10 @@ export function ConversationThread({
   // than a second run and a second bill.
   const idempotencyKey = useRef<string | null>(null);
 
+  // The run whose thread has already been re-read after it finished, so the
+  // reload below happens exactly once per run.
+  const reconciled = useRef<string | null>(null);
+
   const api = useMemo(() => createApi(session.getToken), [session.getToken]);
 
   const loadThread = useCallback(async () => {
@@ -291,7 +311,11 @@ export function ConversationThread({
       // architecture 10.3's whole point is that the record outlives the tab.
       if (details?.last_run_id) {
         try {
-          setRun(await api.run(orgId, details.last_run_id));
+          const existing = await api.run(orgId, details.last_run_id);
+          // The thread was just read, so a run that had already finished needs
+          // no reload — say so rather than paying for a second fetch below.
+          if (TERMINAL.has(existing.status)) reconciled.current = existing.id;
+          setRun(existing);
         } catch {
           // A run that will not load is not worth blocking the thread over; the
           // messages are the conversation, and they are already shown.
@@ -300,11 +324,27 @@ export function ConversationThread({
     })();
   }, [loadThread, api, orgId]);
 
-  // Watch a live run until it stops. The interval is cleared on unmount and on
-  // the first terminal status, so a page left open does not poll forever.
+  const runId = run?.id ?? null;
+  const runStatus = run?.status ?? null;
+  const live = runId !== null && runStatus !== null && !TERMINAL.has(runStatus);
+
+  /**
+   * Watch a live run until it stops.
+   *
+   * **Keyed on the run's id and whether it is live — never on the run object.**
+   * Depending on `run` made this effect cancel itself: `setRun(latest)` inside
+   * the tick triggered a re-render, whose cleanup set `cancelled`, and the
+   * guard after the next `await` then returned before the thread could be
+   * reloaded. The effect re-ran, saw a terminal status and stopped, so the
+   * answer text never arrived — every reply rendered one message behind, which
+   * is what the Phase 7 gate caught. Reloading is now a separate effect below,
+   * which cannot be cancelled by the write that triggers it.
+   *
+   * The interval is cleared on unmount and as soon as `live` goes false, so a
+   * page left open does not poll forever.
+   */
   useEffect(() => {
-    const runId = run?.id;
-    if (!runId || (run && TERMINAL.has(run.status))) return;
+    if (!live || runId === null) return;
 
     let cancelled = false;
     let seq = 0;
@@ -313,20 +353,15 @@ export function ConversationThread({
       try {
         const latest = await api.run(orgId, runId);
         if (cancelled) return;
-        setRun(latest);
-
         const trace = await api.runEvents(orgId, runId, seq);
         if (cancelled) return;
         seq = trace.last_seq;
         const last = trace.events.at(-1);
         if (last) setStep(STEP_WORDS[last.type] ?? null);
-
-        if (TERMINAL.has(latest.status)) {
-          setStep(null);
-          // The reply is a message like any other, so the thread is reloaded
-          // rather than the answer being spliced in from the run.
-          await loadThread();
-        }
+        // Written last, after every await: a state write mid-tick is what
+        // caused the bug above, and doing it here means nothing follows it that
+        // a re-render could interrupt.
+        setRun(latest);
       } catch {
         // A dropped poll is not worth an error banner: the next tick asks again,
         // and the run is unaffected by whether anyone is watching.
@@ -339,7 +374,30 @@ export function ConversationThread({
       cancelled = true;
       clearInterval(timer);
     };
-  }, [api, orgId, run, loadThread]);
+  }, [api, orgId, runId, live]);
+
+  /**
+   * When a run finishes, re-read the thread — the reply is a message like any
+   * other, and `POST …/messages` never returned it.
+   *
+   * Separate from the poll on purpose, and once per run: `reconciled` holds the
+   * id already reloaded for, so a re-render cannot fetch the same thread twice
+   * and a run whose page was opened after it finished is not re-fetched at all.
+   */
+  useEffect(() => {
+    if (runId === null || runStatus === null || !TERMINAL.has(runStatus)) return;
+    if (reconciled.current === runId) return;
+    reconciled.current = runId;
+
+    let active = true;
+    void (async () => {
+      await loadThread();
+      if (active) setStep(null);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [runId, runStatus, loadThread]);
 
   const send = useCallback(async () => {
     const question = draft.trim();
@@ -363,8 +421,10 @@ export function ConversationThread({
     }
   }, [api, orgId, conversationId, draft, sending, loadThread]);
 
-  const live = run !== null && !TERMINAL.has(run.status);
   const answered = run !== null && TERMINAL.has(run.status);
+  const replied =
+    run !== null &&
+    messages.some((message) => message.role === "assistant" && message.run_id === run.id);
 
   return (
     <Stack>
@@ -403,7 +463,7 @@ export function ConversationThread({
       </ol>
 
       {live && run && <RunProgress run={run} step={step} />}
-      {answered && run && <AnswerCard orgId={orgId} run={run} />}
+      {answered && run && <AnswerCard orgId={orgId} run={run} replied={replied} />}
 
       <Card>
         <label className={styles.composerLabel} htmlFor="question">

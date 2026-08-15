@@ -632,7 +632,22 @@ Prefer an edit that fails loudly over one that prints "done".
       resend replays the same question (D-019). And the **answer is not printed
       twice** — in single-shot the finding statement *is* the answer, so the card
       shows the evidence affordance and not a restatement; a test caught that.
-      18 new web tests (72 total, all green), `tsc` and `eslint` clean, and both
+      **The first attempt at this PR failed its own gate, and the record says
+      so** (**B-044**, P1). The owner walked the script in a browser and found
+      every reply rendering one message behind: the card showed a confidence
+      badge and an openable citation and **no answer text**, because nothing
+      re-read the thread when a run finished. The poll effect depended on the
+      whole `run` object, so `setRun` inside a tick cancelled the very tick that
+      was meant to reload the messages. The backend was right the whole time —
+      3,718, correct SQL, correct refusal — which is what made it read as a
+      rendering nicety rather than as the gate failing.
+      Two things worth carrying forward. **It was a race, not a logic error**:
+      the first regression test written for it *passed against the broken code*,
+      because a stub resolving in a microtask beats React's commit; only a stub
+      with real latency orders the two the way a browser does. And **a headless
+      check would never have caught it** — the API was correct at every step, so
+      only a person clicking found it.
+      22 new web tests (76 total, all green), `tsc` and `eslint` clean, and both
       new routes present in the production build.
       Verified live against the seeded pizza database before writing the script,
       per the owner's standing instruction: *"How many orders were placed in July
