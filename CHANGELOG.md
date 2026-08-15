@@ -42,6 +42,11 @@ under "Unreleased", only for changes a user would notice.
   description, so a real question matched nothing at all.
 
 ### Added
+- Ask a question of your data in the browser and read the answer with the query
+  behind it. Pick the database, type the question, watch the run report what it
+  is doing, and expand any answer to see the SQL that produced it and the rows it
+  returned. When the data cannot answer, it says so and says why, rather than
+  guessing.
 - A conversation is started against a chosen database, and every question in it
   is answered from that one. An organization with a single database needs no
   choice; one with several will say so rather than pick for you.

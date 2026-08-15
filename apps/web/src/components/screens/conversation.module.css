@@ -1,0 +1,134 @@
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fromUser,
+.fromAgent {
+  padding: var(--space-4);
+  border-radius: var(--radius-lg);
+  max-width: 68ch;
+}
+
+/* The asker's own words sit right and tinted; the agent's sit left on a plain
+   surface. Position carries the distinction as well as colour, so it survives
+   for anyone who cannot see the tint. */
+.fromUser {
+  align-self: flex-end;
+  background: var(--primary-soft);
+}
+
+.fromAgent {
+  align-self: flex-start;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.messageText {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.timestamp {
+  display: block;
+  margin-top: var(--space-2);
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.step {
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.note {
+  margin: var(--space-3) 0 0;
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 20px;
+  max-width: 68ch;
+}
+
+.failure {
+  margin: var(--space-3) 0 0;
+  color: var(--danger);
+  max-width: 68ch;
+}
+
+.findings {
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.finding {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.findingStatement {
+  margin: 0;
+  max-width: 68ch;
+}
+
+.unsupported {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.citation {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.citationToggle {
+  align-self: flex-start;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.composerLabel {
+  display: block;
+  margin-bottom: var(--space-2);
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.composer {
+  width: 100%;
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  resize: vertical;
+}
+
+.composer:focus-visible {
+  border-color: var(--primary);
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 0;
+}
+
+.composer:disabled {
+  opacity: 0.5;
+}
