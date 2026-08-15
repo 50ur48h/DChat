@@ -126,7 +126,7 @@ check.truths: ## Fail if truths.json and the seed generator disagree
 # ---------------------------------------------------------------------------
 # apps/api
 # ---------------------------------------------------------------------------
-.PHONY: install.api lint.api fmt.api typecheck.api test.api test.rls test.dal test.llm api.dev build.api llm.smoke
+.PHONY: install.api lint.api fmt.api typecheck.api test.api test.rls test.dal test.llm api.dev build.api llm.smoke agent.smoke
 install.api: ## Sync the API virtualenv from uv.lock
 	uv sync --directory $(API_DIR)
 
@@ -155,6 +155,9 @@ test.llm: ## The LLM package's suite on its own
 
 llm.smoke: ## Live provider smoke — real keys, real money, NEVER in CI
 	$(UV_API) python ../../scripts/llm_smoke.py $(ARGS)
+
+agent.smoke: ## Live agent smoke — one real question end to end, NEVER in CI
+	$(UV_API) python ../../scripts/agent_smoke.py $(ARGS)
 
 api.dev: ## uvicorn with reload on :8000
 	$(UV_API) uvicorn dataagent.main:app --host 0.0.0.0 --port 8000 --reload

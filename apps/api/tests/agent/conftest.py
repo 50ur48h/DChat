@@ -76,6 +76,16 @@ async def context(
                 text("INSERT INTO users (id, external_subject, email) VALUES (:i, :s, :e)"),
                 {"i": user_id, "s": f"sub-{user_id}", "e": "asker@example.com"},
             )
+            # A real membership, because the HTTP tests go through the route
+            # guard. Service-level tests never needed one, which is exactly how a
+            # fixture drifts from what the product requires.
+            await connection.execute(
+                text(
+                    "INSERT INTO org_memberships (org_id, user_id, role) "
+                    "VALUES (:org, :user, 'admin')"
+                ),
+                {"org": org_id, "user": user_id},
+            )
     finally:
         await engine.dispose()
 

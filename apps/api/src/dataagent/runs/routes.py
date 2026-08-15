@@ -6,13 +6,18 @@ see somebody else's conversation, and that is not a role check at all — it is 
 ownership check in ``runs/service.py``, which answers 404 rather than 403 so a
 member cannot use the difference to discover that a conversation exists.
 
-``POST …/messages`` answers **202** and a run id, not an answer. The question has
-been accepted and recorded; the work has not been done. That is true today for a
-blunt reason — WP7.2 brings the planner and nothing yet moves a run out of
-``queued`` — and it stays true afterwards, because a research run takes longer
-than a request should. The client polls ``GET …/runs/{id}`` for status and
-``GET …/runs/{id}/events`` for the trace; Phase 8 turns the second into SSE over
-the same rows, which is why the poll response already carries ``last_seq``.
+``POST …/messages`` answers **202** and a run id, not an answer. The question is
+accepted and recorded, and the work happens in a background task (architecture
+0.2.4) — a research run takes thirty seconds to four minutes, which is longer
+than any request should be held open. The client polls ``GET …/runs/{id}`` for
+status and ``GET …/runs/{id}/events`` for the trace; Phase 8 turns the second
+into SSE over the same rows, which is why the poll response already carries
+``last_seq``.
+
+The route schedules and returns. It does not wait, it does not report whether the
+run succeeded, and it does not fail the request when the run does — everything a
+run has to say about itself is in ``agent_runs`` and ``agent_events``, the only
+channel that outlives the request that started it.
 """
 
 from __future__ import annotations
@@ -25,6 +30,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 
+from dataagent.agent.scheduler import schedule_run
 from dataagent.auth.context import RequestContext
 from dataagent.auth.guards import require_member
 from dataagent.runs import service
@@ -254,6 +260,17 @@ async def post_message(
         )
     except NotFoundError as error:
         raise _not_found("conversation") from error
+
+    if result.created:
+        # Only for a question that is new. A replayed idempotency key already has
+        # a run — scheduling again would answer it twice and bill for both, which
+        # is the whole thing the key exists to prevent.
+        await schedule_run(
+            org_id=context.org_id,
+            run_id=result.run_id,
+            actor_user_id=context.user_id,
+            role=context.role,
+        )
     return AskOut(
         run_id=result.run_id,
         message_id=result.message_id,
