@@ -12,15 +12,16 @@ Current position: **Phases 0–5 signed off. Phase 6 merged, its gate partially
                   real database, with the model as the only stub.**
 Next step:        Phase 7 / **WP7.3b** (`p7.3b-chat-ui`) — the chat UI.
                   **This is the Phase 7 gate PR**, so it ends with a manual test
-                  script. Everything it needs from the API exists as of 7.3a;
-                  the build spec is in the "Next step" section near the end of
-                  this file.
+                  script. Everything it needs from the API exists as of 7.3a,
+                  and as of **B-041/B-042/B-043** the stack can actually answer a
+                  question: the gate question was verified end to end and
+                  returned the database's own number.
 Merge policy: ASK
-Blocked on user: WP7.3a is open and MERGE_POLICY is ASK, so 7.3b waits on that
-                 review — it is built directly on 7.3a's routes. An Anthropic API
-                 key would close B-029 and the Phase 6 gate; it blocks no Phase 7
-                 work.
-Last updated: 2026-08-15 by Claude Code (WP7.3a)
+Blocked on user: the B-041 PR is open and MERGE_POLICY is ASK; it touches
+                 `ops/docker-compose.yml`, which needs human review either way.
+                 WP7.3b is built on it. An Anthropic API key would close B-029
+                 and the Phase 6 gate; it blocks no Phase 7 work.
+Last updated: 2026-08-15 by Claude Code (B-041/B-042/B-043)
 
 ---
 
@@ -566,6 +567,38 @@ Prefer an edit that fails loudly over one that prints "done".
       both — it would have to go with one half and stop proving the other, which
       is the one test in this PR worth the most. Say so if you would rather have
       had two, and 7.3b can be cut differently
+- [x] **B-041 (P1), B-042 (P1), B-043** Three reasons the gate could not have
+      passed, found by running it rather than by reading it
+      — taken before the chat UI, because each one on its own makes the M7 gate
+      impossible and none of them is visible from a test suite that was green.
+      Discovered by running `agent_smoke.py` against the demo org and reading
+      the trace, three times in a row.
+      **B-041: a whole question found no table at all.** `websearch_to_tsquery`
+      ANDs bare words, so *"How many orders were placed in July 2026?"* asks for
+      a card containing `'mani' & 'order' & 'place' & 'juli' & '2026'` — which no
+      card can satisfy. `context_selected {"tables": []}`, and the model was
+      asked to write SQL against nothing. It then failed to produce a valid
+      `Plan` twice, which looked like a model problem and was not. The strict
+      query now runs first and keeps every promise it made; **only when it
+      matches nothing** are the words retried joined by OR and ranked. Live:
+      the gate question returns `orders` first at 0.8, and Phase 8's flagship
+      *"Which menu items sell best?"* returns `menu_items` first at 0.6.
+      **B-042: the API container had no model configuration at all.** Compose
+      forwarded the database, auth, secrets and TLS settings and **none** of the
+      seven LLM ones, so every run scheduled by the API died at its first model
+      call. It hid for a whole phase because runs happen *inside the API
+      process* (D-021) while every provider test — `llm.smoke`, `agent.smoke` —
+      runs on the **host**, where `.env` loads automatically. The host worked and
+      the product did not.
+      **B-043: a successful query died writing its result**, after it had already
+      read the customer's data — `/app/ops/artifacts` was not writable, so
+      `dal.run` raised `Permission denied` at the last possible moment and the
+      trace stopped at `tool_called`.
+      **`ops/docker-compose.yml` is an infra change and needs human review.**
+      Verified end to end afterwards: *"How many orders were placed in July
+      2026?"* → **"3,718 orders were placed in July 2026."**, citing execution
+      `5175e4f4-…`, and `SELECT count(*)` against the seed database directly
+      returns **3718**. Two model calls, a fraction of a cent
 - [ ] WP7.3b Chat UI with citation + manual test script              ← gate PR
 - [ ] GATE: "orders in July?" answered with citation; user sign-off
 

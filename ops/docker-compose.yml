@@ -86,6 +86,24 @@ services:
       TLS_MODE: ${TLS_MODE:-require}
       TLS_MODE_LOCAL: ${TLS_MODE_LOCAL:-prefer}
       TLS_CA_FILE: ${TLS_CA_FILE:-}
+      # The model configuration, which this container had none of until Phase 7
+      # put a chat UI in front of it. Runs happen *inside the API process*
+      # (D-021), so a key that exists only in the developer's shell reaches the
+      # smoke script and never the product: every question asked in the browser
+      # failed with "LLM_MODELS names no models for provider 'openai'".
+      #
+      # All defaulted to empty rather than required, for the same reason
+      # SECRETS_BACKEND is: the API must still boot and answer /healthz on a
+      # machine with no key. What refuses without one is the run, and it says so.
+      # No secret is written here — these read from the developer's local .env,
+      # which is gitignored, and .env.example documents them (plan §1.4).
+      LLM_PROVIDERS: ${LLM_PROVIDERS:-}
+      LLM_MODELS: ${LLM_MODELS:-}
+      LLM_ROLE_MAP: ${LLM_ROLE_MAP:-}
+      LLM_PRICES: ${LLM_PRICES:-}
+      LLM_RUN_COST_LIMIT_USD: ${LLM_RUN_COST_LIMIT_USD:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
@@ -95,6 +113,14 @@ services:
       # does not throw away registered data sources — and so the ciphertext is
       # something a developer can actually look at.
       - ../ops/.secrets:/app/ops/.secrets
+      # Where query results are written (ARTIFACTS_PATH, default ops/artifacts).
+      # Unmounted, `/app/ops` is not writable and every successful query died
+      # after running, with `Permission denied` — the query had already read the
+      # customer's data, so this failed at the last possible moment. Gitignored,
+      # and on the host on purpose: WP5.2b's central claim is that no unmasked
+      # value reaches a stored file, and that is only checkable if the files are
+      # somewhere a person can grep.
+      - ../ops/artifacts:/app/ops/artifacts
     depends_on:
       platform-pg:
         condition: service_healthy

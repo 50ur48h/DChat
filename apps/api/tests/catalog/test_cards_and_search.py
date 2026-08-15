@@ -269,12 +269,87 @@ async def test_search_understands_how_people_actually_type(
     assert nonsense == []
 
 
+async def test_a_whole_question_finds_the_table_it_is_about(
+    platform: URL, migrated_database: URL, isolated_customer_database: CustomerDatabase
+) -> None:
+    """**B-041**, and the reason the M7 gate could not pass.
+
+    ``websearch_to_tsquery`` joins bare words with AND, so a question asks for a
+    card containing *every* word in it — including "how", "many" and "were". No
+    card contains all of them, so the agent's primary way of finding anything
+    returned nothing for the one question the phase is judged on, and the model
+    was handed an empty catalog.
+
+    Asserted as a question rather than as a keyword because that is how
+    ``search_tables`` is really called: the agent passes the user's words
+    through, and a test that searched for "shops" would have gone on passing
+    while the product did not work.
+    """
+    org_id, _, _ = await _catalogued(migrated_database, isolated_customer_database)
+
+    hits = await search.search_cards(org_id, "How many shops opened in 2021?")
+
+    assert hits, "a question about shops must find the shops table"
+    assert hits[0].table_name == "shops"
+
+
+async def test_a_question_still_prefers_the_table_it_names(
+    platform: URL, migrated_database: URL, isolated_customer_database: CustomerDatabase
+) -> None:
+    """The OR pass widens what matches; it must not flatten what ranks.
+
+    Matching any word would be useless if every card came back level — the
+    context builder drops the lowest-ranked cards first, so an order that means
+    nothing would drop tables at random.
+    """
+    org_id, _, _ = await _catalogued(migrated_database, isolated_customer_database)
+
+    # "1999" appears in no card, so the strict pass cannot match and the OR pass
+    # is what answers — which is the path being measured here.
+    hits = await search.search_cards(org_id, "How did our shops and regions look in 1999?")
+
+    assert len(hits) > 1, "a loose question should offer more than one candidate"
+    assert {hit.table_name for hit in hits[:2]} == {"shops", "regions"}
+
+
+async def test_the_strict_query_wins_when_it_matches_anything(
+    platform: URL, migrated_database: URL, isolated_customer_database: CustomerDatabase
+) -> None:
+    """AND first, so two words still mean both words.
+
+    The fallback is the answer to "this matched nothing", not a looser search
+    everywhere: "trading name" appears in exactly one card, and widening to OR
+    would bury it under every card mentioning either word.
+    """
+    org_id, _, _ = await _catalogued(migrated_database, isolated_customer_database)
+
+    hits = await search.search_cards(org_id, "trading name")
+
+    assert [hit.table_name for hit in hits] == ["shops"], (
+        "a phrase that matches strictly must not be widened"
+    )
+
+
 async def test_an_empty_search_is_empty_rather_than_everything(
     platform: URL, migrated_database: URL, isolated_customer_database: CustomerDatabase
 ) -> None:
     org_id, _, _ = await _catalogued(migrated_database, isolated_customer_database)
 
     assert await search.search_cards(org_id, "   ") == []
+
+
+async def test_a_search_of_nothing_but_stopwords_finds_nothing(
+    platform: URL, migrated_database: URL, isolated_customer_database: CustomerDatabase
+) -> None:
+    """The OR pass must not turn "the and of" into "everything".
+
+    PostgreSQL drops stopwords itself, which leaves an empty tsquery — so this
+    holds the property rather than a hand-maintained word list that would drift
+    from the index it is meant to agree with.
+    """
+    org_id, _, _ = await _catalogued(migrated_database, isolated_customer_database)
+
+    assert await search.search_cards(org_id, "the and of were") == []
 
 
 async def test_search_can_be_narrowed_to_one_data_source(
