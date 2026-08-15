@@ -25,6 +25,7 @@ row either way.
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 
 from dataagent.connectors.base import ConnectorError
 from dataagent.dal import audit_hook
@@ -76,7 +77,7 @@ async def run(
         )
         raise
 
-    await audit_hook.record_success(
+    recorded = await audit_hook.record_success(
         org_id=org_id,
         data_source_id=data_source_id,
         actor_user_id=actor_user_id,
@@ -84,4 +85,8 @@ async def run(
         store=resolved_store,
         run_id=run_id,
     )
-    return execution
+    # The id goes back to the caller because a citation must name a row somebody
+    # can look up (architecture 4.2). The executor cannot fill it in — it does
+    # not write the row — so the front door is the only place that can, which is
+    # also the only place callers are supposed to be.
+    return replace(execution, execution_id=recorded.execution_id)

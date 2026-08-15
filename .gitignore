@@ -70,8 +70,13 @@ blob-report/
 # ---------------------------------------------------------------------------
 # Local runtime data — never customer data in git
 # ---------------------------------------------------------------------------
-ops/data/
-ops/artifacts/
+# Leading `**/` on purpose. A gitignore pattern containing a slash is anchored
+# to this file's directory, so plain `ops/artifacts/` matched only the one at the
+# repo root — while the API writes to `apps/api/ops/artifacts/` whenever pytest
+# runs with that as its working directory. WP7.2a's live tool tests filled it and
+# `git add -A` staged 27 stored query results before anyone noticed.
+**/ops/data/
+**/ops/artifacts/
 *.sqlite
 *.sqlite3
 *.db
