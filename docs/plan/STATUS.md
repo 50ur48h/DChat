@@ -1,52 +1,40 @@
 # STATUS — data-agent build
 
-Current position: **Phases 0–5 signed off. Phase 6 built; its gate is partially
-                  met and its PR is still open.** Every model call goes through
-                  one metered front door, and that door now reaches a real
-                  provider — OpenAI, verified live against the owner's account.
-                  ⚠ **WP6.2 lives on `p6.2-llm-providers` in PR #35, which is
-                  NOT merged.** `main` is at WP6.1. Nothing in Phase 6's second
-                  half exists on `main` yet.
-Next step:        **Read the note directly below this block first** — it is the
-                  session-end handoff and it says what to do before any new
-                  work. After that: Phase 7 / WP7.1 (`p7.1-runs-schema`), spec
-                  in the "Next step" section near the end of this file.
+Current position: **Phases 0–5 signed off. Phase 6 merged, its gate partially
+                  met and deliberately unticked. Phase 7 has begun: WP7.1 is
+                  built and its PR is open.** PR #35 was merged on 2026-08-14,
+                  so `main` carries the OpenAI provider. On top of it, the
+                  product now has its own record: conversations, runs, an
+                  append-only trace and findings, with the two `run_id` columns
+                  Phases 5 and 6 left dangling finally pointing at a real table.
+Next step:        Phase 7 / **WP7.2** (`p7.2-single-shot`) — the context builder,
+                  planner-lite, core tools and repair-or-refuse. Spec in the
+                  "Next step" section near the end of this file. Nothing yet
+                  moves a run out of `queued`; WP7.2 is what does.
 Merge policy: ASK
-Blocked on user: **PR #35 needs a merge decision** (CI green, human review of
-                 `dal/`+`infra/` not required — this PR touches neither).
-                 Separately, an Anthropic API key would close B-029 and the
-                 Phase 6 gate; it blocks neither Phase 7 nor the merge.
-Last updated: 2026-08-14 by Claude Code (WP6.2, session end)
+Blocked on user: **WP7.1's PR needs a review decision.** Separately, an Anthropic
+                 API key would close B-029 and the Phase 6 gate; it blocks
+                 neither WP7.2 nor this merge.
+Last updated: 2026-08-15 by Claude Code (WP7.1)
 
 ---
 
-## ⚠ Session-end handoff — read this before starting anything
+## Standing notes for a new session
 
-The session that built WP6.2 ended here, deliberately, with the PR open. A new
-session should do these in order and not skip to the build.
-
-1. **Session ritual (plan §7.1), with one addition.** `git fetch --all`, then
-   `gh pr list`. **PR #35 will be open unless the owner merged it.**
-   - *If merged:* `git checkout main && git pull`, confirm `apps/api/src/dataagent/llm/openai.py`
-     is present on `main`, delete the stale local branch, and go to step 3.
-   - *If still open:* do **not** branch off `main` for WP7.1 — you would be
-     building on a tree without the LLM providers. Either wait for the merge or
-     branch from `p6.2-llm-providers`, and say plainly in the PR which you did.
-   - *If it has review comments or red CI:* address those before new work.
-2. **Do not re-verify the provider by calling it.** The live smoke spends real
-   money. It has already been run and its evidence is recorded under Phase 6
-   below. Re-run it only when something about the provider actually changes.
-3. **The Phase 6 gate is not closed.** It is partially met and its checkbox is
+1. **Do not re-verify the LLM provider by calling it.** The live smoke spends
+   real money. It has already been run and its evidence is recorded under Phase
+   6 below. Re-run it only when something about the provider actually changes.
+2. **The Phase 6 gate is not closed.** It is partially met and its checkbox is
    deliberately empty. Do not tick it, and do not reword the criterion, when
    Phase 7 work happens to pass — closing it needs a second real provider
-   (**B-029**, P1). Phase 6 cannot be signed off before then; Phase 7 may
-   proceed regardless, because nothing in it needs two providers.
-4. **Local machine state that a fresh clone will not have.** `.env` here carries
+   (**B-029**, P1). Phase 6 cannot be signed off before then; Phase 7 proceeds
+   regardless, because nothing in it needs two providers.
+3. **Local machine state that a fresh clone will not have.** `.env` here carries
    a working `OPENAI_API_KEY` plus `LLM_PROVIDERS`/`LLM_MODELS`/`LLM_ROLE_MAP`/
    `LLM_PRICES`/`LLM_RUN_COST_LIMIT_USD`. `ANTHROPIC_API_KEY` exists but is
    **empty**. `.env.example` documents all of it without the secrets. A new
    machine needs `make env` and a key before `make llm.smoke` will do anything.
-5. **When the Anthropic key arrives**, verify its three model ids against the
+4. **When the Anthropic key arrives**, verify its three model ids against the
    account with `GET /v1/models` *before* writing them into `LLM_MODELS` — the
    same check done for OpenAI. A pricing page says what exists, not what a key
    may call. That habit is B-027, still unautomated.
@@ -323,7 +311,48 @@ Prefer an edit that fails loudly over one that prints "done".
       structured output and usage reporting
 
 ## Phase 7 — Single-shot Q&A (M7)
-- [ ] WP7.1 Conversations/runs/events schema + routes + run status
+- [x] WP7.1 Conversations/runs/events schema + routes + run status
+      — revision **0012**: `conversations`, `agent_runs`, `messages`,
+      `agent_events`, `findings`. Five tenant tables, so five RLS policies, five
+      `TENANT_TABLES` lines and five seed/forge pairs in `test_rls_proof.py` —
+      the rule has now bitten four times and the guard has caught it every time.
+      `agent_events` is **append-only by grant**, the same lock `audit_log` has
+      carried since revision 0002, because 10.3 makes it the single source of
+      truth for how an answer was reached: a trace that could be edited
+      afterwards would be a story rather than a record.
+      **This is the WP that gave `query_executions.run_id` and
+      `usage_ledger.run_id` their foreign key**, five and six revisions after the
+      columns appeared. `ON DELETE SET NULL` on both, per D-016: a row that
+      records an act outlives the thing it was about. The cost is stated in the
+      migration and was paid on this machine — the five ledger rows written by
+      WP6.1's and WP6.2's smoke scripts named runs that never existed, so their
+      `run_id` is now NULL. Every row survived, costs intact, **including the
+      real `$0.000048` OpenAI call**; what was cleared was a pointer to nothing.
+      **D-020**: a run is ordered by when it was *asked* (`created_at`), not by
+      when it started — a queued run has no `started_at`, and those are precisely
+      the runs a user is watching. Architecture 10.1 edited to match, along with
+      `messages.idempotency_key` and `findings.created_at`.
+      `seq` is gap-free per run, assigned under the run row's own
+      `SELECT … FOR UPDATE`, which is what makes `?after=seq` a complete replay
+      contract rather than a hopeful one — proved by three concurrent writers
+      coming out 1, 2, 3 instead of one of them losing to the unique index.
+      A conversation belongs to the person who started it (6.2 grants "view
+      **own** conversations"), enforced in the service layer where RLS cannot
+      help, and refused as 404 rather than 403. The role matrix gained its seven
+      new routes, all `allow` for every role, with the probe now formatted per
+      role so an ownership 404 can never be recorded as a role decision.
+      40 new tests; `runs/` at **99%**. Raised **B-034**–**B-037**.
+      **Not split, against plan §1.1's ~600-line target, and recorded here
+      rather than passed over.** The three new modules are ~1,230 lines and 349
+      statements — this codebase's comment density, not unusual density of
+      logic. The split that was considered (schema + `EventWriter`, then service
+      + routes) was rejected because it separates a schema from the only code
+      that proves it works: the first half would ship five tables, an
+      append-only grant and a data-nulling migration with no consumer, and the
+      second half would still be over the target. The two parts a reviewer
+      should spend time on are small and self-contained — revision 0012, and the
+      ownership check in `runs/service.py`. Say so if you would rather have had
+      two PRs; the next WP can be cut differently
 - [ ] WP7.2 Context builder + planner-lite + core tools + repair-or-refuse
 - [ ] WP7.3 e2e vs seed DB + minimal chat UI with citation          ← gate PR
 - [ ] GATE: "orders in July?" answered with citation; user sign-off
@@ -364,8 +393,8 @@ Prefer an edit that fails loudly over one that prints "done".
 
 ## Next step
 
-Phase 7 / **WP7.1 — conversations, runs and events** (`p7.1-runs-schema`).
-Plan §6 Phase 7, architecture Part 10.1–10.3.
+Phase 7 / **WP7.2 — context, planner-lite and the core tools**
+(`p7.2-single-shot`). Plan §6 Phase 7, architecture Part 4 and 7.
 
 **No USER INPUT is needed to start.** The one outstanding ask is an **Anthropic
 API key**, which closes B-029 and the Phase 6 gate; it does not block Phase 7.
@@ -375,18 +404,45 @@ ids were — a pricing page is not proof a key can use a model.
 
 Build:
 
-- Revision **0012**: `conversations`, `messages`, `agent_runs`, `agent_events`,
-  `findings` per arch 10.1. All tenant tables, so five RLS policies, five
-  `TENANT_TABLES` lines and five seed/forge pairs in `test_rls_proof.py` — the
-  rule has now bitten three times and the guard has caught it every time.
-  `agent_events` is append-only under the same grant lock as `audit_log`.
-- Routes per arch 10.2, and one `EventWriter` (arch 10.3) that everything the UI
-  will ever show flows through from day one.
-- `agent_runs.id` is the `run_id` that `query_executions` and `usage_ledger`
-  have carried a column for since Phase 5 and 6. **This is the WP that gives
-  both of them their foreign key**, and the WP that makes the per-run cost
-  ceiling (D-019) apply to something real rather than to a uuid the caller
-  invented.
+- `agent/context.py` — the L0–L5 layered prompt (arch Part 4), token-budgeted
+  with a deterministic truncation order. Table cards come from `catalog/search`
+  on the question; the cards' examples are already masked, which is why they are
+  safe to put in a prompt at all.
+- `agent/tools/` — `registry.py` plus `search_tables`, `describe_table`,
+  `run_sql` and `finalize`, all pydantic in and out. `run_sql` is a thin wrapper
+  over `dal.run` and **is the only data path**.
+- `agent/runner.py` single-shot: plan (one `sql` call, structured output) →
+  `run_sql` → on a `PolicyViolation` for an unknown identifier, exactly **one**
+  repair with the violation fed back → finalize. Max 3 LLM calls, enforced.
+- Live smoke `scripts/agent_smoke.py`: "How many orders were placed in July
+  2026?" against the seed database, local and manual only.
+
+What WP7.1 hands it:
+
+- **A run exists and has a shape.** `runs.service.transition` is the only thing
+  that may set a status, the legal moves are in `ALLOWED_TRANSITIONS`, and a
+  finished run can never move again. The runner's job is to call `transition` to
+  `running` when it picks a run up and to a terminal status exactly once — it
+  does not touch the row itself.
+- **`EventWriter` is the only way to write a trace**, bound to one run, and its
+  twenty types are closed (arch 10.3). The runner emits `plan_created`,
+  `tool_called`, `sql_validated` / `sql_rejected`, `query_executed` and
+  `answer_composed`; `run_started` and `run_finished` are already written by
+  `transition`, so do not emit them again.
+- **Payloads are built for eyes.** Short public strings out of structured tool
+  output — never raw model reasoning, never an unmasked value. Nothing enforces
+  this (**B-035**); it is a review question, so keep payload construction next to
+  the code that knows what it is saying.
+- **`record_answer` and `add_finding` exist and write their own events.** A
+  finding's `support` is a list of `query_executions.id` — that list is the
+  citation the M7 gate is about, so populate it from `dal.run`'s result rather
+  than from anything the model said.
+- **The per-run ceiling now applies to something real.** `run_id` is a foreign
+  key, so passing the run's id to `llm.complete` is what makes D-019 bound this
+  question's spend. Pass it on every call.
+- **Nothing runs a run.** `POST …/messages` leaves it `queued` and returns 202.
+  Deciding *what* picks it up — inline in the request, a background task, a
+  queue — is WP7.2's first design choice and is not settled here.
 
 What Phase 6 hands it:
 
@@ -407,8 +463,53 @@ What Phase 6 hands it:
 - **Budgets are still not built.** `CallLimits` bounds one call and D-019's
   ceiling bounds one run's spend. The iteration, query and token caps of arch
   4.4 are Phase 8's, and B-025 owns the org-level quotas.
+- **Two backlog items are due to be felt in WP7.2**, and both were filed so the
+  response is a decision rather than a reflex: **B-024** (the first legitimate
+  engine function the validator refuses — add the one name, with a reason, never
+  widen the rule) and **B-020** (an unaliased projection comes back as
+  `_col_1`, which becomes visible the moment a result is shown to a person).
 
 ## Notes
+
+- **A trace can be written and never rewritten.** `agent_events` carries the
+  same grant lock `audit_log` has: UPDATE and DELETE revoked from the
+  application role, proved by `test_agent_events_is_append_only_for_the_api_role`.
+  It matters more here than it does for the audit log, because architecture 10.3
+  makes this table the product's honesty claim — what the user is shown as proof
+  of how an answer was reached. A trace that could be edited afterwards would be
+  a story with a timestamp on it.
+
+- **`?after=seq` is a promise, and `seq` is what keeps it.** Gap-free and 1-based
+  within a run, so "everything I have not seen" is answerable: a gap would make a
+  reconnecting client wait forever for a number that never arrives, and a
+  duplicate would make it skip a step. `UNIQUE (run_id, seq)` turns a race into
+  an error rather than a mangled trace, and the run row's own `FOR UPDATE` is
+  what stops the race happening — three concurrent writers come out 1, 2, 3
+  instead of two of them colliding and one event being lost.
+
+- **A conversation belongs to one person, and row-level security cannot enforce
+  that.** Two members of the same organization share a tenant, so isolation here
+  is the layer-2 ownership check architecture 6.2 describes, in
+  `runs/service.py`. It refuses with **404 rather than 403**, because a member
+  told "forbidden" has learned that a conversation with that id exists. The
+  consequences are real and are **B-037**: no Admin oversight, no support path,
+  and a departed user's conversations readable by nobody. That is the safe
+  default, not necessarily the final answer.
+
+- **A retried send is the same question.** `POST …/messages` requires an
+  idempotency key (arch 10.2) and a repeat returns the run that already exists,
+  proved both sequentially and with two sends genuinely in flight at once. With
+  D-019's ceiling behind a real provider key, a double-tapped send button is
+  otherwise a doubled bill.
+
+- **The two dangling `run_id` columns finally point somewhere** (revision 0012).
+  Phases 5 and 6 each wrote one with a comment saying a constraint pointing at a
+  table that does not exist is not a constraint; the table now exists, and both
+  are `ON DELETE SET NULL` per D-016 — a row that records an act outlives the
+  thing it was about. Adding the constraint required nulling every `run_id` that
+  named no run, which on this machine was the five rows the WP6.1 and WP6.2
+  smoke scripts left behind. The rows and their costs are untouched; what went
+  was a pointer to nothing. A fresh database sees a no-op.
 
 - **The Phase 6 gate is partially met, and that is written down rather than
   smoothed over.** The criterion — *same suite passes on both providers* — is
@@ -570,7 +671,7 @@ What Phase 6 hands it:
 
 - **The local demo environment, as this session left it.** Five containers up
   (`platform-pg`, `seed-pizza-pg`, `mssql`, `api`, `web`); platform database at
-  revision **0011**. Rebuild the `api` image after any dependency change or the
+  revision **0012**. Rebuild the `api` image after any dependency change or the
   container and the host disagree about what exists.
   The demo organization `ebfe8139-…` now carries evidence from three phases, and
   none of it is fixtures — a reseed does not recreate any of it. Two verified

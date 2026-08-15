@@ -31,8 +31,17 @@ under "Unreleased", only for changes a user would notice.
 - Tenant isolation is enforced by the database: every tenant table has a
   row-level security policy, and the API connects as an unprivileged role that
   cannot bypass it. The audit log is append-only by grant.
+- A run's trace is append-only too: the record of how an answer was reached can
+  be written and never rewritten. Conversations are private to the person who
+  started them — a colleague in the same organization cannot open one, even
+  knowing its address.
 
 ### Added
+- Conversations: ask a question and get back a run to follow. Each run carries
+  its status, its answer when there is one, the findings behind it, and a
+  step-by-step trace you can re-read from any point — so a refreshed page picks
+  up exactly where it left off. Sending the same question twice does not start
+  it twice.
 - Every table gets a plain-language card describing what it holds, its columns
   and roles, and the tables it joins to — or that it joins to none, which is the
   answer that matters most often. Searching in ordinary words finds the right

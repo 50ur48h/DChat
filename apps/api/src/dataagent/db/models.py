@@ -25,9 +25,10 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column
 
 from dataagent.db.base import ROLES, Base, CreatedAt, OrgId, UuidPk
@@ -40,19 +41,26 @@ from dataagent.db.security_events import SecurityEvent
 __all__ = [
     "CARD_TEXT_CONFIGURATION",
     "COLUMN_POLICIES",
+    "CONFIDENCE_LEVELS",
     "DATA_SOURCE_ENGINES",
     "DATA_SOURCE_STATUSES",
+    "EVENT_TYPES",
     "EXECUTION_STATUSES",
     "LLM_ROLES",
     "LLM_TIERS",
+    "MESSAGE_ROLES",
     "PROFILE_STATUSES",
     "RELATIONSHIP_KINDS",
+    "RUN_STATUSES",
     "SEMANTIC_ROLES",
     "SENSITIVITY_LEVELS",
     "SNAPSHOT_STATUSES",
     "TABLE_KINDS",
     "TENANT_TABLES",
+    "TERMINAL_RUN_STATUSES",
     "USAGE_STATUSES",
+    "AgentEvent",
+    "AgentRun",
     "AuditLog",
     "Base",
     "CatalogColumn",
@@ -60,13 +68,17 @@ __all__ = [
     "CatalogSnapshot",
     "CatalogTable",
     "ColumnPolicy",
+    "Conversation",
     "DataSource",
+    "Finding",
     "Invitation",
+    "Message",
     "OrgMembership",
     "Organization",
     "QueryExecution",
     "ResultArtifact",
     "SecurityEvent",
+    "UsageLedger",
     "User",
 ]
 
@@ -574,8 +586,11 @@ class QueryExecution(Base):
     actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
-    #: Phase 7 gives runs a table and this a foreign key.
-    run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    #: SET NULL for the same reason ``data_source_id`` is (D-016): the record of
+    #: what was read outlives the run it was read for. Revision 0012 attached it.
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="SET NULL")
+    )
     sql_text: Mapped[str] = mapped_column(Text, nullable=False)
     sql_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     #: Fully qualified names, from the AST rather than from the text.
@@ -684,8 +699,11 @@ class UsageLedger(Base):
 
     id: Mapped[UuidPk]
     org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
-    #: Phase 7 gives runs a table and this a foreign key.
-    run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    #: SET NULL rather than CASCADE: what a question cost is still true after the
+    #: run row is gone. Revision 0012 attached it.
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="SET NULL")
+    )
     actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
@@ -707,6 +725,268 @@ class UsageLedger(Base):
     repaired: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
     #: Sanitized before it arrives: providers raise nothing that has not been.
     error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[CreatedAt]
+
+
+#: Architecture 10.1's run status domain. ``validating`` is the critic's window
+#: (Phase 9); ``budget_exhausted`` is not a failure — it is a run that spent its
+#: allowance and still owes the user an answer with caveats (arch 4.4).
+RUN_STATUSES: tuple[str, ...] = (
+    "queued",
+    "running",
+    "validating",
+    "completed",
+    "interrupted",
+    "failed",
+    "budget_exhausted",
+)
+
+#: The endings. A run in one of these is finished and cannot move again, which is
+#: what ``runs/service.py`` enforces and what the ``finished_at`` constraint
+#: assumes.
+TERMINAL_RUN_STATUSES: tuple[str, ...] = (
+    "completed",
+    "interrupted",
+    "failed",
+    "budget_exhausted",
+)
+
+MESSAGE_ROLES: tuple[str, ...] = ("user", "assistant")
+
+#: Architecture 10.3's event vocabulary, closed on purpose: the trace UI has to
+#: render every one of them, so a type nobody has designed a row for is a bug.
+#: A CHECK constraint holds the database to the same list, and
+#: ``test_event_types_match_the_migration`` asserts the two copies agree.
+EVENT_TYPES: tuple[str, ...] = (
+    "run_started",
+    "intent_classified",
+    "context_selected",
+    "capability_checked",
+    "plan_created",
+    "step_started",
+    "tool_called",
+    "sql_validated",
+    "sql_rejected",
+    "query_executed",
+    "result_summarized",
+    "finding_added",
+    "hypothesis_updated",
+    "reflection",
+    "critic_verdict",
+    "budget_warning",
+    "budget_exhausted",
+    "answer_composed",
+    "run_finished",
+    "error",
+)
+
+#: How sure the agent is of a finding, in architecture 10.3's own words.
+CONFIDENCE_LEVELS: tuple[str, ...] = ("high", "medium", "low")
+
+
+class Conversation(Base):
+    """A thread of questions, and the runs they started (architecture 10.1).
+
+    ``user_id`` is nullable and set to NULL when a user row goes away: removing
+    somebody from a deployment must not delete the record of what was asked in
+    their organization, which is the rule the audit trail follows for the same
+    reason.
+    """
+
+    __tablename__ = "conversations"
+    __table_args__ = (
+        Index("ix_conversations_org_id_created_at", "org_id", text("created_at DESC")),
+    )
+
+    id: Mapped[UuidPk]
+    org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    title: Mapped[str | None] = mapped_column(String(300))
+    created_at: Mapped[CreatedAt]
+
+
+class AgentRun(Base):
+    """One question, from asked to answered (architecture Part 10.1, 4.4).
+
+    The row every other record in the product points at: ``query_executions`` and
+    ``usage_ledger`` have carried a ``run_id`` since Phases 5 and 6 and got their
+    foreign key to this table in revision 0012, so "what did this question cost,
+    and what did it read" is a join rather than a guess.
+
+    ``question`` repeats the user's message deliberately (architecture 10.1 puts
+    it here): the trace, the eval harness and a support question all read a run on
+    its own, and none of them should need a join to learn what was being answered.
+
+    ``budget`` and ``state`` are Phase 8's — the allowance and the resumable
+    checkpoint. They exist from here so a run row never changes shape mid-phase.
+    """
+
+    __tablename__ = "agent_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ({})".format(", ".join(f"'{s}'" for s in RUN_STATUSES)), name="status_valid"
+        ),
+        # "Finished but with no finish time" is the shape a crashed transition
+        # leaves behind, and without this it would stay invisible until a screen
+        # rendered a blank where a duration belonged.
+        CheckConstraint(
+            "(status IN ({})) = (finished_at IS NOT NULL)".format(
+                ", ".join(f"'{s}'" for s in TERMINAL_RUN_STATUSES)
+            ),
+            name="finished_at_matches_status",
+        ),
+        Index(
+            "ix_agent_runs_org_id_conversation_id_created_at",
+            "org_id",
+            "conversation_id",
+            text("created_at DESC"),
+        ),
+    )
+
+    id: Mapped[UuidPk]
+    org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'queued'"))
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    budget: Mapped[dict[str, object]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    state: Mapped[dict[str, object]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    #: A rollup for the trace UI; ``usage_ledger`` stays authoritative.
+    model_usage: Mapped[dict[str, object]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    #: Null means unpriced, never free — the same rule ``cost_usd`` follows.
+    cost_estimate: Mapped[Decimal | None] = mapped_column(Numeric(precision=10, scale=4))
+    started_at: Mapped[datetime | None]
+    finished_at: Mapped[datetime | None]
+    #: Sanitized before it arrives, like every other error column here.
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[CreatedAt]
+
+
+class Message(Base):
+    """What was said, by the person and by the agent (architecture 10.1).
+
+    ``idempotency_key`` is beyond 10.1's column list and required by 10.2's
+    contract for ``POST …/messages``: a key in the body has to be stored to be
+    honoured. It lives here rather than on the run because it identifies the
+    *client's* message — a retried POST is the same question, not a second one —
+    and it is null for anything the agent writes.
+    """
+
+    __tablename__ = "messages"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ({})".format(", ".join(f"'{r}'" for r in MESSAGE_ROLES)), name="role_valid"
+        ),
+        Index(
+            "ix_messages_org_id_conversation_id_created_at",
+            "org_id",
+            "conversation_id",
+            "created_at",
+        ),
+        # Partial, so the agent's own messages — which carry no key — are not all
+        # competing for one NULL slot per conversation.
+        Index(
+            "uq_messages_idempotency_key",
+            "org_id",
+            "conversation_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[UuidPk]
+    org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="SET NULL")
+    )
+    idempotency_key: Mapped[str | None] = mapped_column(String(200))
+    created_at: Mapped[CreatedAt]
+
+
+class AgentEvent(Base):
+    """One step of one run, as the trace will show it (architecture 10.3).
+
+    Append-only: revision 0012 revokes UPDATE and DELETE on this table from the
+    application role, exactly as revision 0002 does for ``audit_log``. It matters
+    more here, because this table is the product's honesty claim — a trace that
+    could be edited afterwards would be a story rather than a record.
+
+    ``seq`` is 1-based and gap-free within a run, which is what makes
+    ``?after=seq`` a complete replay contract. ``runs/events.py`` assigns it under
+    the run row's own lock; the unique constraint is what makes a mistake there
+    an error rather than a silently duplicated position.
+    """
+
+    __tablename__ = "agent_events"
+    __table_args__ = (
+        CheckConstraint(
+            "type IN ({})".format(", ".join(f"'{t}'" for t in EVENT_TYPES)), name="type_valid"
+        ),
+        CheckConstraint("seq > 0", name="seq_positive"),
+        UniqueConstraint("run_id", "seq", name="uq_agent_events_run_id_seq"),
+        Index("ix_agent_events_org_id_run_id_seq", "org_id", "run_id", "seq"),
+    )
+
+    # bigserial per architecture 10.1: one row per step of every run is the
+    # fastest-growing table in the product.
+    id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
+    org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    seq: Mapped[int] = mapped_column(nullable=False)
+    type: Mapped[str] = mapped_column(String(40), nullable=False)
+    #: Built for eyes (arch 10.3): short public strings out of structured tool
+    #: output. Never raw model reasoning, and never an unmasked value.
+    payload: Mapped[dict[str, object]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    ts: Mapped[CreatedAt]
+
+
+class Finding(Base):
+    """Something the run concluded, and what backs it up (architecture 10.1).
+
+    ``support`` is a list of ``query_executions.id`` values, so a claim in an
+    answer can be walked back to the SQL that produced it — which is the citation
+    the M7 gate is about.
+    """
+
+    __tablename__ = "findings"
+    __table_args__ = (
+        CheckConstraint(
+            "confidence IN ({})".format(", ".join(f"'{c}'" for c in CONFIDENCE_LEVELS)),
+            name="confidence_valid",
+        ),
+        Index("ix_findings_org_id_run_id", "org_id", "run_id"),
+    )
+
+    id: Mapped[UuidPk]
+    org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("agent_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    statement: Mapped[str] = mapped_column(Text, nullable=False)
+    support: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    confidence: Mapped[str] = mapped_column(
+        String(10), nullable=False, server_default=text("'medium'")
+    )
     created_at: Mapped[CreatedAt]
 
 
@@ -732,4 +1012,9 @@ TENANT_TABLES: dict[str, str] = {
     "query_executions": "org_id",
     "result_artifacts": "org_id",
     "usage_ledger": "org_id",
+    "conversations": "org_id",
+    "agent_runs": "org_id",
+    "messages": "org_id",
+    "agent_events": "org_id",
+    "findings": "org_id",
 }

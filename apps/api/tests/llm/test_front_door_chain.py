@@ -15,7 +15,7 @@ import uuid
 from collections.abc import AsyncIterator
 
 import pytest
-from llm_fixture import FAKE_MODELS, build_settings
+from llm_fixture import FAKE_MODELS, build_settings, seed_run
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -160,7 +160,8 @@ async def test_the_ceiling_stops_the_call_before_the_provider_is_asked(
 ) -> None:
     """Enforced *before* the call. A limit checked afterwards is a report, and
     the tokens are already spent by the time it prints."""
-    org_id, run_id = await _org(migrated_database), uuid.uuid4()
+    org_id = await _org(migrated_database)
+    run_id = await seed_run(migrated_database, org_id)
     fake_llm.script("expensive", contains="ask")
     settings = build_settings(
         llm_prices={"fake-strong": {"input": 1000.0, "output": 1000.0}},

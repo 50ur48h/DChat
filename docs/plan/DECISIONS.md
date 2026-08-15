@@ -4,6 +4,34 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-020 — A run is ordered by when it was asked, not by when it started
+Date: 2026-08-15 · Phase: 7 · PR: WP7.1
+Context: Architecture 10.1 gives `agent_runs` in full SQL — the one table it
+spells out completely — with `started_at`, `finished_at` and the index
+`(org_id, conversation_id, started_at DESC)`. WP7.1 creates a run in `queued`
+and hands it to WP7.2's planner to execute, so between the question and the
+planner there is a real interval in which `started_at` is NULL. Every queued run
+therefore sorts as NULL in the architecture's own index, and "this conversation's
+runs, newest first" — the query the chat UI is built on — has no answer for
+exactly the runs a user is waiting on. Two smaller cases are the same shape:
+`messages` needs somewhere to keep 10.2's `idempotency_key`, and `findings` has
+no timestamp at all, so findings cannot be listed in the order they were reached.
+Options: (a) stamp `started_at` at creation, making it mean "asked" and leaving
+nothing that means "began work" — which is the number a latency graph needs;
+(b) sort by `id`, which is a random uuid and not a clock; (c) add `created_at`
+and index on it, keeping `started_at` for what it says.
+Decision: (c), plus the two additive columns. `agent_runs` and `findings` gain
+`created_at`; `messages` gains a nullable `idempotency_key` with a partial unique
+index per conversation; the index becomes
+`(org_id, conversation_id, created_at DESC)`. `started_at` keeps its meaning and
+stays NULL until a run actually starts, which is what makes "queued for 40
+seconds" a measurable thing rather than an invisible one.
+Consequences: `docs/architecture.md` 10.1 is edited so its SQL and its catalog
+say this. The additions are additive only — no column changed meaning and none
+was removed — and the same latitude 10.1 already grants elsewhere ("key columns
+only") is being used, but stated here because `agent_runs` is the one table given
+in full and a silent edit to it would make the document wrong.
+
 ## D-019 — A per-run spend ceiling, ahead of the per-org quotas 8.3 asks for
 Date: 2026-08-14 · Phase: 6 · PR: WP6.2 · Owner's request
 Context: Architecture 8.3 specifies per-organization daily and monthly token and

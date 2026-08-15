@@ -15,7 +15,7 @@ import uuid
 from collections.abc import AsyncIterator
 
 import pytest
-from llm_fixture import build_settings
+from llm_fixture import build_settings, seed_run
 from pydantic import BaseModel
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -135,7 +135,7 @@ async def test_the_run_and_the_actor_reach_the_row(
     """ "What did this run cost" is a question about a run, so the run is on the
     row rather than inferred from a time window."""
     org_id = await _org(migrated_database)
-    run_id = uuid.uuid4()
+    run_id = await seed_run(migrated_database, org_id)
     fake_llm.script("ok")
 
     await service.complete(

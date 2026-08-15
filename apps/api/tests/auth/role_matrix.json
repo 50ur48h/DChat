@@ -14,6 +14,21 @@
     "contributor": "allow",
     "reader": "allow"
   },
+  "GET /v1/orgs/{org_id}/conversations": {
+    "admin": "allow",
+    "contributor": "allow",
+    "reader": "allow"
+  },
+  "GET /v1/orgs/{org_id}/conversations/{conversation_id}": {
+    "admin": "allow",
+    "contributor": "allow",
+    "reader": "allow"
+  },
+  "GET /v1/orgs/{org_id}/conversations/{conversation_id}/messages": {
+    "admin": "allow",
+    "contributor": "allow",
+    "reader": "allow"
+  },
   "GET /v1/orgs/{org_id}/data-sources": {
     "admin": "allow",
     "contributor": "allow",
@@ -34,6 +49,16 @@
     "contributor": "allow",
     "reader": "allow"
   },
+  "GET /v1/orgs/{org_id}/runs/{run_id}": {
+    "admin": "allow",
+    "contributor": "allow",
+    "reader": "allow"
+  },
+  "GET /v1/orgs/{org_id}/runs/{run_id}/events": {
+    "admin": "allow",
+    "contributor": "allow",
+    "reader": "allow"
+  },
   "PATCH /v1/orgs/{org_id}/data-sources/{data_source_id}": {
     "admin": "allow",
     "contributor": "deny(403)",
@@ -48,6 +73,16 @@
     "admin": "allow",
     "contributor": "deny(403)",
     "reader": "deny(403)"
+  },
+  "POST /v1/orgs/{org_id}/conversations": {
+    "admin": "allow",
+    "contributor": "allow",
+    "reader": "allow"
+  },
+  "POST /v1/orgs/{org_id}/conversations/{conversation_id}/messages": {
+    "admin": "allow",
+    "contributor": "allow",
+    "reader": "allow"
   },
   "POST /v1/orgs/{org_id}/data-sources": {
     "admin": "allow",
