@@ -36,6 +36,11 @@ under "Unreleased", only for changes a user would notice.
   started them — a colleague in the same organization cannot open one, even
   knowing its address.
 
+### Fixed
+- Asking a question in ordinary words now finds the tables it is about. Searching
+  the catalog used to require every word of the question to appear in a table's
+  description, so a real question matched nothing at all.
+
 ### Added
 - A conversation is started against a chosen database, and every question in it
   is answered from that one. An organization with a single database needs no
