@@ -52,6 +52,14 @@ deliberately, with nothing in flight — no open PR, no branch, no dirty tree.
    *start of Phase 9*, not Phase 7, and is the one to raise before evals are
    written against a window that drifts.
 
+One trap in this very file, which cost a red CI run to find. **A backlog id that
+appears as a checkbox in two phases is one key to the STATUS guard, and the last
+occurrence wins.** B-039 was `[x]` in Phase 7 and `[ ]` in Phase 8's "must be
+closed before this phase starts" line, so the guard correctly read it as having
+been un-ticked and failed every PR raised after B-039 merged. Both lines now say
+`[x]`. **`B-005` in Phase 9 has exactly the same shape**, so when it is closed,
+tick *both* lines in the same PR.
+
 Two working habits this session earned the hard way, both worth keeping:
 
 - **Run `ruff check . --no-cache` before pushing.** A warm ruff cache passed
@@ -511,11 +519,13 @@ Prefer an edit that fails loudly over one that prints "done".
 - [ ] GATE: "orders in July?" answered with citation; user sign-off
 
 ## Phase 8 — Research loop + trace (M8)
-- [ ] **B-039 (P1) must be closed before this phase starts** — the menu-items
-      refusal demo is this phase's flagship, and today the run would refuse
-      because it could not *find* `menu_items` rather than because no join path
-      exists. A gate that passes for the wrong reason is worse than one that
-      fails. Scheduled into Phase 7 (owner's call, 2026-08-15)
+- [x] **B-039 (P1) was this phase's precondition, and it is closed** (#41)
+      — the menu-items refusal demo is this phase's flagship, and the run would
+      have refused because it could not *find* `menu_items` rather than because
+      no join path exists. A gate that passes for the wrong reason is worse than
+      one that fails. Taken in Phase 7 on the owner's call and verified live:
+      "menu items" now returns exactly the two `menu_items` tables, so what this
+      phase demonstrates will be the capability check rather than a search miss
 - [ ] WP8.1 ResearchState + bounded loop + budgets + duplicate/progress rules
 - [ ] WP8.2 Capability check (join-graph) + honest refusal path
 - [ ] WP8.3 SSE streaming + durable replay + trace UI               ← gate PR
