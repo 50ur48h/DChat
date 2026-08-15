@@ -117,6 +117,10 @@ PROBES: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
     ),
     ("GET", "/v1/orgs/{org_id}/runs/{run_id}", None),
     ("GET", "/v1/orgs/{org_id}/runs/{run_id}/events", None),
+    # Resolving your own citation is part of reading your own trace, so it is a
+    # member route like the two above. Each role probes an execution on *its own*
+    # run, for the same reason the conversations do.
+    ("GET", "/v1/orgs/{org_id}/runs/{run_id}/executions/{execution_id}", None),
     ("DELETE", "/v1/orgs/{org_id}/data-sources/{data_source_id}", None),
 )
 
@@ -154,6 +158,10 @@ class Matrix:
     #: itself is proved in ``tests/runs/test_runs_routes.py``.
     conversations: dict[str, uuid.UUID]
     runs: dict[str, uuid.UUID]
+    #: One `query_executions` row per role, on that role's own run — so the
+    #: evidence probe records a role decision rather than "that execution is not
+    #: on this run", which is a 404 of an entirely different kind.
+    executions: dict[str, uuid.UUID]
 
 
 @pytest.fixture
@@ -179,6 +187,7 @@ async def matrix_app(
     users: dict[str, uuid.UUID] = {}
     conversations: dict[str, uuid.UUID] = {}
     runs: dict[str, uuid.UUID] = {}
+    executions: dict[str, uuid.UUID] = {}
     async with owner.begin() as connection:
         await connection.execute(
             text("SELECT set_config('app.org_id', :org, true)"), {"org": str(org_id)}
@@ -222,6 +231,16 @@ async def matrix_app(
                         "question) VALUES (:i, :o, :c, :u, 'queued', 'How many orders?')"
                     ),
                     {"i": run_id, "o": org_id, "c": conversation_id, "u": user_id},
+                )
+                execution_id = uuid.uuid4()
+                executions[subject] = execution_id
+                await connection.execute(
+                    text(
+                        "INSERT INTO query_executions (id, org_id, run_id, actor_user_id, "
+                        "sql_text, sql_hash, status, row_count) "
+                        "VALUES (:i, :o, :r, :u, 'SELECT 1', 'probehash', 'ok', 1)"
+                    ),
+                    {"i": execution_id, "o": org_id, "r": run_id, "u": user_id},
                 )
         # Port 1 is refused instantly, so the /test probe never waits on a socket.
         await connection.execute(
@@ -279,6 +298,7 @@ async def matrix_app(
             column_id=column_id,
             conversations=conversations,
             runs=runs,
+            executions=executions,
         )
     finally:
         await owner.dispose()
@@ -314,6 +334,7 @@ async def test_the_role_matrix_matches_its_snapshot(matrix_app: Matrix) -> None:
                 column_id=matrix_app.column_id,
                 conversation_id=matrix_app.conversations[role],
                 run_id=matrix_app.runs[role],
+                execution_id=matrix_app.executions[role],
             ) + QUERIES.get(template, "")
             status = await _probe(matrix_app.app, method, path, role, body)
             observed[key][role] = "allow" if status < 400 else f"deny({status})"
@@ -353,6 +374,9 @@ async def test_the_snapshot_says_what_the_architecture_says(matrix_app: Matrix) 
         "POST /v1/orgs/{org_id}/conversations/{conversation_id}/messages",
         "GET /v1/orgs/{org_id}/runs/{run_id}",
         "GET /v1/orgs/{org_id}/runs/{run_id}/events",
+        # A trace whose citations cannot be opened is a trace you are asked to
+        # take on faith, so this is granted with the trace rather than above it.
+        "GET /v1/orgs/{org_id}/runs/{run_id}/executions/{execution_id}",
     ):
         assert recorded[readable] == {
             "admin": "allow",

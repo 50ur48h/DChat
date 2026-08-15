@@ -791,16 +791,30 @@ class Conversation(Base):
     somebody from a deployment must not delete the record of what was asked in
     their organization, which is the rule the audit trail follows for the same
     reason.
+
+    ``data_source_id`` is the database this thread is about (revision 0014,
+    DECISIONS **D-022**). It lives on the conversation rather than on a message
+    because a follow-up question has to reach the same source as the question it
+    follows — two answers in one thread drawn from different databases would be
+    incomparable and nothing would say so. Null is a conversation that named
+    nothing, and it is not an error: the run resolves the organization's single
+    source, or refuses and names the choices. ``ON DELETE SET NULL`` for D-016's
+    reason — removing a source must not remove the record of what was asked
+    about it.
     """
 
     __tablename__ = "conversations"
     __table_args__ = (
         Index("ix_conversations_org_id_created_at", "org_id", text("created_at DESC")),
+        Index("ix_conversations_data_source_id", "data_source_id"),
     )
 
     id: Mapped[UuidPk]
     org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
     user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    data_source_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("data_sources.id", ondelete="SET NULL")
+    )
     title: Mapped[str | None] = mapped_column(String(300))
     created_at: Mapped[CreatedAt]
 

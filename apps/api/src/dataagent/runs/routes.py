@@ -48,6 +48,15 @@ class CreateConversationIn(BaseModel):
         max_length=300,
         description="Optional. Left unset, the first question becomes the title.",
     )
+    data_source_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "The database every question in this conversation is answered against "
+            "(D-022). Optional: left unset, a run uses the organization's single "
+            "data source, and refuses — naming the choices — when there is more "
+            "than one."
+        ),
+    )
 
 
 class ConversationOut(BaseModel):
@@ -56,6 +65,11 @@ class ConversationOut(BaseModel):
     created_at: datetime
     message_count: int = 0
     last_run_id: uuid.UUID | None = None
+    data_source_id: uuid.UUID | None = None
+    data_source_name: str | None = Field(
+        default=None,
+        description="Null when none was named, or when the source has since been removed.",
+    )
 
 
 class MessageOut(BaseModel):
@@ -123,6 +137,44 @@ class RunOut(BaseModel):
     model_usage: dict[str, object] = Field(default_factory=dict[str, object])
 
 
+class ExecutionOut(BaseModel):
+    """One query a run ran — the thing a citation points at (architecture 10.2)."""
+
+    id: uuid.UUID
+    run_id: uuid.UUID
+    status: str = Field(
+        description=(
+            "ok | error | refused. 'refused' never reached an engine, so it has no "
+            "rows and no duration — and this is the only place it is visible at all."
+        )
+    )
+    sql: str = Field(description="This service's canonical statement, not the model's text.")
+    tables: list[str] = Field(default_factory=list[str])
+    columns: list[str] = Field(default_factory=list[str])
+    row_count: int | None = None
+    duration_ms: int | None = None
+    violation_code: str | None = Field(
+        default=None, description="Set exactly when status is 'refused'."
+    )
+    error: str | None = Field(
+        default=None, description="Sanitized: names what failed, never a value."
+    )
+    sensitive_accessed: bool = False
+    masked_columns: list[str] = Field(
+        default_factory=list[str],
+        description="Columns a policy masked here. Their values below are already masked.",
+    )
+    sample_rows: list[list[object]] = Field(
+        default_factory=list[list[object]],
+        description=(
+            "Up to 50 rows, masked on the way in (WP5.2b) — there is no unmasked "
+            "copy of these in the platform database."
+        ),
+    )
+    truncated: bool = False
+    created_at: datetime
+
+
 class EventOut(BaseModel):
     seq: int
     type: str
@@ -149,6 +201,8 @@ def _conversation_out(view: service.ConversationView) -> ConversationOut:
         created_at=view.created_at,
         message_count=view.message_count,
         last_run_id=view.last_run_id,
+        data_source_id=view.data_source_id,
+        data_source_name=view.data_source_name,
     )
 
 
@@ -171,11 +225,17 @@ def _message_out(view: service.MessageView) -> MessageOut:
 async def create_conversation(
     body: CreateConversationIn, context: Annotated[RequestContext, Depends(require_member)]
 ) -> ConversationOut:
-    return _conversation_out(
-        await service.create_conversation(
-            org_id=context.org_id, user_id=context.user_id, title=body.title
+    try:
+        return _conversation_out(
+            await service.create_conversation(
+                org_id=context.org_id,
+                user_id=context.user_id,
+                title=body.title,
+                data_source_id=body.data_source_id,
+            )
         )
-    )
+    except NotFoundError as error:
+        raise _not_found("data source") from error
 
 
 @router.get(
@@ -270,6 +330,10 @@ async def post_message(
             run_id=result.run_id,
             actor_user_id=context.user_id,
             role=context.role,
+            # The conversation's own choice (D-022). None means it named none,
+            # and the scheduler resolves or refuses — which is why this is
+            # passed through rather than defaulted to anything here.
+            data_source_id=result.data_source_id,
         )
     return AskOut(
         run_id=result.run_id,
@@ -311,6 +375,50 @@ async def get_run(
         failure_reason=view.failure_reason,
         cost_estimate=view.cost_estimate,
         model_usage=view.model_usage,
+    )
+
+
+@router.get(
+    "/orgs/{org_id}/runs/{run_id}/executions/{execution_id}",
+    response_model=ExecutionOut,
+    summary="The query behind a citation: sanitized SQL and masked rows",
+)
+async def get_execution(
+    context: Annotated[RequestContext, Depends(require_member)],
+    run_id: RunId,
+    execution_id: Annotated[uuid.UUID, Path(description="An execution produced by this run")],
+) -> ExecutionOut:
+    """Resolve one of a finding's ``support`` ids into evidence a person can read.
+
+    The execution is looked up **through** the run, so one belonging to another
+    run is not found rather than refused — the run's own ownership check is the
+    only one, and there is no second rule here that could drift away from it.
+    """
+    try:
+        view = await service.get_execution(
+            org_id=context.org_id,
+            run_id=run_id,
+            execution_id=execution_id,
+            user_id=context.user_id,
+        )
+    except NotFoundError as error:
+        raise _not_found("execution") from error
+    return ExecutionOut(
+        id=view.id,
+        run_id=view.run_id,
+        status=view.status,
+        sql=view.sql,
+        tables=view.tables,
+        columns=view.columns,
+        row_count=view.row_count,
+        duration_ms=view.duration_ms,
+        violation_code=view.violation_code,
+        error=view.error,
+        sensitive_accessed=view.sensitive_accessed,
+        masked_columns=view.masked_columns,
+        sample_rows=view.sample_rows,
+        truncated=view.truncated,
+        created_at=view.created_at,
     )
 
 
