@@ -42,6 +42,10 @@ under "Unreleased", only for changes a user would notice.
   description, so a real question matched nothing at all.
 
 ### Added
+- Every answer can show its working: a live timeline of what the agent did —
+  which tables it read, what it asked the database, what it concluded, and where
+  it stopped — appearing as it happens and still there afterwards. Refreshing the
+  page mid-question loses none of it.
 - A question that this database genuinely cannot answer is now refused before any
   query runs, and the refusal says which link is missing and what would unlock it
   — rather than joining unrelated tables and presenting whatever comes back.

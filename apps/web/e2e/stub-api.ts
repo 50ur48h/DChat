@@ -145,10 +145,49 @@ export async function startStubApi(port: number = STUB_PORT): Promise<StubApi> {
     }
 
     if (url.includes("/events")) {
+      // The trace's own steps, revealed as the run progresses so a browser test
+      // can watch them arrive rather than being handed the finished list.
+      const steps = [
+        { seq: 1, type: "run_started", payload: { question: QUESTION } },
+        { seq: 2, type: "context_selected", payload: { tables: ["public.orders"] } },
+        { seq: 3, type: "plan_created", payload: { purpose: "count July orders" } },
+        { seq: 4, type: "query_executed", payload: { row_count: 1, duration_ms: 31 } },
+        { seq: 5, type: "run_finished", payload: { status: "completed" } },
+      ];
+      const visible = steps.slice(0, Math.min(steps.length, runPolls + 1));
+      const after = Number(new URL(url, "http://stub").searchParams.get("after") ?? 0);
+      const fresh = visible.filter((step) => step.seq > after);
+
+      if ((request.headers.accept ?? "").includes("text/event-stream")) {
+        // Replay, then close — the real server holds the connection open until
+        // the run ends, and the client resumes from `Last-Event-ID` either way,
+        // so closing early exercises exactly that recovery path.
+        setTimeout(() => {
+          if (response.writableEnded || response.destroyed) return;
+          response.writeHead(200, {
+            "content-type": "text/event-stream",
+            "cache-control": "no-cache",
+            "access-control-allow-origin": "*",
+            "access-control-allow-headers": "authorization,content-type,accept,last-event-id",
+            connection: "close",
+          });
+          for (const step of fresh) {
+            const body = JSON.stringify({ ...step, ts: "2026-08-15T09:00:05Z" });
+            response.write(`id: ${step.seq}
+event: ${step.type}
+data: ${body}
+
+`);
+          }
+          response.end();
+        }, LATENCY_MS);
+        return;
+      }
+
       send(200, {
         run_id: RUN,
-        events: [{ seq: 1, type: "query_executed", payload: {}, ts: "2026-08-15T09:00:05Z" }],
-        last_seq: 1,
+        events: fresh.map((step) => ({ ...step, ts: "2026-08-15T09:00:05Z" })),
+        last_seq: fresh.length > 0 ? fresh[fresh.length - 1]!.seq : after,
       });
       return;
     }
@@ -232,9 +271,12 @@ export async function startStubApi(port: number = STUB_PORT): Promise<StubApi> {
         title: QUESTION,
         created_at: "2026-08-15T09:00:00Z",
         message_count: asked ? 1 : 0,
-        // Null, so the page does not adopt a run on mount: the test is about
-        // what happens to a run started *by the send*.
-        last_run_id: null,
+        // Null until a question has been asked, then the run — exactly as the
+        // real API behaves. This is what a reloaded page adopts, and getting it
+        // wrong made the refresh-replay test pass vacuously: the answer was
+        // visible from the messages while no run, and therefore no trace, was
+        // ever picked up.
+        last_run_id: asked ? RUN : null,
         data_source_id: "66666666-6666-6666-6666-666666666666",
         data_source_name: "Demo",
       });

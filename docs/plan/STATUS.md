@@ -7,9 +7,10 @@ Current position: **Phases 0–5 and 7 signed off. Phase 6 merged, its gate
                   opens into the SQL behind it, and a question the data cannot
                   answer is honestly refused. The product does the thing it is
                   for, in front of a person.
-Next step:        Phase 8 / **WP8.3b** — the trace UI over the SSE stream, and
-                  **the Phase 8 gate**, so it ends with a manual test script.
-                  **WP8.3a is open for review.** Phase 8's
+Next step:        **The Phase 8 GATE is yours** — the manual test script is in
+                  the WP8.3b PR's body. Once signed off, Phase 9 / **WP9.1**
+                  (`p9.1-critic`), whose precondition **B-005** must be closed
+                  first. Phase 8's
                   precondition (**B-039**) is closed, and its flagship refusal —
                   *"Which menu items sell best?"* — was already seen working live
                   during Phase 7's verification, so WP8.2 starts from a known-good
@@ -856,7 +857,36 @@ Prefer an edit that fails loudly over one that prints "done".
       one event a client is waiting for.
       10 tests; `sse.py` at 95%, `runs/routes.py` at 99%, suite at **94%**.
       **B-050** filed: the tail polls rather than using `LISTEN`/`NOTIFY`
-- [ ] WP8.3b Trace UI + the Phase 8 gate                             ← gate PR
+- [x] WP8.3b Trace UI + the Phase 8 gate                             ← gate PR
+      — the product's honesty claim, rendered. `agent_events` is append-only by
+      grant precisely so a trace can be shown as a **record** rather than a
+      story: what appears was written once, by the code that did the thing.
+      **Every event shows, including the ones that are not progress** — a refused
+      query, a duplicate blocked, a budget warning, a capability gap. A trace
+      listing only successes would be advertising, and those are exactly the
+      events a UI written to look good would drop.
+      **Read with `fetch`, not `EventSource`, and that is a security decision.**
+      `EventSource` cannot set headers, so authenticating it means a token in the
+      query string — which this codebase already refused once, for the
+      data-source password, in the same words: browser history, referrer headers,
+      every access log in between. So reconnection is ours, resuming from
+      `Last-Event-ID` off the durable rows, and there is **one** auth path rather
+      than two.
+      Open while the run is going, collapsed once it has finished, an explicit
+      toggle winning from then on — derived rather than synced in an effect. The
+      conversation's poll now asks only *"has it finished?"*; the steps arrive on
+      the stream.
+      6 browser tests, stable across repeated runs, including the gate's own
+      *mid-run refresh replays the whole trace*. That one first passed
+      **vacuously** — the stub returned `last_run_id: null`, so the page never
+      adopted the run and the answer showed from the messages alone. Fixed the
+      stub to match the real API, and only then did it exercise replay.
+      76 unit tests, `tsc` and `eslint` clean.
+      **The gate found one more blocker before it could run: B-051** — a card's
+      range came from the profiler's sample, so the demo catalog claimed orders
+      ended sixteen months early and the M8 scenario refused an answerable
+      question. Fixed in its own PR (#51) with D-025, and **B-052** filed from
+      the same session.
 - [ ] GATE: pizza scenario ≤8 iters; menu-items → honest refusal; sign-off
 
 ## Phase 9 — Critic + composer + evals (M9)

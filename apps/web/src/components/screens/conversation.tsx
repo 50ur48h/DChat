@@ -35,6 +35,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { EvidencePanel } from "@/components/screens/evidence";
+import { Trace } from "@/components/screens/trace";
 import { Badge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -81,26 +82,6 @@ const STATUS_WORDS: Record<string, string> = {
   interrupted: "interrupted",
   failed: "failed",
   budget_exhausted: "stopped at its budget",
-};
-
-/**
- * What the trace's event types mean to somebody watching a spinner.
- *
- * Architecture 10.3's payloads are built for eyes, but its *type names* are
- * ours; a person waiting should read "running the query", not
- * `query_executed`. Phase 8's WP8.3 turns this into the full timeline — this is
- * the one line that makes a two-minute wait explicable.
- */
-const STEP_WORDS: Record<string, string> = {
-  run_started: "Starting",
-  context_selected: "Reading the catalog",
-  plan_created: "Writing the query",
-  tool_called: "Running the query",
-  query_executed: "Reading the results",
-  sql_rejected: "The query was refused — trying to correct it",
-  finding_added: "Noting what it found",
-  answer_composed: "Writing the answer",
-  run_finished: "Finished",
 };
 
 const CONFIDENCE_TONES: Record<string, Tone> = {
@@ -199,19 +180,22 @@ function Findings({
   );
 }
 
-function RunProgress({ run, step }: { run: Run; step: string | null }) {
+function RunProgress({ orgId, run }: { orgId: string; run: Run }) {
   return (
     <Card tone="sunken">
       <Row>
         <Badge tone={STATUS_TONES[run.status] ?? "neutral"}>
           {STATUS_WORDS[run.status] ?? run.status}
         </Badge>
-        {step && <span className={styles.step}>{step}…</span>}
       </Row>
       <p className={styles.note}>
         This can take a minute. The answer arrives here on its own — you can leave the page and
         come back to it.
       </p>
+      {/* The trace replaces the single summary line this card used to show. It
+          streams, so a step appears when it happens; and it replays from the
+          durable rows, so a refresh mid-run loses nothing. */}
+      <Trace orgId={orgId} runId={run.id} live defaultOpen />
     </Card>
   );
 }
@@ -257,6 +241,10 @@ function AnswerCard({
               gate found this card showing a citation and no words at all. */}
           {!replied && run.answer && <p className={styles.findingStatement}>{run.answer}</p>}
           <Findings orgId={orgId} runId={run.id} findings={run.findings} answer={run.answer} />
+          {/* Collapsed once the run is over — the answer is the point then — but
+              still there, because "how did you get that" is the question this
+              product exists to be able to answer. */}
+          <Trace orgId={orgId} runId={run.id} live={false} />
         </>
       )}
     </Card>
@@ -274,7 +262,6 @@ export function ConversationThread({
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [run, setRun] = useState<Run | null>(null);
-  const [step, setStep] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -347,20 +334,14 @@ export function ConversationThread({
     if (!live || runId === null) return;
 
     let cancelled = false;
-    let seq = 0;
 
     const tick = async () => {
       try {
+        // Only the run's *status* is polled now. The steps arrive on the trace's
+        // own stream (WP8.3), so this asks one small question — "has it
+        // finished?" — rather than re-reading the whole trace every second.
         const latest = await api.run(orgId, runId);
         if (cancelled) return;
-        const trace = await api.runEvents(orgId, runId, seq);
-        if (cancelled) return;
-        seq = trace.last_seq;
-        const last = trace.events.at(-1);
-        if (last) setStep(STEP_WORDS[last.type] ?? null);
-        // Written last, after every await: a state write mid-tick is what
-        // caused the bug above, and doing it here means nothing follows it that
-        // a re-render could interrupt.
         setRun(latest);
       } catch {
         // A dropped poll is not worth an error banner: the next tick asks again,
@@ -389,14 +370,7 @@ export function ConversationThread({
     if (reconciled.current === runId) return;
     reconciled.current = runId;
 
-    let active = true;
-    void (async () => {
-      await loadThread();
-      if (active) setStep(null);
-    })();
-    return () => {
-      active = false;
-    };
+    void loadThread();
   }, [runId, runStatus, loadThread]);
 
   const send = useCallback(async () => {
@@ -409,7 +383,6 @@ export function ConversationThread({
       const accepted = await api.ask(orgId, conversationId, question, idempotencyKey.current);
       setDraft("");
       idempotencyKey.current = null;
-      setStep(null);
       await loadThread();
       setRun(await api.run(orgId, accepted.run_id));
     } catch (cause) {
@@ -462,7 +435,7 @@ export function ConversationThread({
         ))}
       </ol>
 
-      {live && run && <RunProgress run={run} step={step} />}
+      {live && run && <RunProgress orgId={orgId} run={run} />}
       {answered && run && <AnswerCard orgId={orgId} run={run} replied={replied} />}
 
       <Card>
