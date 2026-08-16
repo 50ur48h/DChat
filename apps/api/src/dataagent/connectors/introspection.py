@@ -46,6 +46,7 @@ __all__ = [
     "READONLY_PROBE_TABLE",
     "pg_columns",
     "pg_foreign_keys",
+    "pg_ranges",
     "pg_readonly_evidence",
     "pg_row_estimates",
     "pg_sample",
@@ -57,6 +58,7 @@ __all__ = [
     "quote_tsql",
     "tsql_columns",
     "tsql_foreign_keys",
+    "tsql_ranges",
     "tsql_readonly_evidence",
     "tsql_row_estimates",
     "tsql_sample",
@@ -484,6 +486,43 @@ def pg_sample(schema: str, table: str, columns: Sequence[str], limit: int) -> Va
         sql=f"SELECT {projection} FROM {relation} LIMIT $1",  # noqa: S608 - quoted above
         dialect=POSTGRES,
         parameters=[limit],
+    )
+
+
+def pg_ranges(schema: str, table: str, columns: Sequence[str]) -> ValidatedQuery:
+    """The true low and high of each named column, from the engine (**B-051**).
+
+    One aggregate over the whole table, not over a sample. `pg_sample` returns
+    the *first* n rows by design — it must not sort somebody's production
+    table — so a range taken from it is the range of the oldest rows, and the
+    demo catalog duly recorded orders as ending sixteen months before they do.
+
+    One query per table rather than per column, so the cost is the same order as
+    the sample beside it. The caller bounds it with the connector's own timeout
+    and **omits the range when that runs out**: an absent figure is safe and a
+    wrong one is not.
+    """
+    projection = ", ".join(
+        f"MIN({quote_pg(column)}), MAX({quote_pg(column)})" for column in columns
+    )
+    relation = f"{quote_pg(schema)}.{quote_pg(table)}"
+    return ValidatedQuery(
+        _GRANT,
+        sql=f"SELECT {projection} FROM {relation}",  # noqa: S608 - quoted above
+        dialect=POSTGRES,
+    )
+
+
+def tsql_ranges(schema: str, table: str, columns: Sequence[str]) -> ValidatedQuery:
+    """The same aggregate, in the other dialect."""
+    projection = ", ".join(
+        f"MIN({quote_tsql(column)}), MAX({quote_tsql(column)})" for column in columns
+    )
+    relation = f"{quote_tsql(schema)}.{quote_tsql(table)}"
+    return ValidatedQuery(
+        _GRANT,
+        sql=f"SELECT {projection} FROM {relation}",  # noqa: S608 - quoted above
+        dialect=TSQL,
     )
 
 

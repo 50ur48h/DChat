@@ -37,7 +37,7 @@ from dataagent.agent.context import ContextBundle, render
 from dataagent.agent.tools.registry import ToolRegistry
 from dataagent.config import Settings
 from dataagent.llm import service as llm
-from dataagent.llm.base import Message
+from dataagent.llm.base import CallLimits, Message
 
 __all__ = ["Plan", "plan_query"]
 
@@ -72,6 +72,19 @@ class Plan(BaseModel):
         description="When answerable is false, what is missing. Empty otherwise.",
     )
 
+
+#: Room to write the statement this call's own schema allows.
+#:
+#: `CallLimits` defaults to 1,024 output tokens, which is about 4,000 characters
+#: — while `Plan.sql` permits 20,000. A schema that promises more room than the
+#: call can deliver truncates the reply **mid-string**, and a truncated JSON
+#: object is not a parse failure the repair path can fix: the second attempt is
+#: cut off in the same place. The M8 revenue-decline scenario failed exactly
+#: this way, with `did not produce valid Plan in two attempts`.
+#:
+#: Sized to the schema rather than guessed: a 20,000-character statement is
+#: ~5,000 tokens, plus the envelope and the other fields.
+PLAN_OUTPUT_TOKENS = 6_000
 
 #: Appended to the assembled context for this one call. Kept here rather than in
 #: `context.py` because it is about *this* step, not about the run: the layered
@@ -124,6 +137,7 @@ async def plan_query(
         org_id=org_id,
         messages=messages,
         schema=Plan,
+        limits=CallLimits(max_output_tokens=PLAN_OUTPUT_TOKENS),
         run_id=run_id,
         actor_user_id=actor_user_id,
         settings=settings,
