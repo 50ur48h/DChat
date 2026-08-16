@@ -1,7 +1,10 @@
 # STATUS — data-agent build
 
 Current position: **Phases 0–5, 7 and 8 signed off. Phase 6 merged, its gate
-                  partially met and deliberately unticked.** The **Phase 8 gate
+                  partially met and deliberately unticked. Phase 9 is built and
+                  its gate is open** — a draft is judged before it becomes an
+                  answer, the answer says what it does not establish, and twenty
+                  golden questions run as a required check on every PR. The **Phase 8 gate
                   was signed off on 2026-08-16** (#52): the revenue-decline
                   question answered **$938.28** in two research steps against a
                   cap of eight, *"which menu items sell best?"* refused honestly
@@ -17,21 +20,20 @@ Current position: **Phases 0–5, 7 and 8 signed off. Phase 6 merged, its gate
                   a green suite. See "Second data source" below. Two of them
                   are already closed: **WP8.4** (#55) fixed the capability check
                   the hub table defeated, and **B-056** with it.
-Next step:        **Phase 9 / WP9.2b** (`p9.2b-evals-ci`) — the evals as a
-                  **required CI check**, which needs CI to seed a pizza database,
-                  register it and profile it before `make evals` runs. FakeLLM
-                  only there (owner's direction): it costs nothing and stays
-                  deterministic, and model quality is the nightly job's business.
-                  Plus `nightly-evals.yml` with `EVALS_LIVE=1` and a hard token
-                  cap. **This is the Phase 9 gate PR**, and it also owes the live
-                  eval run recorded in its body. **WP9.2a is done** (#59): 20/20
-                  golden questions pass locally against the real seed, and the
-                  answer card renders citations and limitations.
+Next step:        **The Phase 9 gate is the owner's, and it has not been walked.**
+                  The manual test script is in **#60**'s body. Nothing in Phase
+                  10 starts before it is signed off (plan §1.7). When it is,
+                  tick the GATE line in the first Phase 10 PR. Then Phase 10 /
+                  **WP10.1** (`p10.1-knowledge`) — document ingest, chunking,
+                  embedding and tenant-isolated retrieval. **B-059 is the P1**
+                  waiting there: a semantic layer must be able to *import*
+                  definitions a database already carries, not only host ones
+                  somebody types in.
 Merge policy: ASK
 Blocked on user: Nothing blocks Phase 9. An Anthropic API key would close
                  **B-029 (P1)** and with it the Phase 6 gate; that blocks nothing
                  else.
-Last updated: 2026-08-16 by Claude Code (WP9.2a — composer and eval harness)
+Last updated: 2026-08-16 by Claude Code (WP9.2b — evals in CI; Phase 9 gate open)
 
 ---
 
@@ -1185,7 +1187,20 @@ unexplained.
       by text, so rephrasing does not lose the link. `ops/evals/` holds the
       twenty golden questions with every expected number a **path into
       `truths.json`**, and **20/20 pass** against the real seed
-- [ ] WP9.2b Evals in CI (seed + register + required check) + nightly  ← gate PR
+- [x] WP9.2b Evals in CI (seed + register + required check) + nightly (#60)
+      — the thing standing between twenty golden questions and CI was that they
+      needed a registered data source, which until now only ever came from a
+      person clicking through the UI. `ops/evals/provision.py` makes that state
+      from nothing — organization, member, the pizza database registered with
+      its **read-only** login, discovery, profiling — and is idempotent, so a
+      rerun reuses rather than duplicates. The `evals` job seeds its own fixture
+      with the same generator `make seed` runs, so the numbers it checks are the
+      numbers in `truths.json`. **FakeLLM only in CI** (owner's direction): it
+      costs nothing, cannot flake on a provider, and gives the same answer every
+      time; the model's own quality is `nightly-evals.yml`'s business, where it
+      may fail without blocking a merge. `EVALS_TOKEN_BUDGET` is enforced from
+      `usage_ledger` and checked **before** each question, because a budget that
+      stops once it is already over is a report rather than a ceiling
 - [ ] GATE: seeded-wrong-draft caught; 20 golden evals pass; sign-off
 
 ## Phase 10 — Knowledge + semantic layer (M10)

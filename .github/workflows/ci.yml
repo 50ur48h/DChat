@@ -249,6 +249,97 @@ jobs:
   # number that only sometimes appears is one nobody notices going missing. The
   # mssql shard is conditional, so this must not be conditional on it — the
   # script says which shards it found and what their absence means.
+  # The twenty golden questions, against a real seed, on every PR (plan WP9.2b).
+  #
+  # Its own job because it needs a state nothing else does — a seeded pizza
+  # database, an organization, a registered read-only source and a built catalog
+  # — and because a suite that shares a database with the unit tests would be
+  # measuring their leftovers. It provisions all of it from nothing, which is
+  # what makes the evals a *required check* rather than twenty questions that run
+  # when somebody remembers.
+  #
+  # FakeLLM only, and deliberately: the SQL comes from `golden.yaml`, so this
+  # tests the catalog grounding, the DAL, the critic and the composer rather than
+  # a model's prose. It costs nothing, it cannot flake on a provider, and it
+  # gives the same answer every time. The model's own quality is
+  # `nightly-evals.yml`'s business, where it can spend money and fail without
+  # blocking a merge.
+  evals:
+    needs: changes
+    runs-on: ubuntu-latest
+    env:
+      RUN: ${{ needs.changes.outputs.api }}
+      DATABASE_URL: postgresql+asyncpg://postgres:test@localhost:5432/dataagent
+      APP_DATABASE_URL: postgresql+asyncpg://dataagent_app:apptest@localhost:5432/dataagent
+      APP_DB_PASSWORD: apptest
+      # The fixture's own database, on the same server. Registered with the
+      # read-only login `make seed` creates, never the owner: `readonly_verified`
+      # is part of what these evals exercise.
+      SEED_PIZZA_HOST: localhost
+      SEED_PIZZA_PORT: "5432"
+      SEED_PIZZA_DB: pizza
+      SEED_PIZZA_USER: postgres
+      SEED_PIZZA_PASSWORD: test
+      SEED_PIZZA_READONLY_USER: pizza_readonly
+      SEED_PIZZA_READONLY_PASSWORD: evalsreadonly
+      # Both databases are on this runner, so TLS is not negotiable here in the
+      # way it is anywhere else — declared explicitly rather than left to a
+      # default, so nothing about production leaks in from an omission.
+      TLS_LOCAL_HOSTS: localhost
+      SECRETS_BACKEND: local
+      LOCAL_SECRETS_PATH: ${{ github.workspace }}/ops/.secrets/evals.json
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        if: env.RUN == 'true'
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+      - name: Install
+        if: env.RUN == 'true'
+        run: uv sync --locked --directory apps/api
+      - name: A key for the local secrets store
+        if: env.RUN == 'true'
+        run: |
+          mkdir -p ops/.secrets
+          echo "LOCAL_SECRETS_KEY=$(uv run --directory apps/api python -c             'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"             >> "$GITHUB_ENV"
+      - name: The platform database
+        if: env.RUN == 'true'
+        run: |
+          psql "postgresql://postgres:test@localhost:5432/postgres"             -c "CREATE DATABASE dataagent"
+          uv run --directory apps/api alembic upgrade head
+          psql "postgresql://postgres:test@localhost:5432/dataagent"             -c "ALTER ROLE dataagent_app WITH LOGIN PASSWORD 'apptest'"
+      # The same generator `make seed` runs, so the numbers here are the numbers
+      # in truths.json — which is the whole basis of every expected value.
+      - name: The pizza fixture
+        if: env.RUN == 'true'
+        run: |
+          psql "postgresql://postgres:test@localhost:5432/postgres"             -c "CREATE DATABASE pizza"
+          uv run ops/seed/seed_pizza.py
+      - name: An organization, a registered source and its catalog
+        if: env.RUN == 'true'
+        run: |
+          uv run --directory apps/api python ../../ops/evals/provision.py | tee /tmp/provision.log
+          grep '^EVALS_ORG_ID=' /tmp/provision.log >> "$GITHUB_ENV"
+      - name: The twenty golden questions
+        if: env.RUN == 'true'
+        run: make evals
+      - name: Nothing to do
+        if: env.RUN != 'true'
+        run: echo "No API or ops changes; the evals did not need to run."
+
   coverage:
     needs: [api, mssql]
     if: always()
