@@ -109,7 +109,11 @@ async def main() -> int:
 
     print(f"  status    {outcome.status}")
     print(f"  answered  {outcome.answered}")
-    print(f"  repaired  {outcome.repaired}")
+    # `repaired` retired with the single-shot runner: a correction is now just
+    # the next iteration (WP8.1b), so what is worth printing is how many steps
+    # it took and whether a ceiling cut it short.
+    print(f"  iterations{outcome.iterations:>3}")
+    print(f"  stopped   {outcome.stopped_by or '-'}")
     print(f"  llm calls {outcome.llm_calls}")
     print(f"\n  {outcome.answer}\n")
 

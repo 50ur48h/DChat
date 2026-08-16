@@ -1,23 +1,25 @@
-"""One question, answered or honestly refused (architecture M7, Part 4.4).
+"""One question, investigated and answered (architecture M8, Part 4.4).
 
-The single-shot path: context → plan → `run_sql` → **at most one** repair →
-finalize. Phase 8 replaces the middle with a bounded loop; the shape of the ends
-does not change, which is why they are built here.
+**The ends of a run.** Context in, a bounded loop in the middle, a cited answer
+out — and the run moved to exactly one ending whatever happened. WP7.2b built
+this shape around a single plan-run-repair step and said the ends would not
+change when the loop arrived; WP8.1b is that claim being cashed. What changed
+here is one call: `_investigate` now hands off to `loop.research`.
 
 Four rules hold this together, and each exists because of a specific way an
 agent goes wrong.
 
-**The repair happens once, and only for something rewriting can fix.** A
-hallucinated column is repairable — the DAL says which identifier it refused, and
-a second attempt with that fed back usually lands. A connection failure is not:
-retrying the same statement against a database that is down spends a call to
-learn what we already knew. `ToolResult.repairable` is the flag, set by the tool
-layer, and the runner never second-guesses it.
+**A run is bounded by the controller, not by the prompt.** The loop's ceilings
+live in `agent/budget.py` and are checked before anything is spent (4.4). This
+module chooses the run's ending status from what the budget says: a run stopped
+by a ceiling is `budget_exhausted` — an answer with caveats — while one that
+simply had nothing more worth doing is `completed`.
 
 **A refusal is an ending, not a failure.** A run that could not answer completes
 with `answered=false` and a reason. `failed` is reserved for the platform
 breaking. Getting this wrong would either hide real breakage among honest
-refusals or dress a refusal up as an outage.
+refusals or dress a refusal up as an outage. The same applies to exhaustion,
+which is why it has a status of its own rather than borrowing either.
 
 **Citations are verified before they are stored.** The model may only cite
 execution ids this run actually produced. Anything else is dropped and the trace
@@ -37,14 +39,15 @@ the same code moves behind a worker in V1.5 without a rewrite.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from dataagent.agent.context import ContextBundle, build_context
-from dataagent.agent.planner import Plan, plan_query
-from dataagent.agent.tools.base import ToolContext, ToolResult
+from dataagent.agent.budget import Budget, BudgetState
+from dataagent.agent.context import build_context
+from dataagent.agent.loop import LoopOutcome, research
+from dataagent.agent.state import ResearchState, StateFinding
+from dataagent.agent.tools.base import ToolContext
 from dataagent.agent.tools.finalize import FINALIZE, FinalizeIn
 from dataagent.agent.tools.registry import ToolRegistry, default_registry
-from dataagent.agent.tools.sql import RunSqlOut
 from dataagent.config import Settings
 from dataagent.llm.base import LLMError
 from dataagent.runs import service as runs
@@ -53,9 +56,10 @@ from dataagent.tenancy.session import org_session
 
 __all__ = ["RunOutcome", "execute_run"]
 
-#: Architecture M7: plan, one repair, finalize. Enforced in the controller and
-#: never in the prompt (4.4) — a budget a model is merely told about is a wish.
-MAX_LLM_CALLS = 3
+#: Stopping for one of these is `budget_exhausted`; stopping for `no_progress` is
+#: an ordinary completion, because nothing was overspent — the run simply had
+#: nothing further worth doing.
+_BUDGET_DIMENSIONS = frozenset({"iterations", "queries", "llm_calls", "tokens", "wall_seconds"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,32 +72,25 @@ class RunOutcome:
     answer: str
     execution_ids: tuple[str, ...] = ()
     llm_calls: int = 0
-    repaired: bool = False
+    #: How many research steps it took. 0 for a run that never got past context.
+    iterations: int = 0
+    #: The ceiling or rule that stopped the search, when one did — so a caller
+    #: can tell a complete answer from a partial one without re-reading the run.
+    stopped_by: str | None = None
 
 
-@dataclass
-class _State:
-    """The run's working state, checkpointed at every step boundary.
+@dataclass(frozen=True, slots=True)
+class _Working:
+    """Everything one run carries while it is running.
 
-    Architecture 0.2.4 requires the checkpoint because a redeploy kills in-flight
-    runs; this is what a resumable run will be rebuilt from in Phase 8, and what
-    makes an interrupted one explicable now.
+    Two objects rather than one, and stored in two columns, per **D-023**: the
+    research state is the agent's scratchpad, the budget is the ceiling the agent
+    is held to, and a limit that travels inside the thing it limits is one bad
+    deserialization away from being editable.
     """
 
-    step: str = "starting"
-    llm_calls: int = 0
-    executions: list[str] = field(default_factory=list[str])
-    repaired: bool = False
-    plan_sql: str = ""
-
-    def as_json(self) -> dict[str, object]:
-        return {
-            "step": self.step,
-            "llm_calls": self.llm_calls,
-            "executions": list(self.executions),
-            "repaired": self.repaired,
-            "plan_sql": self.plan_sql,
-        }
+    state: ResearchState
+    budget: BudgetState
 
 
 async def execute_run(
@@ -105,6 +102,7 @@ async def execute_run(
     role: str = "reader",
     registry: ToolRegistry | None = None,
     settings: Settings | None = None,
+    budget: Budget | None = None,
 ) -> RunOutcome:
     """Drive one queued run to an ending. Never raises for the question's sake.
 
@@ -114,7 +112,10 @@ async def execute_run(
     """
     tools = registry if registry is not None else _registry_with_finalize()
     events = EventWriter(org_id=org_id, run_id=run_id)
-    state = _State()
+    working = _Working(
+        state=ResearchState(run_id=run_id, org_id=org_id),
+        budget=BudgetState(budget=budget if budget is not None else Budget()),
+    )
     context = ToolContext(
         org_id=org_id,
         run_id=run_id,
@@ -127,23 +128,29 @@ async def execute_run(
     ending, outcome = "failed", None
     try:
         outcome = await _investigate(
-            context=context, tools=tools, events=events, state=state, settings=settings
+            context=context, tools=tools, events=events, working=working, settings=settings
         )
-        ending = "completed"
+        # A run stopped by a ceiling is an answer with caveats, not a failure —
+        # `agent_runs` has carried this status since revision 0012 for exactly
+        # this, and conflating it with `completed` would hide the cost signal
+        # while conflating it with `failed` would invent an outage.
+        ending = (
+            "budget_exhausted" if working.state.stopped_by in _BUDGET_DIMENSIONS else "completed"
+        )
         return outcome
     except LLMError as error:
         # The provider, not the question. Sanitized already, and distinct from a
         # refusal: the user should be told the platform failed, not that their
         # data could not answer them.
-        await _record_failure(events, state, str(error), category="llm_error")
-        return _failed(run_id, state)
+        await _record_failure(events, working, str(error), category="llm_error")
+        return _failed(run_id, working)
     except Exception as error:
-        await _record_failure(events, state, str(error), category="internal_error")
-        return _failed(run_id, state)
+        await _record_failure(events, working, str(error), category="internal_error")
+        return _failed(run_id, working)
     finally:
         # In `finally`, because a run that never ends is the one failure with no
         # symptom until somebody notices a page spinning.
-        await _finish(org_id=org_id, run_id=run_id, status=ending, state=state, outcome=outcome)
+        await _finish(org_id=org_id, run_id=run_id, status=ending, working=working, outcome=outcome)
 
 
 async def _investigate(
@@ -151,145 +158,123 @@ async def _investigate(
     context: ToolContext,
     tools: ToolRegistry,
     events: EventWriter,
-    state: _State,
+    working: _Working,
     settings: Settings | None,
 ) -> RunOutcome:
-    question = await _question_of(context.org_id, context.run_id)
+    """Context, then the bounded loop, then an answer — whatever the loop found.
+
+    The middle used to be plan-run-repair. It is now `loop.research`, and the
+    shape of the ends is why WP7.2b built them the way it did: this function
+    still opens with context and closes with a composed, citation-verified
+    answer, and everything between is the loop's business.
+    """
+    state, budget = working.state, working.budget
+    state.question = await _question_of(context.org_id, context.run_id)
 
     bundle = await build_context(
-        org_id=context.org_id, question=question, data_source_id=context.data_source_id
+        org_id=context.org_id, question=state.question, data_source_id=context.data_source_id
     )
-    state.step = "context"
-    await _checkpoint(context, state)
+    state.phase = "context"
+    state.table_names = list(bundle.table_names)
+    await _checkpoint(context, working)
     await events.emit(
         "context_selected",
         {"tables": list(bundle.table_names), "restrictions": len(bundle.restrictions)},
     )
 
-    plan, calls = await _plan(context, bundle, tools, events, state, settings, repair_of=None)
-    state.llm_calls += calls
-    if not plan.answerable:
-        # The model says the catalog cannot answer this. Believed, because it has
-        # just been shown the catalog — and cheaper than a refusal from the DAL.
-        return await _finalize_refusal(
-            context, events, state, plan.reason or "The available data cannot answer that."
+    async def save() -> None:
+        await _checkpoint(context, working)
+
+    async def keep(finding: StateFinding) -> None:
+        # Written when it is reached, so an interrupted run keeps what it had
+        # concluded and the trace shows the investigation arriving at things in
+        # order. `runs.add_finding` emits `finding_added`, which is why the loop
+        # does not emit one of its own.
+        await runs.add_finding(
+            org_id=context.org_id,
+            run_id=context.run_id,
+            statement=finding.statement,
+            support=finding.support,
+            confidence=finding.confidence
+            if finding.confidence in {"high", "medium", "low"}
+            else "medium",
         )
 
-    result = await _run_sql(context, tools, events, state, plan)
-
-    if not result.ok and result.repairable and state.llm_calls < MAX_LLM_CALLS - 1:
-        state.repaired = True
-        state.step = "repairing"
-        await _checkpoint(context, state)
-        repaired, calls = await _plan(
-            context, bundle, tools, events, state, settings, repair_of=_feedback(plan, result)
-        )
-        state.llm_calls += calls
-        if repaired.answerable:
-            plan = repaired
-            result = await _run_sql(context, tools, events, state, plan)
-
-    if not result.ok:
-        # Repaired-or-refused: the second attempt failed too, so the run ends
-        # honestly and says what was refused rather than apologising.
-        return await _finalize_refusal(
-            context,
-            events,
-            state,
-            f"I could not answer that from this data. The query was refused: {result.error}",
-        )
-
-    return await _compose(context, tools, events, state, plan, result, settings)
-
-
-async def _plan(
-    context: ToolContext,
-    bundle: ContextBundle,
-    tools: ToolRegistry,
-    events: EventWriter,
-    state: _State,
-    settings: Settings | None,
-    *,
-    repair_of: str | None,
-) -> tuple[Plan, int]:
-    plan, tokens = await plan_query(
-        org_id=context.org_id,
+    outcome = await research(
+        context=context,
+        tools=tools,
+        events=events,
+        state=state,
+        budget=budget,
         bundle=bundle,
-        registry=tools,
-        role=context.role,
-        run_id=context.run_id,
-        actor_user_id=context.actor_user_id,
+        checkpoint=save,
+        record_finding=keep,
         settings=settings,
-        repair_of=repair_of,
     )
-    state.step = "planned"
-    state.plan_sql = plan.sql
-    await _checkpoint(context, state)
-    await events.emit(
-        "plan_created",
-        {
-            "purpose": plan.purpose,
-            "answerable": plan.answerable,
-            "repair": repair_of is not None,
-            "tokens": tokens,
-        },
-    )
-    return plan, 1
 
+    if outcome.ending == "refused" and not state.executions:
+        # Nothing was ever run, so there is nothing to compose from and nothing
+        # to cite. Ending here spends no further call to have a model rephrase a
+        # refusal it already wrote.
+        return await _finalize_refusal(context, events, working, outcome.refusal)
 
-async def _run_sql(
-    context: ToolContext,
-    tools: ToolRegistry,
-    events: EventWriter,
-    state: _State,
-    plan: Plan,
-) -> ToolResult:
-    result = await tools.call(
-        context, "run_sql", {"sql": plan.sql, "purpose": plan.purpose}, events=events
-    )
-    if result.ok and isinstance(result.data, RunSqlOut):
-        state.executions.append(result.data.execution_id)
-        await events.emit(
-            "query_executed",
-            {
-                "execution_id": result.data.execution_id,
-                "row_count": result.data.row_count,
-                "duration_ms": result.data.duration_ms,
-                "masked_columns": result.data.masked_columns,
-            },
-        )
-    else:
-        # `sql_rejected` rather than `error`: the registry has already recorded
-        # the failure generically, and 10.3 has a type that says *this* was the
-        # SQL policy refusing, which is what a trace reader wants to see.
-        await events.emit(
-            "sql_rejected", {"rule": result.code or "unknown", "repairable": result.repairable}
-        )
-    state.step = "executed"
-    await _checkpoint(context, state)
-    return result
+    return await _compose(context, events, working, outcome, settings)
 
 
 async def _compose(
     context: ToolContext,
-    tools: ToolRegistry,
     events: EventWriter,
-    state: _State,
-    plan: Plan,
-    result: ToolResult,
+    working: _Working,
+    outcome: LoopOutcome,
     settings: Settings | None,
 ) -> RunOutcome:
-    """The last call: turn rows into an answer that cites them."""
+    """One call that turns what the loop found into an answer that cites it.
+
+    Given **summaries and execution ids**, never rows: the loop kept them out of
+    its own state for the same reason (4.4), and the rows are already durable and
+    masked in `result_artifacts` where a citation can reach them.
+
+    A caveat is *given* to the model rather than left to it. When a ceiling or the
+    progress rule stopped the search, the answer has to say so — an answer that
+    quietly presents partial evidence as complete is the failure architecture 4.4
+    added budgets to make visible.
+    """
     from dataagent.llm import service as llm
     from dataagent.llm.base import Message
 
+    state, budget = working.state, working.budget
+    evidence = (
+        "\n".join(
+            f"- {reference.execution_id}: {reference.summary}" for reference in state.executions
+        )
+        or "- (no query returned a result)"
+    )
+    concluded = "\n".join(f"- {finding.statement}" for finding in state.findings) or "- (none)"
+    # The actual rows of the most recent queries. Bounded and already masked, and
+    # handed to this one call rather than carried in the state: without them the
+    # composer sees only one-line summaries and cannot answer anything whose
+    # result has more than one row, which is most real questions.
+    results = "\n\n".join(
+        f"Result of {execution_id}:\n{rendered}" for execution_id, rendered in outcome.previews
+    )
+
+    caveat = ""
+    if outcome.caveat:
+        caveat = (
+            f"\n\nIMPORTANT: the investigation stopped early. {outcome.caveat} "
+            "Say plainly in your answer that this is a partial result and why, "
+            "and answer with what the evidence below does support."
+        )
+
     prompt = (
-        f"The question was: {await _question_of(context.org_id, context.run_id)}\n\n"
-        f"You ran this query for: {plan.purpose}\n\n{plan.sql}\n\n"
-        f"{result.render()}\n\n"
+        f"The question was: {state.question}\n\n"
+        f"Queries run, with what each returned:\n{evidence}\n\n"
+        f"What you concluded along the way:\n{concluded}\n\n"
+        f"{results}{caveat}\n\n"
         "Answer the question in plain words for the person who asked. Use only "
-        "these numbers. Cite the execution id above in supported_by. If the rows "
-        "do not actually answer the question, set answered to false and say so."
+        "these numbers. Cite in supported_by the execution ids your answer rests "
+        "on. If the evidence does not actually answer the question, set answered "
+        "to false and say what is missing."
     )
     completion = await llm.complete(
         role="compose",
@@ -300,15 +285,15 @@ async def _compose(
         actor_user_id=context.actor_user_id,
         settings=settings,
     )
-    state.llm_calls += 1
+    budget.spend_llm(completion.usage.total_tokens)
     final = completion.parsed_as(FinalizeIn)
 
-    cited = await _verified_citations(final.supported_by, state, events)
-    return await _write_ending(context, events, state, final, cited)
+    cited = await _verified_citations(final.supported_by, working, events)
+    return await _write_ending(context, events, working, final, cited)
 
 
 async def _finalize_refusal(
-    context: ToolContext, events: EventWriter, state: _State, reason: str
+    context: ToolContext, events: EventWriter, working: _Working, reason: str
 ) -> RunOutcome:
     """End without a further model call.
 
@@ -316,21 +301,34 @@ async def _finalize_refusal(
     spending a call to have a model rephrase a refusal is money for prose.
     """
     final = FinalizeIn(answer=reason, answered=False, supported_by=[], confidence="high")
-    return await _write_ending(context, events, state, final, ())
+    return await _write_ending(context, events, working, final, ())
 
 
 async def _write_ending(
     context: ToolContext,
     events: EventWriter,
-    state: _State,
+    working: _Working,
     final: FinalizeIn,
     cited: tuple[str, ...],
 ) -> RunOutcome:
-    """Record the answer, the finding behind it, and the trace entry."""
+    """Record the answer, the findings behind it, and the trace entry.
+
+    Findings plural now: a loop reaches several, and each is written with the
+    executions that support it rather than all of them being folded into one
+    sentence. The composed answer still gets a finding of its own when it is
+    answered and cited, because that is what the answer card is built around.
+    """
+    state = working.state
     await runs.record_answer(org_id=context.org_id, run_id=context.run_id, content=final.answer)
-    if final.answered and cited:
-        # A finding only when there is something to stand behind. A refusal has
-        # no finding — it concluded nothing about the data.
+
+    # The loop already persisted each finding as it reached it, so only the
+    # composed answer may still need one.
+    already = {finding.statement.strip() for finding in state.findings}
+    if final.answered and cited and final.answer.strip() not in already:
+        # A finding only when there is something to stand behind, and only when
+        # the loop did not already record this sentence — otherwise the answer
+        # card shows the same claim twice, which the Phase 7 gate caught once
+        # already.
         await runs.add_finding(
             org_id=context.org_id,
             run_id=context.run_id,
@@ -340,21 +338,23 @@ async def _write_ending(
             if final.confidence in {"high", "medium", "low"}
             else "medium",
         )
-    state.step = "answered"
-    await _checkpoint(context, state)
+
+    state.phase = "finished"
+    await _checkpoint(context, working)
     return RunOutcome(
         run_id=context.run_id,
         status="completed",
         answered=final.answered,
         answer=final.answer,
         execution_ids=cited,
-        llm_calls=state.llm_calls,
-        repaired=state.repaired,
+        llm_calls=working.budget.llm_calls,
+        iterations=state.iteration,
+        stopped_by=state.stopped_by,
     )
 
 
 async def _verified_citations(
-    claimed: list[str], state: _State, events: EventWriter
+    claimed: list[str], working: _Working, events: EventWriter
 ) -> tuple[str, ...]:
     """Only ids this run really produced.
 
@@ -362,7 +362,8 @@ async def _verified_citations(
     is completing a pattern — but the result is the same: a citation that looks
     checkable and is not. Dropped, and the trace says how many.
     """
-    real = [item for item in claimed if item in state.executions]
+    produced = working.state.execution_ids()
+    real = [item for item in claimed if item in produced]
     if len(real) != len(claimed):
         await events.emit(
             "error",
@@ -377,34 +378,19 @@ async def _verified_citations(
     return tuple(real)
 
 
-def _feedback(plan: Plan, result: ToolResult) -> str:
-    """What the one repair attempt is told.
-
-    The refused statement and the reason, and an instruction to fix rather than
-    to try something else — a model told only "that failed" tends to rewrite the
-    question instead of the query.
-    """
-    return (
-        "Your previous statement was refused and did not run.\n\n"
-        f"Statement:\n{plan.sql}\n\n"
-        f"Reason ({result.code}): {result.error}\n\n"
-        "Write a corrected statement that fixes exactly that problem, using only "
-        "tables and columns from the reference data. If the reference data cannot "
-        "answer the question, set answerable to false instead of guessing again."
-    )
-
-
 async def _question_of(org_id: uuid.UUID, run_id: uuid.UUID) -> str:
     view = await runs.get_run(org_id=org_id, run_id=run_id)
     return view.question
 
 
-async def _checkpoint(context: ToolContext, state: _State) -> None:
+async def _checkpoint(context: ToolContext, working: _Working) -> None:
     """Persist the working state at a step boundary (architecture 0.2.4).
 
-    Written directly rather than through `runs.service`, because this is the
-    run's own scratch space rather than a transition — and a transition is the
-    one thing `runs.service` insists on owning.
+    **Two columns, written together** (D-023): `state` is the agent's scratchpad
+    and `budget` is the ceiling it is held to. Written directly rather than
+    through `runs.service`, because this is the run's own working memory rather
+    than a transition — and a transition is the one thing `runs.service` insists
+    on owning.
     """
     from sqlalchemy import update
 
@@ -412,26 +398,29 @@ async def _checkpoint(context: ToolContext, state: _State) -> None:
 
     async with org_session(context.org_id) as session:
         await session.execute(
-            update(AgentRun).where(AgentRun.id == context.run_id).values(state=state.as_json())
+            update(AgentRun)
+            .where(AgentRun.id == context.run_id)
+            .values(state=working.state.as_json(), budget=working.budget.as_json())
         )
 
 
 async def _record_failure(
-    events: EventWriter, state: _State, message: str, *, category: str
+    events: EventWriter, working: _Working, message: str, *, category: str
 ) -> None:
-    state.step = "failed"
+    working.state.phase = "finished"
     await events.emit("error", {"category": category, "safe_message": message[:500]})
 
 
-def _failed(run_id: uuid.UUID, state: _State) -> RunOutcome:
+def _failed(run_id: uuid.UUID, working: _Working) -> RunOutcome:
     return RunOutcome(
         run_id=run_id,
         status="failed",
         answered=False,
         answer="",
-        execution_ids=tuple(state.executions),
-        llm_calls=state.llm_calls,
-        repaired=state.repaired,
+        execution_ids=working.state.execution_ids(),
+        llm_calls=working.budget.llm_calls,
+        iterations=working.state.iteration,
+        stopped_by=working.state.stopped_by,
     )
 
 
@@ -440,19 +429,25 @@ async def _finish(
     org_id: uuid.UUID,
     run_id: uuid.UUID,
     status: str,
-    state: _State,
+    working: _Working,
     outcome: RunOutcome | None,
 ) -> None:
-    """Move the run to its ending, once, whatever happened above."""
+    """Move the run to its ending, once, whatever happened above.
+
+    ``budget_exhausted`` carries no failure reason: it is an answer with caveats,
+    and the caveat is in the answer itself where the person asking will read it.
+    """
     await runs.transition(
         org_id=org_id,
         run_id=run_id,
         status=status,
-        failure_reason=None if status == "completed" else "The run could not be completed.",
+        failure_reason=("The run could not be completed." if status == "failed" else None),
         totals={
-            "llm_calls": state.llm_calls,
-            "queries": len(state.executions),
-            "repaired": state.repaired,
+            "llm_calls": working.budget.llm_calls,
+            "queries": working.budget.queries,
+            "iterations": working.state.iteration,
+            "tokens": working.budget.tokens,
+            "stopped_by": working.state.stopped_by,
             "answered": outcome.answered if outcome is not None else False,
         },
     )

@@ -4,6 +4,64 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-024 — Observe is deterministic, because 4.4's own caps did not fit its own loop
+Date: 2026-08-16 · Phase: 8 · PR: WP8.1b · Owner's direction: fix the document
+Context: Architecture 4.4 lists three model calls per iteration — Plan, Observe
+(cheap model), Reflect — and, four bullets later, a default ceiling of **20 LLM
+calls** for **8 iterations**. Those numbers cannot both hold: `8 × 3` is 24, plus
+Intake and Compose is 26. A run using its iterations as intended would be cut
+short by its *call* budget rather than its iteration budget, and the iteration
+cap — the one the loop is actually written around — would never be the binding
+constraint. Found while building the loop, by adding the numbers up.
+Options: (a) raise the call ceiling to ~28, keeping three model stages and making
+every run cost half as much again; (b) cut iterations to ~6 so three calls fit,
+losing depth to preserve a stage that adds little; (c) make **Observe
+deterministic** and keep both published numbers.
+Decision: (c), and **the architecture is edited rather than the contradiction
+worked around in code** (owner's direction). Observe's job is to turn a *typed*
+tool result into a compact summary for the state — a mechanical transformation of
+a value the tool layer has already validated. A model doing it costs a call,
+varies between runs, and can put a number in the summary that was never in the
+result, which is the one error this system must not make quietly. What 4.4
+actually asks of Observe — *raw rows never accumulate in the prompt* — is kept
+and kept more strictly: a result is shown in full to exactly one prompt, the
+Reflect call immediately after it, and never again.
+Consequences: an iteration costs two model calls, so a full run spends
+`8 × 2 = 16` plus Intake and Compose — **18 against 20**, and 4.4 now states that
+arithmetic so the two ceilings are checked against each other rather than
+independently plausible. The headroom is deliberate: adding a stage, or giving
+Observe a model later, breaks the fit and forces one of the caps to move
+consciously. Interpretation still happens at a model — Reflect sees the result —
+so nothing is lost but the call. `agent/loop.py::summarize` is the whole of
+Observe, and it is unit-testable without a provider, which is how the loop's
+tests stay hermetic.
+
+## D-023 — The budget is stored beside the research state, never inside it
+Date: 2026-08-16 · Phase: 8 · PR: WP8.1b · Owner's decision
+Context: Architecture 4.2 sketches `ResearchState` with `budget: BudgetState` as
+one of its fields, while 10.1 gives `agent_runs` two separate JSONB columns,
+`state` and `budget`. WP8.1a had to pick one and stored them apart; the owner
+confirmed that on 2026-08-16 and gave the reason that settles it.
+Options: (a) nest `BudgetState` inside `ResearchState` and write one column,
+matching 4.2's sketch literally and leaving 10.1's second column unused;
+(b) keep them in the two columns the schema already has.
+Decision: (b), and the architecture is edited so 4.2 says so. Two reasons, and
+the second is the one that makes this more than tidiness. **They answer different
+questions**: "what was this run allowed to spend, and what did it spend" is
+operational, read by an admin screen and by cost reporting, and should not
+require parsing an agent's scratchpad to answer. And **they have different trust
+levels** — the research state is a scratchpad the agent fills, while the budget
+is the ceiling the agent is *held to*. A limit that travels inside the thing it
+limits is one bad deserialization away from being editable, which is the same
+reasoning that keeps budgets in the controller and out of the prompt (4.4).
+Consequences: `ResearchState.as_json()` carries no budget, and `BudgetState`
+knows nothing about research. The loop checkpoints both, to their own columns, at
+every transition. A resumed run reads its ceilings from `agent_runs.budget`
+rather than from whatever the checkpoint claimed they were — so a state rewritten
+by hand, or by a future bug, cannot raise its own limits. `matching the schema
+beats matching a sketch` is the general rule this sets: where 10.1 and an earlier
+Part disagree about storage, 10.1 wins and the earlier Part is corrected.
+
 ## D-022 — A conversation names the database it is about
 Date: 2026-08-15 · Phase: 7 · PR: WP7.3a
 Context: WP7.2c made the scheduler **refuse rather than guess** when an

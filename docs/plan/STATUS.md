@@ -7,11 +7,9 @@ Current position: **Phases 0–5 and 7 signed off. Phase 6 merged, its gate
                   opens into the SQL behind it, and a question the data cannot
                   answer is honestly refused. The product does the thing it is
                   for, in front of a person.
-Next step:        Phase 8 / **WP8.1b** — the bounded loop itself, wired into
-                  `runner.py` in place of the single-shot middle. **WP8.1a is
-                  open for review**: the state a loop remembers and the ceilings
-                  it will be held to, split off (plan §1.1) because the whole was
-                  heading past 1,200 lines. Phase 8's
+Next step:        Phase 8 / **WP8.2** (`p8.2-capability-check`) — the join-graph
+                  reachability check and the honest refusal path. **WP8.1b is
+                  open for review.** Phase 8's
                   precondition (**B-039**) is closed, and its flagship refusal —
                   *"Which menu items sell best?"* — was already seen working live
                   during Phase 7's verification, so WP8.2 starts from a known-good
@@ -749,8 +747,50 @@ Prefer an edit that fails loudly over one that prints "done".
       24 tests, **100% on both modules**, no database and no model in any of them
       — if one of these ever needs a fixture, something has moved into the prompt
       that should not have
-- [ ] WP8.1b The bounded loop itself (understand → plan → act → observe →
-      reflect), wired into `runner.py` in place of the single-shot middle
+- [x] WP8.1b The bounded loop itself, wired into `runner.py`
+      — `agent/loop.py`: a **`for` loop, not a `while`**, so the iteration ceiling
+      *is* the range and it terminates whatever the model says, whatever the tools
+      return and whatever a future editor forgets. Every other budget is checked
+      before anything is spent, so a run never overshoots a cap it was given.
+      **The ends did not change**, which is what WP7.2b promised when it built
+      them: `runner.py` still opens with context and closes with a composed,
+      citation-verified answer that ends the run exactly once. What moved is one
+      call in the middle — and `repair` stopped being a concept, because a
+      correction is now simply the next iteration.
+      **A ceiling is an ending with caveats, not a failure.** Exhaustion gives the
+      run `budget_exhausted`, an answer that says what stopped it, and no
+      `failure_reason`. The progress rule gives plain `completed`, because nothing
+      was overspent — the run just had nothing further worth doing.
+      **D-024, at the owner's direction, fixes the document rather than working
+      round it.** 4.4 listed three model calls per iteration and, four bullets
+      later, 20 calls for 8 iterations: `8 × 3` plus intake and compose is 26, so
+      its own defaults did not fit its own loop. Observe is now **deterministic**
+      — a mechanical transformation of a typed result, which cannot invent a
+      number that was never there — bringing an iteration to two calls and a full
+      run to 18 against 20. 4.4 now states that arithmetic so the two ceilings are
+      checked against each other rather than being independently plausible.
+      **Three defects the work found, none of which a green suite would have
+      shown.** A refused query recorded nothing, so the next planner could not see
+      the refusal *and* the duplicate rule could not stop it being re-proposed. A
+      non-repairable failure — a database that is down — would have burned the
+      whole budget; WP7.2b's `repairable` rule is kept. And `finding_added` was
+      emitted twice per finding, once by the loop and once by the persistence;
+      findings are now written through a callback **when they are reached**, so an
+      interrupted run keeps what it concluded and the trace says it once.
+      **B-049 filed and pinned by a test**: the duplicate rule compares proposals,
+      not canonical statements, because the canonical form only exists after the
+      query has been spent. One question written two ways still runs twice.
+      44 tests across the loop, the state, the budgets and Observe; `runner.py`,
+      `state.py` and `budget.py` at **100%**, `loop.py` at 92%, suite at 94%.
+      Verified live twice: the gate question answered **3,718** in one iteration,
+      and *"which store had the most orders in July 2026, and how did its revenue
+      compare?"* named **Northgate, 955 orders, $31,128.68** — figures that match
+      the database exactly. That second question is the one that earned its
+      keep: it first came back *unanswered*, because the composer was being given
+      one-line summaries and no rows, so it could not answer anything with more
+      than one row in it. The composer now gets a **bounded, already-masked
+      snapshot** of the last few results — handed to one final call, never
+      accumulated into the state, which is what 4.4 actually forbids
 - [ ] WP8.2 Capability check (join-graph) + honest refusal path
 - [ ] WP8.3 SSE streaming + durable replay + trace UI               ← gate PR
 - [ ] GATE: pizza scenario ≤8 iters; menu-items → honest refusal; sign-off

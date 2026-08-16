@@ -37,6 +37,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
 from dataagent.agent import scheduler
+from dataagent.agent.loop import Reflection
 from dataagent.agent.planner import Plan
 from dataagent.agent.tools.base import ToolContext
 from dataagent.agent.tools.finalize import FinalizeIn
@@ -86,7 +87,7 @@ def _cite_what_actually_ran(request: LLMRequest) -> str:
     a constant.
     """
     prompt = "\n".join(message.content for message in request.messages)
-    found = re.search(r'"execution_id":\s*"([0-9a-f-]{36})"', prompt)
+    found = re.search(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", prompt)
     assert found is not None, f"the composing prompt carried no execution id:\n{prompt}"
     return FinalizeIn(
         answer=f"{SHOPS_OPENED_IN_2021} shop opened in 2021.",
@@ -106,6 +107,19 @@ def scripted(fake_llm: FakeLLM) -> FakeLLM:
             reason="",
         ).model_dump_json(),
         role="sql",
+    )
+    # One reflection that ends the investigation: this question needs one query,
+    # and the loop is not the thing under test here — the path from HTTP to a
+    # cited answer is.
+    fake_llm.script(
+        Reflection(
+            findings=[],
+            open_questions=[],
+            next_purpose="",
+            done=True,
+            rationale="the count answers it",
+        ).model_dump_json(),
+        role="plan",
     )
     fake_llm.script(_cite_what_actually_ran, role="compose")
     return fake_llm
