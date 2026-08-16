@@ -4,6 +4,67 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-026 — A join path is safe by direction, not by degree
+Date: 2026-08-16 · Phase: 8 · PR: WP8.4 (B-057) · Owner's direction
+Context: `capability.py` collapsed every declared foreign key into undirected
+adjacency and treated *reachable* as *joinable*. In a star schema that is false.
+Loading a real F&B warehouse exposed it: every fact and dimension carries
+`business_key` referencing a **one-row** `dim_business`, giving that node degree
+15 and a path between almost any two tables. The check therefore called
+`fact_sale → dim_business → fact_purchase` answerable — 112,327 rows against
+13,660 sharing a single key value, which is a 1.5-billion-row cartesian product.
+That is the exact failure `capability.py`'s own docstring opens with, arriving
+*through* the check rather than around it. The DAL's row cap bounds what comes
+back and does nothing whatever for the aggregate, which is the number a person
+reads. The pizza fixture has no hub table, so no amount of testing against it
+could have shown this.
+Options: (a) refuse to route a path through a node above some degree; (b) refuse
+to route through a dimension with one row, or one distinct key; (c) cap path
+length; (d) keep the direction the foreign keys already declare and refuse only
+the shape that actually fans out.
+Decision: (d), and the verdict becomes **three-valued** rather than gaining a
+second refusal. A foreign key is many-to-one *by construction* — its target is a
+unique key or the engine would have rejected the constraint — so every edge
+carries a direction the undirected adjacency was discarding. Child→parent
+**narrows**; parent→child **fans out**. A path is a safe join exactly when it
+never turns *up then down* at an intermediate node, because such a node is a
+shared parent whose two children are being multiplied rather than matched — the
+textbook **chasm trap**. A pair with a chasm-free path is `joinable`; a pair
+reachable only through a chasm is `comparable`; a pair with no path is
+`unreachable`, and only that last one refuses.
+Why not the other three: each treats a symptom. **(a)** is arbitrary and wrong
+in both directions — a legitimate `dim_date` referenced by twelve facts trips it
+while a two-row hub slips under. **(b)** fixes one instance: a five-row
+`dim_business` still yields a fifth of a cartesian product, stated just as
+confidently, and it makes a structural property depend on today's row counts.
+**(c)** cannot separate the cases at all, since `payments → orders → customers`
+is two hops and safe while `fact → dim → fact` is two hops and fatal. (d) is
+structural — no threshold to tune, no statistics to sample, nothing that drifts
+as the data grows — stays deterministic as 4.3 requires, and reads columns
+`catalog_relationships` already stores.
+**`comparable` must not refuse.** Two facts over a shared dimension genuinely
+are comparable: aggregate each to the common grain, then join the aggregates. So
+the planner is handed that instruction rather than a prohibition. Turning the
+middle case into a refusal would trade B-057 for **B-058** — a fluent refusal of
+an answerable question — which is the worse defect, because a wrong answer is at
+least checkable in principle while a false refusal teaches people the product is
+broken.
+Consequences: `JoinGraph` gains `parents` (empty means direction unknown, which
+reads as the pre-D-026 behaviour so a hand-built graph is never *more* strict
+than the catalog); `safe_path` searches over `(node, arrival direction)`;
+`CapabilityChasm` carries the hub so the guidance can name the key to aggregate
+to. 10.3's event vocabulary is untouched — a chasm rides in the existing
+`capability_checked` payload rather than earning a type no UI can render.
+`answerable` still means "no unreachable pair", so the Phase 8 gate's criterion
+is unchanged and its sign-off stands. **What this does not do:** `graph.check`
+sees the *set* of tables a statement names, not how it joins them, so a correct
+aggregate-then-join CTE is indistinguishable here from a direct join of detail
+rows. Blocking at that point would refuse the right answer with the wrong one,
+so stage 1 steers the planner up front — where 4.3 puts it — and records the
+chasm in the trace. Blocking needs the join predicates, which means a
+`join_pairs()` sibling to `tables_named` inside `dal/validator.py`, and that is a
+security-boundary change owed its own reviewed PR.
+
 ## D-025 — A card's figures come from the engine, or they are absent
 Date: 2026-08-16 · Phase: 8 · PR: B-051 · Owner's direction
 Context: `profiler.py` computed `min_val`/`max_val` from the sampled values.

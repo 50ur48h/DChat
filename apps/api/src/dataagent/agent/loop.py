@@ -283,6 +283,20 @@ async def research(
                 execution_ids=state.execution_ids(),
                 previews=tuple(previews),
             )
+        if verdict.chasms:
+            # A chasm is recorded and **not blocked**, deliberately (D-026).
+            # `tables_named` gives the set of tables the statement mentions and
+            # not how it joins them, so a statement that already aggregates each
+            # side in its own CTE — the correct query for this pair — is
+            # indistinguishable here from one that joins the detail rows. To
+            # block on the table set alone would refuse the right answer along
+            # with the wrong one, which is B-058 arriving from the other
+            # direction. The steering that *is* safe happens before the model
+            # writes anything, in `runner._investigate`, where 4.3 puts it.
+            # Blocking waits on reading the join predicates themselves, which
+            # belongs in `dal/validator.py` and therefore in its own reviewed PR.
+            state.capability = verdict.as_payload()
+            await events.emit("capability_checked", verdict.as_payload())
 
         digest = proposed_hash(plan.sql)
         if state.has_run(digest):

@@ -19,7 +19,14 @@ import uuid
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from dataagent.agent.capability import CapabilityGap, JoinGraph, load_join_graph
+from dataagent.agent.capability import (
+    COMPARABLE,
+    JOINABLE,
+    UNREACHABLE,
+    CapabilityGap,
+    JoinGraph,
+    load_join_graph,
+)
 from dataagent.agent.loop import Reflection
 from dataagent.agent.planner import Plan
 from dataagent.agent.tools.base import ToolContext
@@ -30,8 +37,22 @@ from dataagent.runs.events import read_events
 from llm_fixture import build_settings
 
 
-def _graph(**edges: list[str]) -> JoinGraph:
-    return JoinGraph(edges={name: frozenset(links) for name, links in edges.items()})
+def _graph(**references: list[str]) -> JoinGraph:
+    """`orders=["customers"]` means *orders has a foreign key to customers*.
+
+    Directional input, because that is what a foreign key actually is, and since
+    D-026 it is what decides a chasm from a safe path. The undirected adjacency
+    the reachability tests use is derived here rather than written out twice.
+    """
+    edges: dict[str, set[str]] = {name: set() for name in references}
+    for child, parents in references.items():
+        for parent in parents:
+            edges.setdefault(child, set()).add(parent)
+            edges.setdefault(parent, set()).add(child)
+    return JoinGraph(
+        edges={name: frozenset(links) for name, links in edges.items()},
+        parents={name: frozenset(links) for name, links in references.items() if links},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +63,7 @@ def _graph(**edges: list[str]) -> JoinGraph:
 def test_a_declared_foreign_key_joins_both_ways() -> None:
     """A foreign key points one way; a join works either way. Treating the graph
     as directed would refuse half the questions it should allow."""
-    graph = _graph(orders=["customers"], customers=["orders"])
+    graph = _graph(orders=["customers"], customers=[])
 
     assert graph.path("orders", "customers") == ("orders", "customers")
     assert graph.path("customers", "orders") == ("customers", "orders")
@@ -52,13 +73,13 @@ def test_a_multi_hop_path_is_found_and_reported_at_its_shortest() -> None:
     """`payments → orders → customers` is a real answer to "can these be
     combined", and the hop count is what tells a person whether the join is
     sensible."""
-    graph = _graph(payments=["orders"], orders=["payments", "customers"], customers=["orders"])
+    graph = _graph(payments=["orders"], orders=["customers"], customers=[])
 
     assert graph.path("payments", "customers") == ("payments", "orders", "customers")
 
 
 def test_an_isolated_table_reaches_nothing() -> None:
-    graph = _graph(orders=["customers"], customers=["orders"], menu_items=[])
+    graph = _graph(orders=["customers"], customers=[], menu_items=[])
 
     assert graph.path("menu_items", "orders") is None
     assert graph.check(["menu_items", "orders"]).answerable is False
@@ -75,7 +96,7 @@ def test_one_table_is_always_answerable() -> None:
 def test_a_schema_prefix_is_the_same_table() -> None:
     """A statement says `FROM orders` as often as `FROM public.orders`, and a
     check that missed a gap over a prefix would be worse than no check."""
-    graph = _graph(orders=["customers"], customers=["orders"], menu_items=[])
+    graph = _graph(orders=["customers"], customers=[], menu_items=[])
 
     assert graph.check(["public.orders", '"public"."customers"']).answerable is True
     assert graph.check(["public.menu_items", "public.orders"]).answerable is False
@@ -94,7 +115,7 @@ def test_the_refusal_names_both_tables_and_what_would_unlock_it() -> None:
 def test_the_gap_that_fails_is_the_one_named() -> None:
     """Pairwise rather than "is the set connected", so a question over three
     tables says *which* one is stranded."""
-    graph = _graph(orders=["customers"], customers=["orders"], menu_items=[])
+    graph = _graph(orders=["customers"], customers=[], menu_items=[])
 
     verdict = graph.check(["orders", "customers", "menu_items"])
 
@@ -102,6 +123,127 @@ def test_the_gap_that_fails_is_the_one_named() -> None:
         ("customers", "menu_items"),
         ("menu_items", "orders"),
     }
+
+
+# ---------------------------------------------------------------------------
+# The chasm trap (B-057, D-026)
+#
+# The star schema, in the smallest form that has the problem: two facts and the
+# one-row dimension they both key to. Every one of these fails against the
+# pre-D-026 graph, which said `joinable` for the pair on the strength of a
+# two-hop path — a cartesian product it called an answer.
+# ---------------------------------------------------------------------------
+
+
+def _star() -> JoinGraph:
+    return _graph(
+        fact_sale=["dim_business", "dim_outlet"],
+        fact_purchase=["dim_business", "dim_supplier"],
+        dim_outlet=["dim_business"],
+        dim_supplier=["dim_business"],
+        dim_business=[],
+    )
+
+
+def test_two_facts_under_a_shared_parent_are_comparable_and_not_joinable() -> None:
+    """The defect, stated. `fact_sale → dim_business → fact_purchase` walks *up*
+    a foreign key and then back *down* another, so the shared parent multiplies
+    the two sides together instead of matching them."""
+    graph = _star()
+
+    assert graph.path("fact_sale", "fact_purchase") is not None, "still reachable"
+    assert graph.safe_path("fact_sale", "fact_purchase") is None, "and not safely"
+    assert graph.classify("fact_sale", "fact_purchase") == COMPARABLE
+
+
+def test_a_chasm_does_not_refuse_the_question() -> None:
+    """The half of this that matters as much as the detection.
+
+    These two tables *can* be compared — aggregate each to the shared key, then
+    join the aggregates — so making the pair unanswerable would trade B-057 for
+    B-058, which is the worse defect."""
+    verdict = _star().check(["fact_sale", "fact_purchase"])
+
+    assert verdict.answerable is True, "a chasm is not a refusal"
+    assert verdict.gaps == ()
+    assert [(c.left, c.right, c.via) for c in verdict.chasms] == [
+        ("fact_purchase", "fact_sale", "dim_business")
+    ]
+
+
+def test_the_guidance_names_the_key_and_says_what_to_do_instead() -> None:
+    """A prohibition would leave the model with nowhere to go. This names the
+    hub, so "aggregate to the shared key first" is an instruction it can follow."""
+    guidance = _star().check(["fact_sale", "fact_purchase"]).guidance()
+
+    assert "dim_business" in guidance
+    assert "Aggregate" in guidance
+    assert "multiplies" in guidance
+
+
+def test_a_fact_still_joins_to_its_own_dimensions() -> None:
+    """The normal star query, which must not become collateral damage: one hop
+    up to a dimension is a many-to-one match and always was fine."""
+    graph = _star()
+
+    assert graph.classify("fact_sale", "dim_outlet") == JOINABLE
+    assert graph.classify("fact_sale", "dim_business") == JOINABLE
+    assert graph.check(["fact_sale", "dim_outlet", "dim_business"]).chasms == ()
+
+
+def test_two_dimensions_of_one_fact_are_joinable_through_it() -> None:
+    """`dim_outlet → fact_sale → dim_item` goes *down* then *up*, which is the
+    ordinary "sales by outlet and item" shape and preserves the fact's grain.
+    Only up-then-down is a chasm."""
+    graph = _graph(fact_sale=["dim_outlet", "dim_item"], dim_outlet=[], dim_item=[])
+
+    assert graph.classify("dim_outlet", "dim_item") == JOINABLE
+
+
+def test_a_chain_of_many_to_one_hops_stays_joinable() -> None:
+    """`payments → orders → customers` is every hop narrowing, so the grain of
+    the left table survives. The multi-hop case D-026 must not break."""
+    graph = _graph(payments=["orders"], orders=["customers"], customers=[])
+
+    assert graph.safe_path("payments", "customers") == ("payments", "orders", "customers")
+    assert graph.classify("payments", "customers") == JOINABLE
+
+
+def test_an_unreachable_pair_is_still_unreachable() -> None:
+    """Three-valued, not two-renamed: a pair with no path at all keeps refusing,
+    which is the behaviour the Phase 8 gate was signed off on."""
+    graph = _graph(orders=["customers"], customers=[], menu_items=[])
+
+    assert graph.classify("menu_items", "orders") == UNREACHABLE
+    assert graph.check(["menu_items", "orders"]).answerable is False
+
+
+def test_a_safe_route_wins_over_a_chasm_route() -> None:
+    """Two tables joined *both* through a shared parent and by a direct key are
+    joinable: the verdict is about whether a safe path exists, not about whether
+    an unsafe one does."""
+    graph = _graph(
+        fact_sale=["dim_business", "dim_outlet"],
+        dim_outlet=["dim_business"],
+        dim_business=[],
+    )
+
+    assert graph.classify("fact_sale", "dim_outlet") == JOINABLE
+    assert graph.check(["fact_sale", "dim_outlet"]).chasms == ()
+
+
+def test_a_graph_without_direction_classifies_nothing_as_a_chasm() -> None:
+    """The default is the old behaviour, so a hand-built or future admin-declared
+    graph that arrives without direction cannot silently start refusing."""
+    graph = JoinGraph(
+        edges={
+            "fact_sale": frozenset({"dim_business"}),
+            "fact_purchase": frozenset({"dim_business"}),
+            "dim_business": frozenset({"fact_sale", "fact_purchase"}),
+        }
+    )
+
+    assert graph.classify("fact_sale", "fact_purchase") == JOINABLE
 
 
 async def test_the_graph_includes_tables_that_join_to_nothing(
@@ -119,6 +261,56 @@ async def test_the_graph_includes_tables_that_join_to_nothing(
     assert "products" in graph.edges, "the fixture's unrelated table is present"
     assert graph.edges["products"] == frozenset(), "and it joins to nothing"
     assert graph.path("products", "shops") is None
+
+
+# ---------------------------------------------------------------------------
+# What the planner is actually told (B-056)
+# ---------------------------------------------------------------------------
+
+
+def test_the_planner_hears_about_the_tables_the_question_selected() -> None:
+    """The truncation used to be alphabetical, which made it noise.
+
+    `unreachable_pairs()` sorts by table name, and `runner` took the first
+    twenty. On a schema with 385 gaps that meant twenty facts about whichever
+    table sorts first and none about the one the question was about — so 4.3's
+    "told up front" steered nothing, and the check caught the model afterwards
+    instead. Relevance is measured against the tables `context_selected` chose.
+    """
+    from dataagent.agent.runner import CAPABILITY_NOTE_LIMIT, relevant_pairs
+
+    noise = [
+        CapabilityGap(left="aaa_first_alphabetically", right=f"other_{index}")
+        for index in range(CAPABILITY_NOTE_LIMIT * 2)
+    ]
+    wanted = CapabilityGap(left="fact_sale", right="dim_calendar")
+
+    picked = relevant_pairs([*noise, wanted], ["fact_sale", "dim_calendar"])
+
+    assert picked == (wanted,), "only the pairs the question is about"
+
+
+def test_a_pair_the_question_spans_outranks_one_it_merely_touches() -> None:
+    """Both endpoints selected beats one, because the model is about to write a
+    statement over exactly those tables."""
+    from dataagent.agent.runner import relevant_pairs
+
+    spanning = CapabilityGap(left="fact_sale", right="dim_calendar")
+    touching = CapabilityGap(left="fact_sale", right="meta_workflow")
+
+    picked = relevant_pairs([touching, spanning], ["fact_sale", "dim_calendar"])
+
+    assert picked[0] == spanning
+
+
+def test_nothing_selected_falls_back_to_the_first_few() -> None:
+    """A run whose context chose no tables still gets a bounded note rather than
+    the whole catalog or nothing at all."""
+    from dataagent.agent.runner import CAPABILITY_NOTE_LIMIT, relevant_pairs
+
+    pairs = [CapabilityGap(left=f"a{i}", right=f"b{i}") for i in range(50)]
+
+    assert len(relevant_pairs(pairs, [])) == CAPABILITY_NOTE_LIMIT
 
 
 # ---------------------------------------------------------------------------

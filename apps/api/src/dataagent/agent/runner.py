@@ -39,10 +39,11 @@ the same code moves behind a worker in V1.5 without a rewrite.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from dataagent.agent.budget import Budget, BudgetState
-from dataagent.agent.capability import load_join_graph
+from dataagent.agent.capability import CapabilityChasm, CapabilityGap, load_join_graph
 from dataagent.agent.context import build_context
 from dataagent.agent.loop import LoopOutcome, research
 from dataagent.agent.state import ResearchState, StateFinding
@@ -55,7 +56,7 @@ from dataagent.runs import service as runs
 from dataagent.runs.events import EventWriter
 from dataagent.tenancy.session import org_session
 
-__all__ = ["RunOutcome", "execute_run"]
+__all__ = ["RunOutcome", "execute_run", "relevant_pairs"]
 
 #: Stopping for one of these is `budget_exhausted`; stopping for `no_progress` is
 #: an ordinary completion, because nothing was overspent — the run simply had
@@ -154,6 +155,40 @@ async def execute_run(
         await _finish(org_id=org_id, run_id=run_id, status=ending, working=working, outcome=outcome)
 
 
+#: How many capability facts the planner is told up front. The limit is real —
+#: a star schema yields hundreds of pairs and the prompt has a budget — but which
+#: ones it keeps is the whole point (B-056).
+CAPABILITY_NOTE_LIMIT = 20
+
+
+def relevant_pairs[PairT: CapabilityGap | CapabilityChasm](
+    pairs: Sequence[PairT], selected: Sequence[str]
+) -> tuple[PairT, ...]:
+    """The pairs this question is about, not the ones that sort first (B-056).
+
+    4.3 hands the planner its capability facts up front *"so a well-behaved model
+    avoids the dead end rather than being caught in it"*. That only works if the
+    facts concern the tables in hand. This used to be `pairs[:20]` over a list
+    sorted by table name, which on the F&B source meant twenty facts about
+    `bridge_item_ingredient` and **none** of the fourteen about `fact_sale` —
+    the warning was noise, and the check caught the model afterwards instead of
+    steering it.
+
+    Both endpoints selected beats one, because a pair the question spans is worth
+    more than a pair it merely touches. Ordering is otherwise left alone, so the
+    result stays deterministic for the same catalog and question.
+    """
+    wanted = {name.strip().strip('"').split(".")[-1].lower() for name in selected}
+    if not wanted:
+        return tuple(pairs[:CAPABILITY_NOTE_LIMIT])
+
+    def rank(pair: PairT) -> int:
+        return -((pair.left in wanted) + (pair.right in wanted))
+
+    touching = [pair for pair in pairs if pair.left in wanted or pair.right in wanted]
+    return tuple(sorted(touching, key=rank)[:CAPABILITY_NOTE_LIMIT])
+
+
 async def _investigate(
     *,
     context: ToolContext,
@@ -197,22 +232,46 @@ async def _investigate(
 
     graph = await load_join_graph(context.org_id, source_id)
     policy = await source_policy(context.org_id, source_id)
-    gaps = graph.unreachable_pairs()
+    gaps = relevant_pairs(graph.unreachable_pairs(), bundle.table_names)
+    chasms = relevant_pairs(graph.comparable_pairs(), bundle.table_names)
     state.capability = {
         "unreachable": [{"left": gap.left, "right": gap.right} for gap in gaps],
+        "comparable": [
+            {"left": chasm.left, "right": chasm.right, "via": chasm.via} for chasm in chasms
+        ],
     }
     await events.emit(
         "capability_checked",
-        {"unreachable": [f"{gap.left} ↔ {gap.right}" for gap in gaps][:20]},
+        {
+            "unreachable": [f"{gap.left} ↔ {gap.right}" for gap in gaps],
+            "comparable": [f"{chasm.left} ↔ {chasm.right} via {chasm.via}" for chasm in chasms],
+        },
     )
+    notes: list[str] = []
     if gaps:
-        bundle = bundle.with_capability_note(
+        notes.append(
             "These tables cannot be combined in one query — this database has no "
             "link between them: "
-            + "; ".join(f"{gap.left} and {gap.right}" for gap in gaps[:20])
+            + "; ".join(f"{gap.left} and {gap.right}" for gap in gaps)
             + ". Do not write a query joining any such pair; if the question needs "
             "one, set answerable to false and say which link is missing."
         )
+    if chasms:
+        # Deliberately phrased as an instruction rather than a prohibition
+        # (D-026): these pairs have a correct query, and a model told only "do
+        # not" would refuse a question it could have answered.
+        notes.append(
+            "These tables are related only through a shared parent, so joining them "
+            "directly multiplies their rows together instead of matching them: "
+            + "; ".join(
+                f"{chasm.left} and {chasm.right} (both under {chasm.via})" for chasm in chasms
+            )
+            + ". To combine such a pair, aggregate each side to the shared key in its "
+            "own subquery or CTE first, then join the two aggregates. Do not join the "
+            "detail rows."
+        )
+    if notes:
+        bundle = bundle.with_capability_note(" ".join(notes))
 
     async def save() -> None:
         await _checkpoint(context, working)
