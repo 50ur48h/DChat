@@ -41,6 +41,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import date
 
 from dataagent.agent.budget import Budget, BudgetState
 from dataagent.agent.capability import CapabilityChasm, CapabilityGap, load_join_graph
@@ -105,12 +106,18 @@ async def execute_run(
     registry: ToolRegistry | None = None,
     settings: Settings | None = None,
     budget: Budget | None = None,
+    as_of: date | None = None,
 ) -> RunOutcome:
     """Drive one queued run to an ending. Never raises for the question's sake.
 
     Takes ids rather than objects so it can be called from anywhere — a request,
     a background task, a script, a test — which is the constraint that keeps the
     V1.5 move behind a worker free.
+
+    ``as_of`` is what this run calls today (**D-027**). None means the wall clock,
+    which is what a person asking in a browser means; the eval harness passes a
+    fixed date, and that is the whole mechanism by which *"revenue last month"*
+    has the same answer next year as it does now.
     """
     tools = registry if registry is not None else _registry_with_finalize()
     events = EventWriter(org_id=org_id, run_id=run_id)
@@ -124,6 +131,7 @@ async def execute_run(
         role=role,
         actor_user_id=actor_user_id,
         data_source_id=data_source_id,
+        as_of=as_of,
     )
 
     await runs.transition(org_id=org_id, run_id=run_id, status="running")
@@ -208,14 +216,25 @@ async def _investigate(
     state.question = await _question_of(context.org_id, context.run_id)
 
     bundle = await build_context(
-        org_id=context.org_id, question=state.question, data_source_id=context.data_source_id
+        org_id=context.org_id,
+        question=state.question,
+        data_source_id=context.data_source_id,
+        as_of=context.as_of,
     )
     state.phase = "context"
     state.table_names = list(bundle.table_names)
+    state.as_of = bundle.as_of.isoformat()
     await _checkpoint(context, working)
     await events.emit(
         "context_selected",
-        {"tables": list(bundle.table_names), "restrictions": len(bundle.restrictions)},
+        {
+            "tables": list(bundle.table_names),
+            "restrictions": len(bundle.restrictions),
+            # In the trace because a person reading an answer about "last month"
+            # is owed the date that phrase was resolved against (D-027). It is
+            # also the only way to tell a stale answer from a wrong one.
+            "as_of": bundle.as_of.isoformat(),
+        },
     )
 
     # The join graph, loaded once. The pairs that cannot be joined are told to

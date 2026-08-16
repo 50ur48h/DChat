@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy import URL, text
@@ -541,3 +542,74 @@ async def test_the_run_state_is_checkpointed_as_it_goes(
     assert spent["iterations"] == 1
     assert spent["queries"] == 1
     assert spent["limits"]["iterations"] == 8, "the allowance this run was given"
+
+
+# ---------------------------------------------------------------------------
+# What this run called today (B-005, D-027)
+# ---------------------------------------------------------------------------
+
+
+async def test_the_trace_records_the_date_relative_periods_were_resolved_against(
+    context: ToolContext, fake_llm: FakeLLM
+) -> None:
+    """A person reading an answer about "last month" is owed the date that phrase
+    meant. It is also the only way to tell a stale answer from a wrong one."""
+    fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql")
+    fake_llm.script(_reflect(), role="plan")
+    fake_llm.script(_cites_the_execution, role="compose")
+    run_id = await _run_for(context, "How many shops did we have last month?")
+
+    await execute_run(
+        org_id=context.org_id,
+        run_id=run_id,
+        data_source_id=context.data_source_id or uuid.uuid4(),
+        actor_user_id=context.actor_user_id,
+        settings=build_settings(),
+        as_of=date(2026, 7, 15),
+    )
+
+    events = await read_events(org_id=context.org_id, run_id=run_id)
+    selected = next(e for e in events if e.type == "context_selected")
+    assert selected.payload["as_of"] == "2026-07-15"
+
+
+async def test_a_pinned_date_reaches_the_prompt_the_model_is_given(
+    context: ToolContext, fake_llm: FakeLLM
+) -> None:
+    """The mechanism the eval harness depends on. Asserted against the prompt
+    itself rather than the trace, because the trace could be right while the
+    model was told something else — which is the exact shape of B-051."""
+    fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql")
+    fake_llm.script(_reflect(), role="plan")
+    fake_llm.script(_cites_the_execution, role="compose")
+    run_id = await _run_for(context, "How many shops did we have last month?")
+
+    await execute_run(
+        org_id=context.org_id,
+        run_id=run_id,
+        data_source_id=context.data_source_id or uuid.uuid4(),
+        actor_user_id=context.actor_user_id,
+        settings=build_settings(),
+        as_of=date(2026, 7, 15),
+    )
+
+    planning = fake_llm.calls_for("sql")[0]
+    system = " ".join(m.content for m in planning.request.messages if m.role == "system")
+    assert "Today is 2026-07-15" in system
+    assert "CURRENT_DATE" in system, "the escape is named, not merely the date"
+
+
+async def test_a_run_with_no_date_given_anchors_on_today(
+    context: ToolContext, fake_llm: FakeLLM
+) -> None:
+    """The default is the wall clock: what a person asking in a browser means."""
+    fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql")
+    fake_llm.script(_reflect(), role="plan")
+    fake_llm.script(_cites_the_execution, role="compose")
+    run_id = await _run_for(context, "How many shops are there?")
+
+    await _execute(context, run_id)
+
+    events = await read_events(org_id=context.org_id, run_id=run_id)
+    selected = next(e for e in events if e.type == "context_selected")
+    assert selected.payload["as_of"] == datetime.now(UTC).date().isoformat()

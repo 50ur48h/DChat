@@ -4,6 +4,55 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-027 — The run is told what "today" is; the model does not choose
+Date: 2026-08-16 · Phase: 8 · PR: B-005 · Owner's direction
+Context: **B-005** was filed as an eval problem — the seed pins
+`END_DATE = 2026-07-31`, so *"last full month"* stops meaning July as real time
+moves on. Investigating it before deciding showed the defect is a product one.
+Nothing in the prompt said what the current date was, so the model picked an
+anchor per question and picked **differently**: one live run resolved *"revenue
+last full month"* with `DATE_TRUNC('MONTH', CURRENT_DATE)` — the database
+server's clock — and another, minutes later, resolved *"why did revenue decline
+recently"* with `DATE_TRUNC('MONTH', MAX(order_date))` — the data's own last
+date. The first drifts with the wall clock, the second does not drift at all, and
+on the day they were measured **both were right**: today is 2026-08-16, so
+`CURRENT_DATE` lands in August and "last full month" is July, which is exactly
+where the fixture stops. A right answer for a reason nobody chose, which is the
+same shape as **B-051** (a card that lied) and **B-060** (a silent choice between
+two defensible tables). Eight of the twenty golden evals depend on "now".
+Options: (a) pin every eval question to absolute dates; (b) a `SEED_END_DATE`
+override that CI fixes while local demos track today; (c) give the run an
+explicit `as_of` and make the model resolve every relative period against it;
+(d) wait until it breaks.
+Decision: (c), with (a) kept for the evals that were always about a fixed window.
+`as_of` is a field on `ContextBundle` and on `ToolContext`, defaulted to the wall
+clock — which is what a person asking in a browser means — and passed explicitly
+by anything that needs determinism. It is rendered at **L0** as its own titled
+block, so a tight budget can never drop it, and it names both escapes: no clock
+function, and no `MAX(some_date)` either. Why not the others: **(a)** cannot
+express golden eval #19 at all, since nothing is permanently in the future, and
+it stops the evals testing the relative-time handling every real question uses;
+**(b)** makes CI and local into different products, which is the configuration
+that hides bugs rather than catching them, and it still leaves the anchor
+undefined — `CURRENT_DATE` against `MAX()` would remain a coin flip; **(d)** was
+two weeks of runway into the middle of Phase 9.
+The seed's `END_DATE` stays frozen and `truths.json` is untouched, which was the
+point of pinning them in the first place.
+Consequences: the prompt grows by ~132 tokens on **every** call, L0 being
+undroppable and the loop paying it per iteration — 2.2% of the default budget,
+and the cost of the property. `as_of` is written to `context_selected` so a
+reader of a trace can see what "last month" meant, and onto the checkpoint so a
+resumed run keeps the anchor it started with rather than silently changing what
+"recently" means halfway through. Verified live: the same question at the same
+`as_of` produces **byte-identical SQL** with literal dates and no clock function,
+and at `as_of = 2027-03-09` it resolves February 2027 and answers *"the orders
+data ends on 2026-07-31, so it does not cover the required month"* — the drift
+made visible instead of silently returning zero rows. **What this does not do:**
+there is no way for a user to say *"as of 30 June"* in the UI, which is a real
+want and is **B-062**; and WP9.1's deterministic critic can now check that the
+range in the SQL matches the range the question stated, which it could not have
+done against a range nobody defined.
+
 ## D-026 — A join path is safe by direction, not by degree
 Date: 2026-08-16 · Phase: 8 · PR: WP8.4 (B-057) · Owner's direction
 Context: `capability.py` collapsed every declared foreign key into undirected
