@@ -27,6 +27,7 @@ from dataagent.agent.capability import (
     JoinGraph,
     load_join_graph,
 )
+from dataagent.agent.critic import CriticOut
 from dataagent.agent.loop import Reflection
 from dataagent.agent.planner import Plan
 from dataagent.agent.tools.base import ToolContext
@@ -450,6 +451,9 @@ async def test_a_question_over_joinable_tables_is_not_refused(
         ).model_dump_json(),
         role="compose",
     )
+    # A run now ends with a critic pass (WP9.1), scripted explicitly so a
+    # critic that stopped running would fail here rather than pass quietly.
+    fake_llm.script(CriticOut(verdict="pass", reasons=[]).model_dump_json(), role="critic")
     run_id = await _ask(context, "How many shops are in each region?")
 
     outcome = await _execute(context, run_id)

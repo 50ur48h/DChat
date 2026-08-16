@@ -18,6 +18,7 @@ from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from dataagent.agent.budget import Budget
+from dataagent.agent.critic import CriticOut
 from dataagent.agent.loop import ReflectFinding, Reflection
 from dataagent.agent.planner import Plan
 from dataagent.agent.runner import RunOutcome, execute_run
@@ -122,6 +123,9 @@ def _script_investigation(fake_llm: FakeLLM, steps: int, *, finish: bool = True)
         last = finish and index == steps - 1
         fake_llm.script(_reflect(done=last, statement=f"finding {index}"), role="plan", times=1)
     fake_llm.script(_final(), role="compose")
+    # A run now ends with a critic pass (WP9.1). Scripted explicitly rather
+    # than defaulted, so a critic that stopped running would fail here.
+    fake_llm.script(CriticOut(verdict="pass", reasons=[]).model_dump_json(), role="critic")
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +149,7 @@ async def test_a_four_step_investigation_runs_every_step(
     assert outcome.iterations == 4
     assert outcome.stopped_by is None
     assert await _queries_run(context, run_id, wired) == 4
-    assert outcome.llm_calls == 9, "four plans, four reflections, one compose"
+    assert outcome.llm_calls == 10, "four plans, four reflections, one compose, one critic (WP9.1)"
 
     view = await runs.get_run(org_id=context.org_id, run_id=run_id)
     assert view.status == "completed"
@@ -278,6 +282,9 @@ async def test_two_barren_iterations_stop_the_loop(context: ToolContext, fake_ll
         # No finding, no open question: nothing moved.
         fake_llm.script(_reflect(done=False), role="plan", times=1)
     fake_llm.script(_final(), role="compose")
+    # A run now ends with a critic pass (WP9.1). Scripted explicitly rather
+    # than defaulted, so a critic that stopped running would fail here.
+    fake_llm.script(CriticOut(verdict="pass", reasons=[]).model_dump_json(), role="critic")
     run_id = await _run_for(context, "Tell me everything")
 
     outcome = await _execute(context, run_id, Budget(iterations=8))
@@ -302,6 +309,9 @@ async def test_a_repeated_query_counts_as_no_progress_and_is_never_sent(
     fake_llm.script(_plan(STEPS[0]), role="sql")
     fake_llm.script(_reflect(done=False), role="plan")
     fake_llm.script(_final(), role="compose")
+    # A run now ends with a critic pass (WP9.1). Scripted explicitly rather
+    # than defaulted, so a critic that stopped running would fail here.
+    fake_llm.script(CriticOut(verdict="pass", reasons=[]).model_dump_json(), role="critic")
     run_id = await _run_for(context, "Tell me everything")
 
     outcome = await _execute(context, run_id, Budget(iterations=8))

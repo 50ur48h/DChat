@@ -49,6 +49,7 @@ executor needs for masking and the audit row.
 
 from __future__ import annotations
 
+import re
 from contextlib import suppress
 from dataclasses import dataclass
 from typing import TypeGuard, cast
@@ -66,7 +67,15 @@ from dataagent.connectors.base import PolicyGrant, ValidatedQuery
 from dataagent.dal.errors import PolicyViolation, ViolationCode
 from dataagent.dal.policy import SourcePolicy
 
-__all__ = ["ColumnRef", "Projection", "TableRef", "Validated", "tables_named", "validate"]
+__all__ = [
+    "ColumnRef",
+    "Projection",
+    "TableRef",
+    "Validated",
+    "date_literals",
+    "tables_named",
+    "validate",
+]
 
 #: This module is on ``SANCTIONED_VALIDATORS`` (connectors/base.py). Holding the
 #: grant is what lets it declare SQL fit to run, and it is the only module in the
@@ -424,6 +433,46 @@ def tables_named(sql: str, *, dialect: str) -> tuple[str, ...]:
             table.name.lower()
             for table in parsed.find_all(exp.Table)
             if table.name and table.name.lower() not in defined
+        }
+        return tuple(sorted(found))
+    return ()
+
+
+#: A bare ISO date. Deliberately strict: a string that merely contains digits
+#: and dashes is not a date, and a loose match here would put an id or a
+#: product code into a range comparison.
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def date_literals(sql: str, *, dialect: str) -> tuple[str, ...]:
+    """Every date written into a statement, as ``YYYY-MM-DD`` strings.
+
+    Added for the critic (architecture 4.5), whose first deterministic check is
+    that *"date literals in executed SQL cover the claimed period"*. It reads a
+    statement that has **already run**, so unlike `tables_named` it is not
+    guarding anything — it is evidence for a check on the answer.
+
+    Reads the literal text rather than evaluating anything: `'2026-07-01'`,
+    `DATE '2026-07-01'` and `CAST('2026-07-01' AS DATE)` all reach here as a
+    string node whose value looks like a date, which is exactly what the check
+    wants to compare. An expression the model computed instead of writing down —
+    `CURRENT_DATE - 30` — deliberately yields nothing, and the critic treats a
+    statement with no literals as one that stated no range. That is the right
+    bias: **D-027** already forbids clock functions in the prompt, so the useful
+    signal here is a range written out and wrong, not a range left implicit.
+
+    Same placement argument as `tables_named`: sqlglot is confined to this module
+    (see the pyright note at the top), and this grants nothing — it holds no
+    `PolicyGrant`, produces no `Validated`, and the only thing a caller can do
+    with it is disagree with an answer.
+    """
+    with suppress(PolicyViolation, RecursionError, SqlglotError):
+        _refuse_if_too_complex(sql, dialect)
+        parsed = sqlglot.parse_one(sql, read=dialect)
+        found = {
+            node.this
+            for node in parsed.find_all(exp.Literal)
+            if node.is_string and _ISO_DATE.fullmatch(str(node.this))
         }
         return tuple(sorted(found))
     return ()

@@ -149,10 +149,15 @@ class ResearchState(BaseModel):
     hypotheses: list[Hypothesis] = Field(default_factory=list[Hypothesis])
     open_questions: list[str] = Field(default_factory=list[str])
 
-    #: WP8.2's join-path verdicts and WP9.1's verdict. Declared now so the stored
-    #: shape is stable; neither is written by this work package.
+    #: WP8.2's join-path verdicts and WP9.1's verdict — both written now.
     capability: dict[str, Any] = Field(default_factory=dict[str, Any])
     critic: dict[str, Any] | None = None
+
+    #: How many drafts the critic has judged. Bounded by `MAX_CRITIC_PASSES`, and
+    #: on the state rather than in a local so an interrupted run cannot come back
+    #: and claim a fresh re-entry it has already spent (architecture M9's "at
+    #: most one" is a property of the run, not of one call to the runner).
+    critic_passes: int = 0
 
     #: Set when a ceiling stopped the run, so the composed answer can say which.
     stopped_by: str | None = None
