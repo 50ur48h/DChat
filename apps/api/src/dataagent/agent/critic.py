@@ -96,6 +96,14 @@ _MONTH_YEAR = re.compile(
     r"\b(" + "|".join(sorted(_MONTHS)) + r")\w*\s+(\d{4})\b",
     re.IGNORECASE,
 )
+# "1 March 2026" / "15th Mar 2026" — a day, a month and a year, which is how a
+# person writes a bounded range in a sentence. Two of these make a range, and
+# they must be read *before* the month-year pattern, which sees the same words
+# and calls them a whole month.
+_DAY_MONTH_YEAR = re.compile(
+    r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(" + "|".join(sorted(_MONTHS)) + r")\w*\s+(\d{4})\b",
+    re.IGNORECASE,
+)
 _BARE_YEAR = re.compile(r"\b(19|20)(\d{2})\b")
 _ISO_DATE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 _LAST_MONTH = re.compile(r"\blast\s+(?:full\s+|complete\s+)?month\b", re.IGNORECASE)
@@ -231,11 +239,30 @@ def stated_range(question: str, as_of: date) -> _Range | None:
             # comparison against a statement's `<` and `<=` is one rule.
             return _Range(first, date.fromordinal(second.toordinal() + 1), f"{pair[0]}..{pair[1]}")
 
-    found = _MONTH_YEAR.search(text)
-    if found:
-        month, year = _MONTHS[found.group(1).lower()[:3]], int(found.group(2))
+    # A bounded range written in words, before the whole-month reading of the
+    # same words. "revenue between 1 March 2026 and 15 March 2026" names two days
+    # inside a month; reading it as the month blocked a correct query with a
+    # wrong-range refusal — a false block, found by golden eval #18.
+    days = _DAY_MONTH_YEAR.findall(text)
+    if len(days) >= 2:
+        first = date(int(days[0][2]), _MONTHS[days[0][1].lower()[:3]], int(days[0][0]))
+        second = date(int(days[1][2]), _MONTHS[days[1][1].lower()[:3]], int(days[1][0]))
+        if first <= second:
+            return _Range(
+                first,
+                date.fromordinal(second.toordinal() + 1),
+                f"{first.isoformat()}..{second.isoformat()}",
+            )
+
+    months = _MONTH_YEAR.findall(text)
+    if len(months) == 1:
+        month, year = _MONTHS[months[0][0].lower()[:3]], int(months[0][1])
         start = date(year, month, 1)
-        return _Range(start, _add_month(start), found.group(0))
+        return _Range(start, _add_month(start), f"{_MONTH_NAMES[month - 1]} {year}")
+    if len(months) > 1:
+        # Two months named and no days between them: the question spans something
+        # this parser cannot pin down, so it says nothing rather than guessing.
+        return None
 
     if _LAST_MONTH.search(text):
         first_of_this = as_of.replace(day=1)

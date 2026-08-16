@@ -43,7 +43,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 
-from dataagent.agent import critic
+from dataagent.agent import composer, critic
 from dataagent.agent.budget import Budget, BudgetState
 from dataagent.agent.capability import CapabilityChasm, CapabilityGap, JoinGraph, load_join_graph
 from dataagent.agent.context import ContextBundle, build_context
@@ -93,6 +93,9 @@ class RunOutcome:
     #: The ceiling or rule that stopped the search, when one did — so a caller
     #: can tell a complete answer from a partial one without re-reading the run.
     stopped_by: str | None = None
+    #: What the answer does not establish (WP9.2). Empty is the common case and
+    #: a good one: a clean run should not be made to sound uncertain.
+    limitations: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -364,7 +367,9 @@ async def _investigate(
 
     state.critic = verdict.as_payload()
     cited = await _verified_citations(draft.supported_by, working, events)
-    return await _write_ending(context, events, working, draft, cited)
+    return await _write_ending(
+        context, events, working, draft, cited, verdict=verdict, caveat=outcome.caveat
+    )
 
 
 def _may_re_enter(working: _Working) -> bool:
@@ -606,16 +611,28 @@ async def _write_ending(
     working: _Working,
     final: FinalizeIn,
     cited: tuple[str, ...],
+    verdict: CriticVerdict | None = None,
+    caveat: str = "",
 ) -> RunOutcome:
-    """Record the answer, the findings behind it, and the trace entry.
+    """Record the answer, what backs it, what it does not establish, and the trace.
 
-    Findings plural now: a loop reaches several, and each is written with the
+    Findings plural: a loop reaches several, and each is written with the
     executions that support it rather than all of them being folded into one
     sentence. The composed answer still gets a finding of its own when it is
     answered and cited, because that is what the answer card is built around.
+
+    WP9.2 adds the other half of an answer — its **limitations**, assembled by
+    `composer` from what the run knows rather than asked of a model, and the
+    **cited** mark on the findings the answer rests on.
     """
     state = working.state
-    await runs.record_answer(org_id=context.org_id, run_id=context.run_id, content=final.answer)
+    composed = composer.assemble(final, state, verdict, citations=cited, caveat=caveat)
+    await runs.record_answer(
+        org_id=context.org_id,
+        run_id=context.run_id,
+        content=final.answer,
+        limitations=list(composed.limitations),
+    )
 
     # The loop already persisted each finding as it reached it, so only the
     # composed answer may still need one.
@@ -635,6 +652,11 @@ async def _write_ending(
             else "medium",
         )
 
+    # Mark the findings this answer rests on. Matched by shared execution, not by
+    # text: the composer rephrases, and a match on wording would lose the link
+    # exactly when the answer was written well.
+    await runs.mark_cited(org_id=context.org_id, run_id=context.run_id, executions=cited)
+
     state.phase = "finished"
     await _checkpoint(context, working)
     return RunOutcome(
@@ -646,6 +668,7 @@ async def _write_ending(
         llm_calls=working.budget.llm_calls,
         iterations=state.iteration,
         stopped_by=state.stopped_by,
+        limitations=composed.limitations,
     )
 
 

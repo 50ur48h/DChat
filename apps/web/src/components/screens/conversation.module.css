@@ -61,6 +61,40 @@
   max-width: 68ch;
 }
 
+/* What the answer does not establish. Quiet by design: a limitation is part of
+   a good answer rather than a failure of one, so it reads as a note beside the
+   reply and is never styled with --danger. The rule on the left is the only
+   thing marking it apart, because a box would make every caveated answer look
+   like a warning. */
+.limitations {
+  margin: var(--space-4) 0 0;
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.limitationsTitle {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.limitationList {
+  margin: 0;
+  padding-left: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 20px;
+  max-width: 68ch;
+}
+
 .findings {
   margin: var(--space-4) 0 0;
   padding: 0;

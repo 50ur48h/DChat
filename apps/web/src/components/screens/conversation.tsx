@@ -123,6 +123,31 @@ function Citation({
 }
 
 /**
+ * What the answer does not establish.
+ *
+ * Beside the answer, never instead of it, and never styled as an error — a
+ * limitation is part of a good answer, not a failure of one. The list is
+ * assembled by the platform from what the run knows (`agent/composer.py`), so a
+ * model cannot hedge it away or invent it; an empty list means there was nothing
+ * to say, which is the common case and a good one.
+ */
+function Limitations({ notes }: { notes: string[] }) {
+  if (notes.length === 0) return null;
+  return (
+    <section className={styles.limitations} aria-label="What this answer does not establish">
+      <p className={styles.limitationsTitle}>
+        {notes.length === 1 ? "One thing to know" : `${notes.length} things to know`}
+      </p>
+      <ul className={styles.limitationList}>
+        {notes.map((note) => (
+          <li key={note}>{note}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/**
  * The claims behind the reply, and the queries behind those.
  *
  * A single-shot run writes one finding whose statement *is* the answer
@@ -142,10 +167,17 @@ function Findings({
   findings: Finding[];
   answer: string | null;
 }) {
-  if (findings.length === 0) return null;
+  // Cited findings are the evidence for *this* answer. The rest are steps the
+  // investigation took on the way, and they are in the trace where they belong —
+  // showing all of them under the answer buries the one a reader wants.
+  // `cited` is absent on runs written before WP9.2, so an older run keeps
+  // showing everything rather than suddenly showing nothing.
+  const anyCited = findings.some((finding) => finding.cited);
+  const shown = anyCited ? findings.filter((finding) => finding.cited) : findings;
+  if (shown.length === 0) return null;
   return (
     <ul className={styles.findings}>
-      {findings.map((finding) => (
+      {shown.map((finding) => (
         <li key={finding.id} className={styles.finding}>
           <Row>
             <Badge tone={CONFIDENCE_TONES[finding.confidence] ?? "neutral"}>
@@ -240,6 +272,7 @@ function AnswerCard({
               the reply is in the list above, which is where it belongs — the
               gate found this card showing a citation and no words at all. */}
           {!replied && run.answer && <p className={styles.findingStatement}>{run.answer}</p>}
+          <Limitations notes={run.limitations ?? []} />
           <Findings orgId={orgId} runId={run.id} findings={run.findings} answer={run.answer} />
           {/* Collapsed once the run is over — the answer is the point then — but
               still there, because "how did you get that" is the question this

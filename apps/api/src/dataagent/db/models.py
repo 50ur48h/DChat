@@ -17,6 +17,7 @@ from decimal import Decimal
 from sqlalchemy import (
     ARRAY,
     BigInteger,
+    Boolean,
     CheckConstraint,
     Computed,
     ForeignKey,
@@ -877,6 +878,14 @@ class AgentRun(Base):
     )
     #: Null means unpriced, never free — the same rule ``cost_usd`` follows.
     cost_estimate: Mapped[Decimal | None] = mapped_column(Numeric(precision=10, scale=4))
+    #: What this answer does not establish, in plain words: a budget that stopped
+    #: the search, a critic warning, a period the data does not cover. A column
+    #: rather than a field inside ``state`` because a limitation is part of the
+    #: answer, and the answer card should not have to read the agent's own
+    #: scratchpad to decide what to show a person.
+    limitations: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
     started_at: Mapped[datetime | None]
     finished_at: Mapped[datetime | None]
     #: Sanitized before it arrives, like every other error column here.
@@ -1001,6 +1010,10 @@ class Finding(Base):
     confidence: Mapped[str] = mapped_column(
         String(10), nullable=False, server_default=text("'medium'")
     )
+    #: True when the composed answer rests on this finding. A run reaches several
+    #: and an answer uses some; the card shows the used ones as evidence and
+    #: leaves the rest in the trace, where they are the investigation's working.
+    cited: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     created_at: Mapped[CreatedAt]
 
 
