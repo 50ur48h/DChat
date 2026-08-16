@@ -63,6 +63,23 @@ make evals              # eval harness with FakeLLM (Phase 9+)
   `docker exec … sh -c '/opt/…'` arrives as nonsense. Start such command strings
   with a word (`exec /opt/…`), as `ops/scripts/seed_mssql.sh` does.
 
+## Customer data never enters this repo
+The GitHub remote is **public**. Anything a customer supplies — the database, its
+data dictionary, and anything derived from either — lives under `.SampleData/`,
+which is gitignored as a whole directory rather than by file extension.
+
+**Scan DDL for literals, not just tables for rows.** A ported view definition is
+schema by its file extension and *content* by what is inside it: `ops/seed/`
+briefly held a hand-written Postgres port of a customer's views, and two of those
+views were literal `UNION ALL` blocks reproducing that customer's own
+data-quality findings verbatim. A scan of distinct row values did not catch it,
+because those sentences are not rows — they are string constants in the view SQL.
+So a check of "is any customer data in this commit" has to grep the committed
+tree for **quoted literals in DDL, view definitions and fixtures**, not only for
+values pulled out of tables. `load_sqlite.py` therefore defaults `--views` to
+`<database>.views.sql` beside the `.sqlite`: the customer's SQL stays with the
+customer's data, and no future import can put it back by accident.
+
 ## Repo facts (this clone)
 - GitHub remote: https://github.com/50ur48h/DChat — **public**. Secret hygiene is
   critical from commit one: nothing sensitive in code, docs, fixtures, or PR text.
