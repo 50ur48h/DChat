@@ -77,6 +77,10 @@ class Result:
     limitations: int = 0
     tokens: int = 0
     answer: str = ""
+    #: What the critic said, when it said anything. Surfaced on a failure
+    #: because it is almost always the *reason*: an eval that reports "did not
+    #: answer" and stops has hidden the one line that explains why.
+    critic: list[str] = field(default_factory=list["str"])
 
     def fail(self, why: str) -> None:
         self.passed = False
@@ -309,6 +313,7 @@ async def run_case(
     result.iterations = outcome.iterations
     result.limitations = len(outcome.limitations)
     result.tokens = await tokens_spent(org_id, asked.run_id)
+    result.critic = await critic_reasons(org_id, asked.run_id)
 
     async with org_session(org_id) as session:
         rows = (
@@ -343,7 +348,12 @@ def _check(
         if result.answered:
             result.fail("answered a question the schema cannot answer")
     elif not result.answered:
-        result.fail(f"did not answer: {result.answer[:120]}")
+        # The critic's own words first: they say *why*, where "did not answer"
+        # only says that it did not.
+        for reason in result.critic:
+            result.fail(f"the critic blocked it: {reason}")
+        if not result.critic:
+            result.fail(f"did not answer: {result.answer[:120] or '(no answer was composed)'}")
 
     if "queries_run" in expect and result.queries != expect["queries_run"]:
         result.fail(f"ran {result.queries} queries, expected {expect['queries_run']}")
@@ -402,6 +412,28 @@ def _single_value(artifacts: dict[str, dict[str, Any]], column: str) -> Any:
         if column in names and rows:
             return rows[0][names.index(column)]
     return None
+
+
+async def critic_reasons(org_id: uuid.UUID, run_id: uuid.UUID) -> list[str]:
+    """Every blocking finding the critic recorded, newest verdict last.
+
+    Read from the trace rather than from the outcome, because a run that was
+    blocked and then failed for want of a second script never returns a verdict
+    to its caller — and that is exactly the run whose reason someone needs.
+    """
+    from dataagent.runs.events import read_events
+
+    reasons: list[str] = []
+    for event in await read_events(org_id=org_id, run_id=run_id):
+        if event.type != "critic_verdict":
+            continue
+        findings = event.payload.get("findings") or []
+        if not isinstance(findings, list):
+            continue
+        for finding in findings:
+            if isinstance(finding, dict) and finding.get("severity") == "block":
+                reasons.append(str(finding.get("detail", "")))
+    return reasons
 
 
 async def tokens_spent(org_id: uuid.UUID, run_id: uuid.UUID) -> int:

@@ -40,12 +40,20 @@ EVAL_USER_EMAIL = "evals@localhost"
 
 
 async def main() -> int:
+    from dotenv import load_dotenv
     from sqlalchemy import text
 
     from dataagent.catalog import discovery, profiler
     from dataagent.datasources import service as datasources
     from dataagent.db.engine import build_engine
     from dataagent.tenancy.session import org_session
+
+    # The repository's own .env, when there is one. `load_dotenv` does not
+    # override what is already set, so a workflow's environment still wins — CI
+    # has no .env of its own until `make` creates a placeholder one from
+    # .env.example, and that placeholder must not replace the real values.
+    if (env := REPO_ROOT / ".env").exists():
+        load_dotenv(env)
 
     host = os.environ.get("SEED_PIZZA_HOST", "localhost")
     port = int(os.environ.get("SEED_PIZZA_PORT", "6543"))
