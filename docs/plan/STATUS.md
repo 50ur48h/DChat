@@ -7,10 +7,9 @@ Current position: **Phases 0–5 and 7 signed off. Phase 6 merged, its gate
                   opens into the SQL behind it, and a question the data cannot
                   answer is honestly refused. The product does the thing it is
                   for, in front of a person.
-Next step:        Phase 8 / **WP8.3** (`p8.3-sse-trace`) — SSE over the durable
-                  `agent_events` rows, replay from `?after=seq`, and the trace
-                  UI. **This is the Phase 8 gate PR**, so it ends with a manual
-                  test script. **WP8.2 is open for review.** Phase 8's
+Next step:        Phase 8 / **WP8.3b** — the trace UI over the SSE stream, and
+                  **the Phase 8 gate**, so it ends with a manual test script.
+                  **WP8.3a is open for review.** Phase 8's
                   precondition (**B-039**) is closed, and its flagship refusal —
                   *"Which menu items sell best?"* — was already seen working live
                   during Phase 7's verification, so WP8.2 starts from a known-good
@@ -829,7 +828,35 @@ Prefer an edit that fails loudly over one that prints "done".
       between menu_items and orders"* — and the control question still answers
       **3718**. The model refused before even proposing SQL, because it had been
       told; the check was there in case it had not been
-- [ ] WP8.3 SSE streaming + durable replay + trace UI               ← gate PR
+- [x] WP8.3a SSE streaming + durable replay
+      — WP8.3 split in two (plan §1.1), by layer as WP7.3 was: this is the
+      endpoint, WP8.3b is the trace UI and the Phase 8 gate.
+      10.3 is unambiguous about what this is — *"`agent_events` is the single
+      source of truth; SSE is just its live tail"* — so nothing is streamed that
+      is not already a durable row, and the stream is built from the same
+      `read_events` the poll uses. Streaming changes **when** events arrive, not
+      what they are, which is what makes a reconnect trivial rather than a
+      synchronisation problem.
+      **Replay is the default, not a recovery path.** A stream always begins by
+      sending everything after the sequence the client names, so connect and
+      reconnect are one operation: no in-memory buffer to miss, no window where
+      an event is lost between writer and subscriber. **`Last-Event-ID` is
+      honoured**, because that is how `EventSource` reconnects by itself — a
+      dropped connection recovers without the page doing anything. A malformed
+      one replays rather than refusing: it comes from a reconnecting browser, and
+      the worst case of ignoring it is a replay the client already has.
+      **One URL, negotiated by `Accept`.** 10.2 lists one events route, and the
+      chat UI polls it today; two URLs would be two contracts that could drift.
+      **The stream ends when the run does**, with a heartbeat in between so a
+      proxy does not mistake a quiet trace for a dead socket, and a hard ceiling
+      so a stuck run cannot hold a socket forever.
+      One ordering trap, pinned by a test: the run's status is read **before**
+      the final read of the table. The other order silently drops any event
+      written between the two — in practice `run_finished` itself, which is the
+      one event a client is waiting for.
+      10 tests; `sse.py` at 95%, `runs/routes.py` at 99%, suite at **94%**.
+      **B-050** filed: the tail polls rather than using `LISTEN`/`NOTIFY`
+- [ ] WP8.3b Trace UI + the Phase 8 gate                             ← gate PR
 - [ ] GATE: pizza scenario ≤8 iters; menu-items → honest refusal; sign-off
 
 ## Phase 9 — Critic + composer + evals (M9)
