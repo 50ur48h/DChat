@@ -13,6 +13,7 @@ MERGE_POLICY: ASK        # ASK | AUTO — see docs/plan/implementation-plan.md �
 ## Commands
 make up / make down     # local stack (compose: platform-pg, seed DBs, api, web)
 make seed               # (re)build the pizza demo dataset
+make seed.fnb SQLITE=…  # load a customer SQLite file into seed-fnb-pg
 make migrate            # alembic upgrade head against local platform-pg
 make db.setup           # migrate + grant dataagent_app its local login
 make api.dev / web.dev  # hot-reload dev servers
