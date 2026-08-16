@@ -1,10 +1,14 @@
 # STATUS — data-agent build
 
-Current position: **Phases 0–5, 7 and 8 signed off. Phase 6 merged, its gate
-                  partially met and deliberately unticked. Phase 9 is built and
-                  its gate is open** — a draft is judged before it becomes an
-                  answer, the answer says what it does not establish, and twenty
-                  golden questions run as a required check on every PR. The **Phase 8 gate
+Current position: **Phases 0–5 and 7–9 signed off. Phase 6 merged, its gate
+                  partially met and deliberately unticked.** The **Phase 9 gate
+                  was signed off on 2026-08-16** (#60): 20/20 golden evals, a
+                  seeded wrong-date draft caught deterministically with no model
+                  call, and an answer card showing its citation and its
+                  limitations. The **live** run is recorded at **12/20** and that
+                  number stands — five of the eight failures are one harness
+                  defect (**B-066**), two are the harness expecting the wrong
+                  thing, one is **B-018**. The **Phase 8 gate
                   was signed off on 2026-08-16** (#52): the revenue-decline
                   question answered **$938.28** in two research steps against a
                   cap of eight, *"which menu items sell best?"* refused honestly
@@ -20,151 +24,157 @@ Current position: **Phases 0–5, 7 and 8 signed off. Phase 6 merged, its gate
                   a green suite. See "Second data source" below. Two of them
                   are already closed: **WP8.4** (#55) fixed the capability check
                   the hub table defeated, and **B-056** with it.
-Next step:        **The Phase 9 gate is the owner's, and it has not been walked.**
-                  The manual test script is in **#60**'s body. Nothing in Phase
-                  10 starts before it is signed off (plan §1.7). When it is,
-                  tick the GATE line in the first Phase 10 PR. Then Phase 10 /
-                  **WP10.1** (`p10.1-knowledge`) — document ingest, chunking,
-                  embedding and tenant-isolated retrieval. **B-059 is the P1**
-                  waiting there: a semantic layer must be able to *import*
-                  definitions a database already carries, not only host ones
-                  somebody types in.
+Next step:        **B-064 first — it is a P1 and it is not scheduled anywhere.**
+                  A conversation is not a conversation: every question is
+                  answered in isolation, and no message but the current one has
+                  ever reached a prompt. It needs a design decision before code
+                  (which layer, how many turns, whether an answer goes back in).
+                  Then Phase 10 / **WP10.1** (`p10.1-knowledge`) — document
+                  ingest, chunking, embedding, tenant-isolated retrieval —
+                  which also closes **B-018**, and after it **WP10.2**, which
+                  owes **B-059**: a semantic layer must be able to *import*
+                  definitions a database already carries.
 Merge policy: ASK
-Blocked on user: Nothing blocks Phase 9. An Anthropic API key would close
-                 **B-029 (P1)** and with it the Phase 6 gate; that blocks nothing
-                 else.
-Last updated: 2026-08-16 by Claude Code (WP9.2b — evals in CI; Phase 9 gate open)
+Blocked on user: **A provider key as a GitHub secret**, without which
+                 `nightly-evals.yml` cannot run — the repository has zero secrets
+                 and the workflow's own guard refuses a keyless live run. Putting
+                 a key there is an owner decision. Separately, an Anthropic key
+                 would close **B-029 (P1)** and with it the Phase 6 gate. Neither
+                 blocks Phase 10.
+Last updated: 2026-08-16 by Claude Code (session end — Phase 9 signed off)
 
 ---
 
 ## ⚠ Session-end handoff — read this before starting anything
 
-**Phase 8 is built, walked and signed off.** Everything this session produced is
+**Phase 9 is built, walked and signed off.** Everything this session produced is
 on `main`. Nothing is in flight: no branch, no open PR, no dirty tree.
 
 ### 1. Session ritual
 
 `git fetch --all && git checkout main && git pull`, then `gh pr list` — both
-quiet. The Phase 8 GATE line under Phase 8 below is `[x]` with its evidence, and
-that line is the source of truth for where the build stands.
+quiet. The GATE lines under each phase are the source of truth for where the
+build stands, and Phase 9's carries its live results as well as its CI ones.
 
-### 2. B-005 is closed (#57) — Phase 9 is unblocked
+### 2. Do not start Phase 10 code until B-064 is decided
 
-**Answered 2026-08-16, and it turned out to be a code task after all.**
-Checking before deciding found the anchor problem was the product's, not the
-fixture's — see **D-027**. What follows is the original entry, kept because the
-reasoning that reframed it is worth reading before the next "this is just a
-fixture chore" arrives.
+**B-064 (P1)** is the largest thing this session found and it is **not scheduled
+anywhere**. A conversation is not a conversation: `_question_of` reads one string
+from `agent_runs.question`, `ContextBundle` has no field for prior turns, and L5
+renders that single question. **No message but the current one has ever reached
+any prompt.** The owner hit it in the gate demo — asked a question, typed *"check
+again"*, and was told no business question had been given.
 
-**B-005 (P1)** was Phase 9's stated precondition and was filed as an **owner
-decision, not a code task**. The seed dataset pins `END_DATE = 2026-07-31` for
-reproducibility, so *"last full month"* stops meaning July as real time moves on,
-and golden eval #2 is phrased relatively. Either pin every eval question to
-absolute dates, or add a documented `SEED_END_DATE` override that CI fixes while
-local demos track today. Ask first; an eval harness built on a window that
-silently drifts is worth less than no harness.
+It is a **specification** gap, not only an implementation one: architecture 4.8's
+six layers have no slot for the thread, and the only "conversation history" in
+the plan is WP11.2's *list* of past conversations, which is navigation. What was
+anticipated is the half D-022 built — 10.1 says a conversation carries its
+`data_source_id` *"because a follow-up must reach the same source as the question
+it follows"*, so follow-ups were foreseen and only their routing was built.
 
-**Tick both its checkboxes in the same PR** when it closes — Phase 9's line and
-its BACKLOG row. The STATUS guard keys on the **last** occurrence of a backlog
-id, and B-039 already cost a red CI run on every PR raised after it merged.
+Four questions to settle before writing code, all in the backlog entry: which
+layer it renders at (**L5**, with the question — it is user-supplied text and
+must not sit above the platform rules); how many turns, since 4.4 already refuses
+to let a prompt grow with an investigation; whether an *answer* goes back in or
+only the question; and whether a follow-up may cite the previous run's
+executions or must re-query.
 
-### 3. Re-prepping the demo — the stack is not left running
+### 3. The live evals are 12/20 and that number is not a failure to hide
 
-```
-make down && make up
-```
+`make evals` is 20/20 in CI and on any developer machine. The **live** run —
+real models, 223,685 tokens — is 12/20, and the taxonomy matters more than the
+number:
 
-Roughly 30 seconds. `down` without `--volumes` keeps the platform database, so
-the demo org keeps its two verified sources, its re-profiled catalog and its
-history. Then **check what is actually being served**, not what is on disk — see
-item 4. A cheap end-to-end smoke before handing a browser over is worth its
-fraction of a cent:
+* **Five** are one harness defect (**B-066**): `expect.value_of` names the column
+  the *scripted* SQL used, and a real model aliases its output as it likes. The
+  check is sound in FakeLLM mode and wrong in the only mode that spends money.
+* **Two** are the harness expecting the wrong thing. **#19** refused because the
+  data ends 2026-07-31 — that is D-027's last clause working exactly as written —
+  and **#17** refused *"how are we doing?"* as too vague, which is defensible.
+* **One** is real and already has an id: **#14** was never shown the `orders`
+  card, because search is lexical and nothing embeds (**B-018**, which WP10.1
+  closes).
 
-```
-docker cp scripts/agent_smoke.py dataagent-api-1:/tmp/agent_smoke.py
-docker exec dataagent-api-1 sh -c "exec python /tmp/agent_smoke.py --org ebfe8139-abbb-45ee-8e21-8ed3c3b50642 --source Demo"
-```
+So the pipeline holds and the harness is not yet fit to judge a model. Fix B-066
+before reading any nightly result as a product signal.
 
-It should answer **3718**. The demo org has **two** data sources, so a
-conversation must name one — "Demo" is the PostgreSQL pizza database.
+### 4. `nightly-evals.yml` has never run, and cannot yet
 
-### 4. The trap that cost a whole gate cycle
+The repository has **zero secrets and zero variables**. The workflow's first step
+refuses a keyless live run on purpose — a live eval without a provider is a green
+tick that proves nothing. Putting a provider key into GitHub is an **owner
+decision** and was deliberately not taken on their behalf. Until then, the live
+evidence is the local run recorded against the Phase 9 GATE line.
 
-**`next dev` in the web container does not see host edits.** File-watch events do
-not cross the Windows bind mount, so an edited file sits in the container while
-the served chunk still holds the previous version (**B-045**). A *new route
-directory* gives an obvious 404; an *edit to an existing file* is far worse,
-because the page keeps working and silently runs the old code — a fix was
-reviewed, shipped and reported as broken that way, having never executed.
-`docker compose restart web` fixes it, and a full `up --build` fixes a partial
-route tree. CLAUDE.md carries a one-liner that greps the **served** chunks for a
-token from your change. Use it before believing anything.
+### 5. A false block is the critic's characteristic failure
 
-### 5. Run the gate before asking anyone to
+Standing note 5 above says it and this is the second place it is written, because
+it cost three defects in one session. The rule: **every new critic rule ships
+with two tests — one proving it fires, one proving it does not fire on a
+legitimate question near it.** Golden eval #18 is the first test that caught a
+false block before a human did, which is the whole argument for the eval suite.
 
-The owner's standing instruction, and it earned itself three times this session:
-it found **B-041/042/043** before the Phase 7 gate, and **B-051** and **B-052**
-before the Phase 8 one. Spending a cent of real credit to do it is expected, not
-something to ask about. Read the run's **trace**, not just its final status — the
-useful diagnosis has twice been several steps before the failure surfaced
-(`context_selected {"tables": []}` was the tell for B-041). What remains
-off-limits is re-running `make llm.smoke` for reassurance.
+### 6. Run the thing you just changed
 
-### 6. Two figures that must never come from a sample again
+Four times this session a `\n` inside a shell heredoc became a real newline and
+broke what it was writing — a string literal, twice; a `make` recipe once, which
+took **every CI job** down with `Makefile:120: missing separator`. The lesson is
+not "use the Edit tool", though that helps. It is that `make help` printed
+nothing when the broken target went in, and that was read as quiet rather than as
+broken. **Adding a make target and not running `make` is the same omission as
+shipping a page and never loading it.**
 
-**B-051** was the second time this class bit — WP4.3 was the first, for row
-counts. A card's range came from the profiler's sample, so the demo catalog
-claimed orders ended sixteen months early and the agent refused an answerable
-question: *a correct inference from a card that lied*, which is worse than a
-crash because nothing about it looks wrong. **D-025** settles the rule: a figure
-stated as a fact about a column comes from the engine or is absent, and a figure
-that can only come from the sample must say so — as `distinct in sample` and
-`examples:` already did, which is why only the range was wrong. The guard is
-structural: `profile_column` has no code path from sampled values to a range, and
-a test fails if that line ever comes back.
+`make preflight` now exists and runs what CI runs, in CI's order. Every lint
+recipe passes `--no-cache`, because a warm ruff cache twice reported a clean tree
+that CI then failed on.
 
-### 7. One gate criterion is covered by test, not demonstrated
+### 7. Two databases, and only one is a fixture
 
-**B-053 is accepted and closed** on the owner's decision: the duplicate-query
-block is asserted twice in CI, both proving zero extra `query_executions` rows,
-but it cannot be provoked on demand because that needs a model which repeats
-itself. A scripted replay was **refused** — *a rigged demo is worse than a
-recorded gap*. Do not reopen this by building the harness. The gap is written
-into the Phase 8 GATE line in plain words, which is where it belongs.
+`Demo` is the pizza generator, whose numbers `truths.json` and every eval depend
+on — do not touch it. `F&B demo` is a real operator's warehouse loaded from a
+SQLite file under `.SampleData/`, which is **gitignored and never committed**.
+Rebuild with `make seed.fnb SQLITE=…`. Test against **both**: seven defects came
+out of the second one in an afternoon that six phases against the first never
+surfaced.
+
+**Scan DDL for literals, not just tables for rows.** A ported view definition is
+schema by its extension and *content* by what is inside it; two of that
+customer's views were `UNION ALL` blocks reproducing their own data-quality
+findings verbatim, and a scan of row values did not catch it. CLAUDE.md carries
+the rule.
 
 ### 8. What is open, and what it means
 
-**P1** — **B-029**: a second real
-provider, the only thing that closes the Phase 6 gate; needs an Anthropic key.
+**P1** — **B-064**: above, and it gates nothing formally but will embarrass any
+demo. **B-059**: the customer's own semantic layer is invisible; WP10.2 owes an
+*import* path, not only an authoring UI. **B-060**: the same question twice chose
+two tables and answered RM 642,930 and RM 4,707. **B-029**: a second real
+provider, the only thing that closes the Phase 6 gate.
 
-**P2** — **B-052**: a structured call's output ceiling can be smaller than the
-schema it must fill; fixed for the planner, still true everywhere else, and
-`FinalizeIn.answer` is next to hit it — which matters because Phase 9 makes the
-composer work harder. **B-038**: `agent_configs` and `skills` have no store, so
-L1–L3 of the layered prompt render as nothing, and it carries the per-org budget
-overrides Phase 8's budgets already expect. **B-035**, **B-003**, **B-048**.
+**P2** — **B-066** (the live harness, above), **B-065** (a refusal should name
+the database it looked in — the owner asked the F&B source an orders question and
+the refusal read as a broken product), **B-057**'s siblings **B-058** (an
+undeclared but working join is refused) and **B-054** (the profiler samples the
+first rows on disk), **B-052**, **B-038**, **B-035**, **B-003**, **B-048**.
 
-**P3 worth remembering** — **B-020**: `_col_1` is user-visible in the evidence
-panel; the planner asks for aliases, which is a mitigation and explicitly not the
-fix. **B-049**: the duplicate rule compares proposals, not canonical statements,
-so one question written two ways still runs twice. **B-050**: the SSE tail polls
-rather than using `LISTEN`/`NOTIFY`. **B-046/047**: the answer card should read as
-one object.
+**P3 worth remembering** — **B-061** with **B-020**: internal keys and the wrong
+currency symbol reach the reader. **B-062**: no way to ask a question as of a
+past date. **B-049**, **B-050**, **B-046/047**.
 
 ### 9. Habits this session earned
 
-- **jsdom is not evidence for anything timing-dependent.** A regression test for
-  B-044 *passed against the broken code*; `apps/web/e2e/` exists because of that
-  and runs real Chromium in CI.
-- **A test that passes first time on an e2e deserves suspicion.** Tamper with the
-  expectation and watch it fail before trusting it. Two tests this session passed
-  vacuously until their fixture was made faithful.
-- **Run `ruff check . --no-cache` before pushing.** A warm cache has passed
-  locally while CI failed on the same tree.
-- **A patch script must assert its edit matched** — and a `\n` inside a shell
-  heredoc collapses into a real newline, silently breaking a string literal. That
-  happened three times this session. Prefer the Edit tool, or write the block to
-  a file and splice it, for anything containing escapes.
+- **Run the phase's own deliverable before asking anyone to walk a gate.** It
+  found B-041/042/043, B-051, B-052, and this session `make evals.setup` failing
+  on a clean machine and a failing eval hiding the critic's reason — both found
+  by running the documented command rather than reading it.
+- **Verify a CI job locally before pushing it.** The whole `evals` path was run
+  against an empty database first, which found two things a push-and-watch cycle
+  would have found slowly: `org_memberships` has no surrogate id, and the secrets
+  key must be shared across steps.
+- **A test that passes first time deserves suspicion.** Tamper with it and watch
+  it fail. Three web tests and three critic tests were confirmed that way.
+- **jsdom is not evidence for anything timing-dependent** — `apps/web/e2e/` exists
+  because a regression test once passed against the broken code.
 
 ## Standing notes for a new session
 
@@ -1201,7 +1211,38 @@ unexplained.
       may fail without blocking a merge. `EVALS_TOKEN_BUDGET` is enforced from
       `usage_ledger` and checked **before** each question, because a budget that
       stops once it is already over is a report rather than a ceiling
-- [ ] GATE: seeded-wrong-draft caught; 20 golden evals pass; sign-off
+- [x] GATE: seeded-wrong-draft caught; 20 golden evals pass; sign-off
+      — **signed off 2026-08-16.** Walked in the browser and at the terminal.
+      `make evals` → **20/20**. The seeded wrong draft caught deterministically:
+      question 1 changed to ask July and query June returned **3742** — June's
+      real count, correctly run and correctly cited, nothing about it looking
+      wrong — and the critic blocked it naming both the period asked for and the
+      period used, **with no model call**. In the browser: an answer citing its
+      query, an honest refusal on the missing `orders`↔`menu_items` link, and
+      limitations rendered beside the answer rather than instead of it.
+      **The live run is recorded and it is 12/20, not 20/20.** That number is
+      kept as it is. Five failures are one harness defect (**B-066**): the value
+      check names a column the *scripted* SQL used, and a real model aliases its
+      output as it likes — a check that is sound in CI and wrong in the only mode
+      that spends money. Two more are the harness expecting the wrong thing:
+      **#19** refused because the data ends 2026-07-31, which is precisely
+      D-027's last clause working, and **#17** refused *"how are we doing?"* as
+      too vague, which is defensible. One is a real gap and already has an id —
+      **#14** was never shown the `orders` card, because search is lexical and
+      nothing embeds (**B-018**). So what the live run establishes is that the
+      pipeline holds and the *harness* is not yet ready to judge a real model.
+      **223,685 tokens** for the twenty; the two multi-step questions were half
+      of it. `nightly-evals.yml` has still never executed — the repository has
+      **zero secrets and zero variables**, so the workflow's own guard refuses
+      it, correctly. Putting a provider key into GitHub is the owner's decision
+      and is not mine to make.
+      What the phase leaves behind: a draft is **judged before it becomes an
+      answer**, by arithmetic first and a model second, and the arithmetic half
+      is free because a deterministic block skips the call. An answer now says
+      what it does **not** establish, and those limitations are assembled by the
+      platform rather than asked of the model, so they cannot be hedged away.
+      And twenty questions run against a real database on every pull request,
+      against numbers that live in exactly one place.
 
 ## Phase 10 — Knowledge + semantic layer (M10)
 - [ ] WP10.1 Docs ingest/chunk/embed/retrieve under RLS + APIs
@@ -1245,75 +1286,52 @@ unexplained.
 
 ## Next step
 
-**The Phase 8 gate is signed off** (2026-08-16), and its evidence is recorded
-against the GATE line under Phase 8 above — including the one criterion that is
-covered by test rather than demonstrated (**B-053**, accepted).
+**Phase 9 is signed off** (#60, 2026-08-16). Its GATE line above carries the
+evidence, including the live run at 12/20 and why that number is what it is.
 
-**WP8.4 is done** (#55, **B-057** and **B-056**). The capability check now
-tells a safe join path from a chasm by the direction the foreign keys already
-declare, and the verdict is three-valued: `joinable` / `comparable` (aggregate
-each side to the shared key, then join the aggregates) / `unreachable`, with only
-the last one refusing. Why direction rather than any threshold, and why the
-middle verdict must not refuse, is **D-026**. What it deliberately left: the
-check reads which tables a statement names and not how it joins them, so it
-*steers* the planner up front and records the chasm in the trace rather than
-blocking — blocking needs join predicates read in `dal/validator.py`, which is a
-security-boundary change owed its own reviewed PR.
+**First, and before any Phase 10 code: B-064.** It is P1, it is the largest thing
+the gate demo found, and it is scheduled nowhere. A conversation is answered one
+message at a time with no memory of the thread — see the handoff's item 2 for the
+four design questions that need settling first. It is a decision, then a small
+change: `ContextBundle` gains a field, `_layers` renders it at L5 beside the
+question, and `runner` reads the conversation's recent turns. What makes it worth
+deciding rather than writing is that every wrong answer here is a *safety*
+answer — history is user-supplied text, and putting it above the platform rules
+would be the one place 4.8's precedence stops being soft.
 
-~~**Before any Phase 9 code: B-005.**~~ **Closed in #57.** Phase 9's own line said it must
-be closed before the phase starts, and it is an **owner decision rather than a
-code task** — the seed dataset pins `END_DATE = 2026-07-31` for reproducibility,
-so "last full month" stops meaning July as real time moves on, and golden eval #2
-is phrased relatively. Either pin every eval question to absolute dates, or add a
-documented `SEED_END_DATE` override that CI fixes while local demos track today.
-Raise it early; it needs an answer, not an implementation. **Tick both its
-checkboxes in the same PR** — Phase 9's line and its BACKLOG row — because the
-STATUS guard keys on the last occurrence and B-039 already cost a red CI run on
-every PR raised after it merged.
-
-**WP9.1 is done** (#58). Next is Phase 9 / **WP9.2 — composer and eval
-harness v1** (`p9.2-composer-evals`), which is the **Phase 9 gate PR**.
-Plan §6 Phase 9, architecture 4.5 and M9.
+Then Phase 10 / **WP10.1 — knowledge ingest and retrieval** (`p10.1-knowledge`).
+Plan §6 Phase 10, architecture 5.4–5.5.
 
 Build:
 
-- **The composer's limitations.** WP9.1 hands the critic's warnings to the run
-  and the second draft is *told* what was wrong, but `FinalizeIn` still has no
-  `limitations` field — the reasons reach the answer only as prose the model
-  chose to include. Give it the field, render it in the answer card, and make a
-  `WARN` finding travel there by construction rather than by persuasion.
-- **`ops/evals/`** — the twenty golden questions from plan §6, expected answers
-  read from `ops/seed/truths.json` and **never hardcoded**, run against the
-  FakeLLM so `make evals` is deterministic and free.
-- **`as_of` is pinned to 2026-08-16** in the harness (**D-027**). Keep the
-  relative phrasing in #2, #6, #11–13, #17 and #20 — those exist to test exactly
-  that handling — and absolute dates only in #1 and #18, which were always about
-  a fixed window. **#19 only works because of the anchor**: "a future date range"
-  means after `as_of`, and against a wall clock no date stays future.
-- `make evals` as a required CI check, plus `nightly-evals.yml` on a schedule
-  with real keys and a hard token cap (plan §4.1).
+- Revision 0016: `documents`, `document_chunks` (vector + tsvector), **+RLS and a
+  proof-suite extension in the same PR** — the rule has held for every tenant
+  table so far and this is the first one in three phases.
+- `knowledge/`: upload, heading-aware chunking with overlap, embedding through
+  the Phase 6 provider config, hybrid retrieve (vector + lexical, RRF merge), all
+  under the org session. The retrieval tool is registered with **L4 framing** —
+  retrieved text is reference material and explicitly not instructions (7.4).
+- **This closes B-018**, and B-018 is why golden eval #14 failed live: card
+  search is lexical, so *"which day of the week is busiest"* never surfaced the
+  `orders` card. Every card already carries `flags.embedding = "queued"`, so the
+  backfill has its work list.
+- **Tests:** an org-isolation retrieval test in the `rls_proof` family (two orgs,
+  one query, zero cross-hits); chunker goldens; and an injection-framing test
+  where a chunk saying *"ignore your instructions"* arrives wrapped.
 
-What WP9.1 hands it:
-
-- **A verdict that already knows how to be a limitation.** `CriticVerdict.warnings`
-  is separate from `.blocking` precisely so the composer can render one without
-  acting on it.
-- **A checked date range.** Eval #1 and #18 are absolute and #2 is relative, and
-  the critic now blocks a draft whose SQL missed the period — so an eval that
-  passes for the wrong reason fails here first.
-- **Headroom that was counted, not assumed.** D-028's arithmetic leaves three
-  calls spare against 24, and `test_the_call_ceiling_fits_the_run_that_spends_the_most`
-  asserts the sum.
+Then **WP10.2**, the gate PR, which owes **B-059**: the semantic layer must
+*import* definitions a database already carries, admin-reviewed, provenance kept.
+Its gate walks against the F&B source as well as the pizza one, and the phase has
+done its job when the question that answered **0 units** answers something else.
 
 Two things to watch:
 
-- **B-052** — `FinalizeIn.answer` is 4,000 characters against a default output
-  ceiling of 1,024 tokens, and adding `limitations` makes that schema bigger. The
-  critic's own call sets its ceiling explicitly for this reason; the composer's
-  does not, and WP9.2 is the phase that makes the composer work harder.
-- **B-060** — the eval suite is where "the same question twice gives the same
-  answer" stops being a hope. #20 is a duplicate of #11 phrased differently and
-  exists to check exactly that.
+- **USER INPUT, now hard-required:** embedding provider credentials. Phase 4 made
+  them optional and search degraded to lexical; Phase 10 cannot. Ask before
+  starting WP10.1, not during it.
+- **B-052** — a structured call's output ceiling can be smaller than the schema it
+  must fill. Fixed for the planner and the critic, still true for the composer,
+  and chunk-summarisation is the next shape to hit it.
 
 ## Notes
 
