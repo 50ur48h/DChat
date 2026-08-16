@@ -27,7 +27,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from dataagent.agent.scheduler import schedule_run
@@ -35,6 +36,7 @@ from dataagent.auth.context import RequestContext
 from dataagent.auth.guards import require_member
 from dataagent.runs import service
 from dataagent.runs.service import NotFoundError
+from dataagent.runs.sse import event_stream
 
 router = APIRouter(prefix="/v1", tags=["conversations"])
 
@@ -425,9 +427,10 @@ async def get_execution(
 @router.get(
     "/orgs/{org_id}/runs/{run_id}/events",
     response_model=EventsOut,
-    summary="This run's trace, after a sequence number",
+    summary="This run's trace, after a sequence number — JSON, or SSE on request",
 )
 async def get_run_events(
+    request: Request,
     context: Annotated[RequestContext, Depends(require_member)],
     run_id: RunId,
     after: Annotated[
@@ -440,8 +443,44 @@ async def get_run_events(
             ),
         ),
     ] = 0,
-) -> EventsOut:
-    """Poll now, SSE in Phase 8 — the same durable rows either way (arch 10.3)."""
+) -> EventsOut | StreamingResponse:
+    """One URL, two deliveries of the same durable rows (architecture 10.2, 10.3).
+
+    `Accept: text/event-stream` streams the trace and keeps streaming until the
+    run ends; anything else answers once with JSON. **One route rather than two**
+    because 10.2 lists one, and because a separate streaming URL would be a
+    second contract that could drift from the poll — they read the same rows
+    through the same function, and that is worth keeping structurally true.
+
+    Ownership is checked before a stream begins, so an unauthorised caller gets
+    a 404 rather than an empty stream that looks like a run with no trace.
+    """
+    if "text/event-stream" in request.headers.get("accept", ""):
+        try:
+            # Awaited here rather than inside the generator: an exception raised
+            # after streaming has begun cannot become a status code, and a 404
+            # delivered as an empty 200 stream is not a refusal anyone can see.
+            await service.list_events(
+                org_id=context.org_id, run_id=run_id, user_id=context.user_id, after=after
+            )
+        except NotFoundError as error:
+            raise _not_found("run") from error
+        return StreamingResponse(
+            event_stream(
+                org_id=context.org_id,
+                run_id=run_id,
+                user_id=context.user_id,
+                after=after,
+                last_event_id=request.headers.get("last-event-id"),
+            ),
+            media_type="text/event-stream",
+            headers={
+                # Proxies buffer by default, which turns a live trace into one
+                # burst at the end; both headers are how you ask them not to.
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
     try:
         events = await service.list_events(
             org_id=context.org_id, run_id=run_id, user_id=context.user_id, after=after
