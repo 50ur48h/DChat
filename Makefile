@@ -116,9 +116,7 @@ secrets.key: ## Print a fresh LOCAL_SECRETS_KEY line to paste into .env
 
 .PHONY: preflight
 preflight: lint typecheck check.status test ## Everything CI will run, in CI's order
-	@printf '
-Preflight clean. Safe to push.
-'
+	@echo "Preflight clean. Safe to push."
 
 .PHONY: check.status
 check.status: ## Fail if STATUS.md lost its phase checklist or signed-off work
