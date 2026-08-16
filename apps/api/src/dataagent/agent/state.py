@@ -133,6 +133,11 @@ class ResearchState(BaseModel):
     run_id: uuid.UUID
     org_id: uuid.UUID
     question: str = ""
+    #: The date this run resolved "last month" against (**D-027**). Stored as an
+    #: ISO string on the checkpoint, so a run resumed tomorrow keeps yesterday's
+    #: anchor — an interrupted investigation that silently changed what "recently"
+    #: meant halfway through would be worse than one that failed.
+    as_of: str = ""
 
     phase: Phase = "starting"
     iteration: int = 0

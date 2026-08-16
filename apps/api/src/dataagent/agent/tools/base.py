@@ -23,6 +23,7 @@ import json
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import date
 from typing import Protocol
 
 from pydantic import BaseModel
@@ -91,6 +92,13 @@ class ToolContext:
     #: The source a data question is being answered from. None until one is
     #: chosen, and ``run_sql`` refuses rather than guessing.
     data_source_id: uuid.UUID | None = None
+    #: What this run calls "today" (**D-027**). None means the wall clock, which
+    #: is what a person asking a question in a browser means. The eval harness
+    #: pins it, and that is the entire mechanism by which a relative question has
+    #: the same answer next year (B-005). It travels on the context rather than
+    #: as an argument to `build_context` alone because a tool may one day need it
+    #: too, and a second source of "now" is how this defect returns.
+    as_of: date | None = None
 
 
 @dataclass(frozen=True, slots=True)

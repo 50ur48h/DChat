@@ -17,22 +17,20 @@ Current position: **Phases 0–5, 7 and 8 signed off. Phase 6 merged, its gate
                   a green suite. See "Second data source" below. Two of them
                   are already closed: **WP8.4** (#55) fixed the capability check
                   the hub table defeated, and **B-056** with it.
-Next step:        **B-005** — an owner decision Phase 9 cannot start without.
-                  Then Phase 9 / **WP9.1** (`p9.1-critic`). Build spec in the
-                  "Next step" section near the end of this file. **WP8.4 is
-                  done** (#55): the capability check now tells a safe join path
-                  from a chasm by direction, and 143 of the 210 pairs it used to
-                  call joinable on the F&B catalog were false. **B-059** is the
-                  next P1 after B-005 and lands in Phase 10, whose spec now
-                  requires the semantic layer to *import* what a database already
-                  carries.
+Next step:        **Phase 9 / WP9.1** (`p9.1-critic`) — the deterministic
+                  critic, the LLM checklist half, and one bounded re-entry. Its
+                  two preconditions are both closed: **WP8.4** (#55) and
+                  **B-005** (#57). Build spec in the "Next step" section near the
+                  end of this file. The critic can now check that the date range
+                  in a statement matches the range the question stated, which
+                  D-027 is what made possible. **B-059** is the next P1 and lands
+                  in Phase 10, whose spec now requires the semantic layer to
+                  *import* what a database already carries.
 Merge policy: ASK
-Blocked on user: **B-005 (P1)** — the seed dataset's fixed end date, which Phase
-                 9's own line makes a precondition. It needs an answer, not an
-                 implementation. Separately, an Anthropic API key would close
-                 **B-029 (P1)** and with it the Phase 6 gate; that blocks
-                 nothing else.
-Last updated: 2026-08-16 by Claude Code (WP8.4 — the chasm trap)
+Blocked on user: Nothing blocks Phase 9. An Anthropic API key would close
+                 **B-029 (P1)** and with it the Phase 6 gate; that blocks nothing
+                 else.
+Last updated: 2026-08-16 by Claude Code (B-005 — the run is told what today is)
 
 ---
 
@@ -47,10 +45,16 @@ on `main`. Nothing is in flight: no branch, no open PR, no dirty tree.
 quiet. The Phase 8 GATE line under Phase 8 below is `[x]` with its evidence, and
 that line is the source of truth for where the build stands.
 
-### 2. Do not start Phase 9 code until B-005 is answered
+### 2. B-005 is closed (#57) — Phase 9 is unblocked
 
-**B-005 (P1)** is Phase 9's stated precondition and it is an **owner decision,
-not a code task**. The seed dataset pins `END_DATE = 2026-07-31` for
+**Answered 2026-08-16, and it turned out to be a code task after all.**
+Checking before deciding found the anchor problem was the product's, not the
+fixture's — see **D-027**. What follows is the original entry, kept because the
+reasoning that reframed it is worth reading before the next "this is just a
+fixture chore" arrives.
+
+**B-005 (P1)** was Phase 9's stated precondition and was filed as an **owner
+decision, not a code task**. The seed dataset pins `END_DATE = 2026-07-31` for
 reproducibility, so *"last full month"* stops meaning July as real time moves on,
 and golden eval #2 is phrased relatively. Either pin every eval question to
 absolute dates, or add a documented `SEED_END_DATE` override that CI fixes while
@@ -127,7 +131,7 @@ into the Phase 8 GATE line in plain words, which is where it belongs.
 
 ### 8. What is open, and what it means
 
-**P1** — **B-005**: above, and it gates Phase 9. **B-029**: a second real
+**P1** — **B-029**: a second real
 provider, the only thing that closes the Phase 6 gate; needs an Anthropic key.
 
 **P2** — **B-052**: a structured call's output ceiling can be smaller than the
@@ -1125,8 +1129,13 @@ unexplained.
 
 ## Phase 9 — Critic + composer + evals (M9)
 - [x] **WP8.4 (B-057, P1) landed before this phase** (#55) — see Phase 8
-- [ ] **B-005 (P1) must be closed before this phase starts** — the seed window
-      must stop drifting before evals are written against it
+- [x] **B-005 (P1) closed before this phase started** (#57) — and it was a
+      product defect rather than an eval chore. Nothing told the model what
+      the current date was, so it chose an anchor per question and chose
+      differently: `CURRENT_DATE` for one, `MAX(order_date)` for the next,
+      both right on the day they were measured. **D-027** gives the run an
+      `as_of`, defaulted to the wall clock and pinned by the eval harness.
+      The seed's `END_DATE` stays frozen and `truths.json` is untouched
 - [ ] WP9.1 Deterministic critic + LLM checklist + bounded re-entry
 - [ ] WP9.2 Composer (citations/limitations) + eval harness v1      ← gate PR
 - [ ] GATE: seeded-wrong-draft caught; 20 golden evals pass; sign-off
@@ -1188,7 +1197,7 @@ check reads which tables a statement names and not how it joins them, so it
 blocking — blocking needs join predicates read in `dal/validator.py`, which is a
 security-boundary change owed its own reviewed PR.
 
-**Before any Phase 9 code: B-005.** Phase 9's own line says it must
+~~**Before any Phase 9 code: B-005.**~~ **Closed in #57.** Phase 9's own line said it must
 be closed before the phase starts, and it is an **owner decision rather than a
 code task** — the seed dataset pins `END_DATE = 2026-07-31` for reproducibility,
 so "last full month" stops meaning July as real time moves on, and golden eval #2
