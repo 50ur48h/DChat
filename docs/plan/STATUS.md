@@ -15,13 +15,16 @@ Current position: **Phases 0–5, 7 and 8 signed off. Phase 6 merged, its gate
                   fixture this project designed. It found seven defects
                   (**B-054**…**B-060**), four of them P1/P2 and none visible to
                   a green suite. See "Second data source" below.
-Next step:        **B-005 first — it is an owner decision and Phase 9 cannot
-                  start without it.** Then Phase 9 / **WP9.1** (`p9.1-critic`):
-                  the deterministic critic, the LLM checklist half, and one
-                  bounded re-entry. Build spec in the "Next step" section near
-                  the end of this file. **B-060 and B-056 belong to that phase**
-                  and were found before it started, which is the cheapest they
-                  will ever be.
+Next step:        **WP8.4 first** (`p8.4-chasm`) — **B-057**, raised to P1 and
+                  scheduled before Phase 9 by the owner: a hub dimension defeats
+                  the capability check, and honest refusal is the product's core
+                  promise. Takes **B-056** with it. Then **B-005**, which is an
+                  owner decision Phase 9 cannot start without. Then Phase 9 /
+                  **WP9.1** (`p9.1-critic`). Build specs for all of it are in the
+                  "Next step" section near the end of this file. **B-059** is
+                  next after WP8.4 in priority order and lands in Phase 10, whose
+                  spec now requires the semantic layer to *import* what a
+                  database already carries.
 Merge policy: ASK
 Blocked on user: **B-005 (P1)** — the seed dataset's fixed end date, which Phase
                  9's own line makes a precondition. It needs an answer, not an
@@ -1090,8 +1093,21 @@ unexplained.
       answerable question on the strength of it), **B-052** and **B-041/042/043**
       before it. Running the gate before asking anyone to walk it earned its keep
       three times over.
+- [ ] WP8.4 Capability check: the chasm trap (**B-057** P1) + **B-056**
+      — **added after the gate, and the gate stands.** Pointing the same check
+      at a real star schema on 2026-08-16 exposed the opposite failure to the one
+      Phase 8 was judged on: a **one-row** hub dimension makes every fact
+      reachable from every other, so the check calls a 1.5-billion-row cartesian
+      product *answerable*. The criterion the gate tested — a schema that cannot
+      answer is refused, naming the missing link — is unaffected and still met.
+      The pizza fixture has no hub table, so no amount of testing against it
+      could have shown this. Owner scheduled it **before Phase 9** because the
+      honest-refusal claim is the product's core promise. Build spec in "Next
+      step"; the short version is that direction beats degree, and the fix must
+      produce a third verdict rather than a second refusal.
 
 ## Phase 9 — Critic + composer + evals (M9)
+- [ ] **WP8.4 (B-057, P1) lands before this phase** — see Phase 8
 - [ ] **B-005 (P1) must be closed before this phase starts** — the seed window
       must stop drifting before evals are written against it
 - [ ] WP9.1 Deterministic critic + LLM checklist + bounded re-entry
@@ -1140,7 +1156,100 @@ unexplained.
 against the GATE line under Phase 8 above — including the one criterion that is
 covered by test rather than demonstrated (**B-053**, accepted).
 
-**Before any Phase 9 code: B-005.** Phase 9's own line says it must
+**First, and before Phase 9: WP8.4 — the capability check's chasm trap**
+(`p8.4-chasm`). **B-057**, raised to P1 by the owner on 2026-08-16 and scheduled
+here because *the honest-refusal claim is the product's core promise*. It is
+Phase 8 code, found after Phase 8's gate, and the gate stands: the criterion it
+was judged on — a schema that genuinely cannot answer is refused, naming the
+missing link — is still met. What the F&B source exposed is the **other** side of
+the same check, which the pizza fixture could never show because it has no hub
+table.
+
+**The diagnosis.** `load_join_graph` collapses every relationship into undirected
+adjacency and `path()` walks it breadth-first, so *reachable* is treated as
+*joinable*. Those are not the same thing. A foreign key is many-to-one **by
+construction** — its target is a unique key, or the engine would not have
+accepted it — so every edge already carries a direction, and building the
+adjacency is precisely where that direction is thrown away. Walking an edge
+child→parent **narrows**: each row on the left matches at most one on the right.
+Walking it parent→child **fans out**. A path is a safe join exactly when it never
+turns *up then down* at an intermediate node, and a node where it does is the
+textbook **chasm trap**:
+
+```
+fact_sale --up--> dim_business --down--> fact_purchase     unsafe (chasm)
+payments  --up--> orders       --up----> customers         safe (all narrowing)
+dim_outlet --down--> fact_sale --up----> dim_item          safe (the normal star)
+```
+
+With `dim_business` holding **one** row the chasm degenerates to a full cartesian
+product: 112,327 × 13,660 ≈ 1.5 billion rows, from a path the check today calls
+answerable. The DAL's row cap bounds what comes back and does nothing whatever
+for the aggregate, which is the number a person reads.
+
+**Why direction, and not the three obvious alternatives.** Each of those treats a
+symptom:
+
+- **A degree threshold.** Arbitrary, and wrong in both directions: a legitimate
+  `dim_date` referenced by twelve fact tables trips it, while a two-row hub slips
+  under it.
+- **Excluding one-row dimensions.** Fixes this instance and nothing else. A
+  five-row `dim_business` still produces a fifth of a cartesian product, and
+  states it just as confidently.
+- **A path-length cap.** Cannot separate the cases at all: `payments → orders →
+  customers` is two hops and safe, `fact → dim → fact` is two hops and fatal.
+
+The direction rule is **structural** — no threshold to tune, no statistics to
+sample, nothing that changes as the data grows. It stays deterministic, which
+4.3 requires, because the model must not be able to talk past it. And it needs no
+new data: `catalog_relationships` already stores `from_table` and `to_table`.
+
+**It must not become a refusal.** `fact_sale` and `fact_purchase` genuinely
+*are* comparable — you aggregate each to a common grain and join the aggregates,
+which is what a competent analyst does and what the question deserves. Refusing
+the pair would trade B-057 for a worse **B-058**, which is the false-refusal
+defect sitting two rows above it in the backlog. So the verdict goes
+**three-valued**:
+
+| verdict | meaning | what the planner is told |
+|---|---|---|
+| `joinable` | a chasm-free path exists | nothing; unchanged behaviour |
+| `comparable` | only chasm paths exist | aggregate each side to the shared key **first**, then join the aggregates; never join these two directly |
+| `unreachable` | no path at all | refuse, naming the missing link — exactly as today |
+
+The middle row is the part worth building. It converts a silent cartesian product
+into a *correct* query, and it is information a model can act on rather than a
+wall it hits.
+
+**Build (stage 1, this WP):**
+
+- `agent/capability.py`: keep direction on each edge (`child → parent`), classify
+  a path by its turn sequence, and return a three-valued verdict. `CapabilityGap`
+  grows a `kind` so a `comparable` pair can carry its own sentence.
+- `agent/runner.py`: put the `comparable` guidance into the planner bundle and
+  into the `capability_checked` payload. **10.3's vocabulary is closed and this
+  needs no new type** — only the payload grows, so no UI change is required.
+- Take **B-056** in the same PR. It is the same six lines of `runner.py`: the
+  gaps handed to the planner are truncated alphabetically (`gaps[:20]`), so on
+  this source it hears twenty facts about `bridge_item_ingredient` and none of
+  the fourteen about `fact_sale`. Select the twenty that involve the tables
+  `context_selected` just chose — they are already in hand at that point in
+  `_investigate`.
+- **Tests:** a hub fixture where two facts share a one-row parent, asserting
+  `comparable` and **not** `joinable`; `payments → orders → customers` stays
+  `joinable`; a genuinely disconnected pair stays `unreachable`; and a regression
+  over the pizza fixture asserting **no verdict changes**, because a fix for a
+  false negative that quietly introduces false positives is not a fix.
+
+**Stage 2, deliberately not in this WP.** The check reads only the *set* of
+tables named in the proposed statement, so it cannot see that the model wrote
+`JOIN fact_purchase ON business_key` rather than joining aggregates. Reading the
+join predicates would let it refuse the specific statement instead of the table
+pair — strictly better, and it needs a `join_pairs()` sibling to `tables_named`
+in `dal/validator.py`. That is a security-boundary file, so it belongs in its own
+PR with human review, and stage 1 is worth having before it.
+
+**Then, before any Phase 9 code: B-005.** Phase 9's own line says it must
 be closed before the phase starts, and it is an **owner decision rather than a
 code task** — the seed dataset pins `END_DATE = 2026-07-31` for reproducibility,
 so "last full month" stops meaning July as real time moves on, and golden eval #2
