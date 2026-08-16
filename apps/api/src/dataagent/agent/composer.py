@@ -35,6 +35,7 @@ from dataagent.agent.tools.finalize import FinalizeIn
 
 __all__ = ["ComposedAnswer", "assemble", "limitations_for"]
 
+
 @dataclass(frozen=True, slots=True)
 class ComposedAnswer:
     """Architecture 4.2's `ComposedAnswer`, as much of it as Phase 9 fills.
