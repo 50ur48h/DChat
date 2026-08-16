@@ -10,18 +10,28 @@ Current position: **Phases 0–5, 7 and 8 signed off. Phase 6 merged, its gate
                   one shot, bounded by ceilings the controller enforces, refused
                   deterministically when the schema cannot answer it, and visible
                   step by step in a record that cannot be rewritten.
-Next step:        **B-005 first — it is an owner decision and Phase 9 cannot
-                  start without it.** Then Phase 9 / **WP9.1** (`p9.1-critic`):
-                  the deterministic critic, the LLM checklist half, and one
-                  bounded re-entry. Build spec in the "Next step" section near
-                  the end of this file.
+                  A **second, real data source** was loaded and tried on
+                  2026-08-16 — an F&B operator's 112k-row warehouse, not a
+                  fixture this project designed. It found seven defects
+                  (**B-054**…**B-060**), four of them P1/P2 and none visible to
+                  a green suite. See "Second data source" below.
+Next step:        **WP8.4 first** (`p8.4-chasm`) — **B-057**, raised to P1 and
+                  scheduled before Phase 9 by the owner: a hub dimension defeats
+                  the capability check, and honest refusal is the product's core
+                  promise. Takes **B-056** with it. Then **B-005**, which is an
+                  owner decision Phase 9 cannot start without. Then Phase 9 /
+                  **WP9.1** (`p9.1-critic`). Build specs for all of it are in the
+                  "Next step" section near the end of this file. **B-059** is
+                  next after WP8.4 in priority order and lands in Phase 10, whose
+                  spec now requires the semantic layer to *import* what a
+                  database already carries.
 Merge policy: ASK
 Blocked on user: **B-005 (P1)** — the seed dataset's fixed end date, which Phase
                  9's own line makes a precondition. It needs an answer, not an
                  implementation. Separately, an Anthropic API key would close
                  **B-029 (P1)** and with it the Phase 6 gate; that blocks
                  nothing else.
-Last updated: 2026-08-16 by Claude Code (session end — Phase 8 signed off)
+Last updated: 2026-08-16 by Claude Code (second data source loaded and tried)
 
 ---
 
@@ -167,11 +177,110 @@ one object.
    account with `GET /v1/models` *before* writing them into `LLM_MODELS` — the
    same check done for OpenAI. A pricing page says what exists, not what a key
    may call. That habit is B-027, still unautomated.
+5. **There are two customer databases now, and only one of them is a fixture.**
+   `Demo` is the pizza generator, whose numbers `truths.json` and the Phase 9
+   evals depend on — do not touch it. `F&B demo` is a real operator's warehouse
+   loaded from a SQLite file the owner supplied, which lives in `.SampleData/`
+   and is **gitignored, not committed**. Rebuild it with
+   `make seed.fnb SQLITE=.SampleData/<file>.sqlite`; it is idempotent and drops
+   its own schema first. Test against **both**: seven defects were found in an
+   afternoon against the second one that six phases against the first never
+   surfaced. See "Second data source" below.
 
 One process note worth carrying forward: a patch script that reports success
 without asserting its edit matched will lie to you. This file's header silently
 went un-updated for exactly that reason, and was caught only by reading it back.
 Prefer an edit that fails loudly over one that prints "done".
+
+## Second data source — the F&B trial (2026-08-16)
+
+The demo organization now has **two** customer databases, so every run must name
+one. The pizza fixture is untouched and its numbers still match `truths.json`;
+the Phase 9 evals depend on that and nothing here touched it.
+
+| | pizza | F&B |
+|---|---|---|
+| compose service | `seed-pizza-pg` :6543 | `seed-fnb-pg` :6544 |
+| data source name | `Demo` | `F&B demo` |
+| login | `pizza_readonly` | `fnb_readonly` |
+| built by | `make seed` (generator) | `make seed.fnb SQLITE=…` (translator) |
+| objects | 6 tables | 27 tables + 8 views, 43 foreign keys |
+| rows | ~50k orders | 112,327 sales, 51,356 stock moves |
+
+**Why it was worth doing.** The pizza fixture is a schema this project designed,
+so it flatters every part of the product that has to read a schema. This one was
+written by someone else: `dim_`/`fact_`/`bridge_`/`map_`/`meta_` naming, eight
+tables that are empty because the business does not collect that yet, a column
+called `coverage_start` holding `'opening'`, a `weighing_time` holding `'7.30
+pm'`, and a `meta_gate` table listing eight open data-quality questions **about
+itself**. Twelve realistic questions were run against it live.
+
+**The load is a translation, not a fixture.** `ops/seed/load_sqlite.py` carries
+tables, columns, primary keys, foreign keys, indexes and row counts across
+verbatim and fails rather than dropping anything; every row count and every view
+is checked back against the SQLite original. Two deliberate departures, both
+recorded in the script: a `text` column becomes `date` only when *every* non-null
+value is a bare ISO date (SQLite has no date type, so leaving it text would test
+the interchange format rather than the customer's data), and the eight views are
+hand-ported to PostgreSQL in `ops/seed/fnb_views.sql` because a half-working
+automatic dialect translation puts wrong numbers in front of people. Seven
+aggregates including all eight views match the original **to the cent**.
+
+### What worked
+
+Discovery and profiling read 35 objects and 280 columns in **under three
+seconds**, and the cards are good: views are found and labelled as views, the
+column roles (`[id]` / `[dimension]` / `[measure]` / `[time]`) are right, `100%
+empty` is stated for the four columns that are wholly null, and a table with no
+foreign keys says so in words. **Eight of twelve questions were answered
+correctly to the cent** against figures computed independently, and the three
+refusals were all honest and correctly reasoned — including *"break sales down by
+menu category"*, refused because `dim_item.category` is 100% null, which the
+profiler had flagged and the planner read.
+
+**B-051's fix is visible working here.** Every card's `range` is right — including
+`business_date range 2025-01-01 to 2025-12-31` — while every sample-derived figure
+beside it on the same card is wrong (B-054). The range comes from the engine
+because D-025 says it must; that is exactly the difference the decision bought.
+
+### What broke, and what each one means
+
+* **B-054** — the sample is the first rows on disk, so `fact_sale.row_role` is
+  described as having two values when it has three, and the missing one is 80% of
+  the table. Nothing lies: everything is labelled `in sample`. It is still the
+  wrong picture of the data.
+* **B-056** — the capability gaps handed to the planner up front are truncated
+  **alphabetically**, so on 385 gaps it hears 20 about `bridge_item_ingredient`
+  and **none** of the 14 about `fact_sale`. 4.3's up-front warning is noise.
+* **B-057** — every table keys to a *one-row* `dim_business`, so the join graph
+  says `fact_sale` and `fact_purchase` are joinable through it. That is a
+  1.5-billion-row cartesian product arriving *through* the check that exists to
+  prevent one.
+* **B-058** — and in the same breath, the opposite: `dim_calendar.cal_date` and
+  `fact_sale.business_date` join perfectly and no constraint declares it, so
+  *"do we sell more on weekends?"* is **refused**. A false refusal on an
+  answerable question, which `capability.py` itself calls worse than no check.
+* **B-059** — the customer shipped their own semantic layer (`meta_metric`,
+  `meta_gate`, `meta_assumption`, `v_data_quality_status`) and it sits in the
+  catalog as ordinary data. Asked how many units of the top-selling set were
+  sold, the agent answered **0** — correct SQL, business nonsense, and the
+  database's own data-quality gate explains why in English one table away.
+* **B-060** — the worst one. *"Which raw ingredients cost us the most to buy?"*
+  asked twice picked two different tables and gave **AYAM MENTAH at RM 642,930**
+  and **FRESH COCONUT WATER at RM 4,707** — the second from a filter matching 7
+  rows in 51,356 — both as confident prose with no hedge. The SQL was right both
+  times. What is missing is any sign that a choice was made.
+* **B-055** — a view never gets a row estimate, and this source's own dictionary
+  says runtime code should prefer the views.
+
+**The pattern.** Everything that broke is a *semantics* failure, not a SQL
+failure: every statement the agent wrote parsed, validated, ran and was cited
+correctly. What it could not do was tell which of two defensible tables was
+authoritative, or notice that a column it filtered on was undocumented, or read
+the warnings the customer had already written down. **B-059 and B-060 are P1 for
+that reason**, and they land on Phase 9's doorstep: a deterministic critic is
+exactly the place to check that an undocumented code filter is not left
+unexplained.
 
 ## Phase 0 — Bootstrap & walking skeleton (M0)
 - [x] WP0.1 Repo, docs, tracking files, branch protection
@@ -984,8 +1093,21 @@ Prefer an edit that fails loudly over one that prints "done".
       answerable question on the strength of it), **B-052** and **B-041/042/043**
       before it. Running the gate before asking anyone to walk it earned its keep
       three times over.
+- [ ] WP8.4 Capability check: the chasm trap (**B-057** P1) + **B-056**
+      — **added after the gate, and the gate stands.** Pointing the same check
+      at a real star schema on 2026-08-16 exposed the opposite failure to the one
+      Phase 8 was judged on: a **one-row** hub dimension makes every fact
+      reachable from every other, so the check calls a 1.5-billion-row cartesian
+      product *answerable*. The criterion the gate tested — a schema that cannot
+      answer is refused, naming the missing link — is unaffected and still met.
+      The pizza fixture has no hub table, so no amount of testing against it
+      could have shown this. Owner scheduled it **before Phase 9** because the
+      honest-refusal claim is the product's core promise. Build spec in "Next
+      step"; the short version is that direction beats degree, and the fix must
+      produce a third verdict rather than a second refusal.
 
 ## Phase 9 — Critic + composer + evals (M9)
+- [ ] **WP8.4 (B-057, P1) lands before this phase** — see Phase 8
 - [ ] **B-005 (P1) must be closed before this phase starts** — the seed window
       must stop drifting before evals are written against it
 - [ ] WP9.1 Deterministic critic + LLM checklist + bounded re-entry
@@ -1034,7 +1156,100 @@ Prefer an edit that fails loudly over one that prints "done".
 against the GATE line under Phase 8 above — including the one criterion that is
 covered by test rather than demonstrated (**B-053**, accepted).
 
-**Before any Phase 9 code: B-005.** Phase 9's own line says it must
+**First, and before Phase 9: WP8.4 — the capability check's chasm trap**
+(`p8.4-chasm`). **B-057**, raised to P1 by the owner on 2026-08-16 and scheduled
+here because *the honest-refusal claim is the product's core promise*. It is
+Phase 8 code, found after Phase 8's gate, and the gate stands: the criterion it
+was judged on — a schema that genuinely cannot answer is refused, naming the
+missing link — is still met. What the F&B source exposed is the **other** side of
+the same check, which the pizza fixture could never show because it has no hub
+table.
+
+**The diagnosis.** `load_join_graph` collapses every relationship into undirected
+adjacency and `path()` walks it breadth-first, so *reachable* is treated as
+*joinable*. Those are not the same thing. A foreign key is many-to-one **by
+construction** — its target is a unique key, or the engine would not have
+accepted it — so every edge already carries a direction, and building the
+adjacency is precisely where that direction is thrown away. Walking an edge
+child→parent **narrows**: each row on the left matches at most one on the right.
+Walking it parent→child **fans out**. A path is a safe join exactly when it never
+turns *up then down* at an intermediate node, and a node where it does is the
+textbook **chasm trap**:
+
+```
+fact_sale --up--> dim_business --down--> fact_purchase     unsafe (chasm)
+payments  --up--> orders       --up----> customers         safe (all narrowing)
+dim_outlet --down--> fact_sale --up----> dim_item          safe (the normal star)
+```
+
+With `dim_business` holding **one** row the chasm degenerates to a full cartesian
+product: 112,327 × 13,660 ≈ 1.5 billion rows, from a path the check today calls
+answerable. The DAL's row cap bounds what comes back and does nothing whatever
+for the aggregate, which is the number a person reads.
+
+**Why direction, and not the three obvious alternatives.** Each of those treats a
+symptom:
+
+- **A degree threshold.** Arbitrary, and wrong in both directions: a legitimate
+  `dim_date` referenced by twelve fact tables trips it, while a two-row hub slips
+  under it.
+- **Excluding one-row dimensions.** Fixes this instance and nothing else. A
+  five-row `dim_business` still produces a fifth of a cartesian product, and
+  states it just as confidently.
+- **A path-length cap.** Cannot separate the cases at all: `payments → orders →
+  customers` is two hops and safe, `fact → dim → fact` is two hops and fatal.
+
+The direction rule is **structural** — no threshold to tune, no statistics to
+sample, nothing that changes as the data grows. It stays deterministic, which
+4.3 requires, because the model must not be able to talk past it. And it needs no
+new data: `catalog_relationships` already stores `from_table` and `to_table`.
+
+**It must not become a refusal.** `fact_sale` and `fact_purchase` genuinely
+*are* comparable — you aggregate each to a common grain and join the aggregates,
+which is what a competent analyst does and what the question deserves. Refusing
+the pair would trade B-057 for a worse **B-058**, which is the false-refusal
+defect sitting two rows above it in the backlog. So the verdict goes
+**three-valued**:
+
+| verdict | meaning | what the planner is told |
+|---|---|---|
+| `joinable` | a chasm-free path exists | nothing; unchanged behaviour |
+| `comparable` | only chasm paths exist | aggregate each side to the shared key **first**, then join the aggregates; never join these two directly |
+| `unreachable` | no path at all | refuse, naming the missing link — exactly as today |
+
+The middle row is the part worth building. It converts a silent cartesian product
+into a *correct* query, and it is information a model can act on rather than a
+wall it hits.
+
+**Build (stage 1, this WP):**
+
+- `agent/capability.py`: keep direction on each edge (`child → parent`), classify
+  a path by its turn sequence, and return a three-valued verdict. `CapabilityGap`
+  grows a `kind` so a `comparable` pair can carry its own sentence.
+- `agent/runner.py`: put the `comparable` guidance into the planner bundle and
+  into the `capability_checked` payload. **10.3's vocabulary is closed and this
+  needs no new type** — only the payload grows, so no UI change is required.
+- Take **B-056** in the same PR. It is the same six lines of `runner.py`: the
+  gaps handed to the planner are truncated alphabetically (`gaps[:20]`), so on
+  this source it hears twenty facts about `bridge_item_ingredient` and none of
+  the fourteen about `fact_sale`. Select the twenty that involve the tables
+  `context_selected` just chose — they are already in hand at that point in
+  `_investigate`.
+- **Tests:** a hub fixture where two facts share a one-row parent, asserting
+  `comparable` and **not** `joinable`; `payments → orders → customers` stays
+  `joinable`; a genuinely disconnected pair stays `unreachable`; and a regression
+  over the pizza fixture asserting **no verdict changes**, because a fix for a
+  false negative that quietly introduces false positives is not a fix.
+
+**Stage 2, deliberately not in this WP.** The check reads only the *set* of
+tables named in the proposed statement, so it cannot see that the model wrote
+`JOIN fact_purchase ON business_key` rather than joining aggregates. Reading the
+join predicates would let it refuse the specific statement instead of the table
+pair — strictly better, and it needs a `join_pairs()` sibling to `tables_named`
+in `dal/validator.py`. That is a security-boundary file, so it belongs in its own
+PR with human review, and stage 1 is worth having before it.
+
+**Then, before any Phase 9 code: B-005.** Phase 9's own line says it must
 be closed before the phase starts, and it is an **owner decision rather than a
 code task** — the seed dataset pins `END_DATE = 2026-07-31` for reproducibility,
 so "last full month" stops meaning July as real time moves on, and golden eval #2

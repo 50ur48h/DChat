@@ -83,6 +83,12 @@ blob-report/
 *.parquet
 *.dump
 
+# Customer data supplied for local testing: the SQLite file and the data
+# dictionary that came with it. `make seed.fnb` loads it into seed-fnb-pg.
+# The whole directory, not just the database — a dictionary names real tables,
+# outlets and suppliers, and this repository is public.
+.SampleData/
+
 # ---------------------------------------------------------------------------
 # Editors / OS
 # ---------------------------------------------------------------------------

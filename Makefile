@@ -94,6 +94,9 @@ seed: .env ## (Re)build the pizza demo dataset in seed-pizza-pg
 seed.mssql: .env ## (Re)build the pizza demo dataset in the mssql container
 	$(SHELL) ops/scripts/seed_mssql.sh
 
+seed.fnb: .env ## Load a customer SQLite file into seed-fnb-pg: make seed.fnb SQLITE=path
+	uv run ops/seed/load_sqlite.py --sqlite "$(SQLITE)"
+
 .PHONY: db.setup migrate migrate.down migration
 db.setup: .env ## Migrate, then give dataagent_app its local login
 	$(SHELL) ops/scripts/db_setup.sh
