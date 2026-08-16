@@ -37,6 +37,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
 from dataagent.agent import scheduler
+from dataagent.agent.critic import CriticOut
 from dataagent.agent.loop import Reflection
 from dataagent.agent.planner import Plan
 from dataagent.agent.tools.base import ToolContext
@@ -122,6 +123,9 @@ def scripted(fake_llm: FakeLLM) -> FakeLLM:
         role="plan",
     )
     fake_llm.script(_cite_what_actually_ran, role="compose")
+    # A run now ends with a critic pass (WP9.1). Scripted explicitly rather
+    # than defaulted, so a critic that stopped running would fail here.
+    fake_llm.script(CriticOut(verdict="pass", reasons=[]).model_dump_json(), role="critic")
     return fake_llm
 
 

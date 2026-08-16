@@ -43,7 +43,22 @@ __all__ = [
 #: Architecture 4.4's defaults, named so the numbers are greppable from the doc.
 DEFAULT_ITERATIONS = 8
 DEFAULT_QUERIES = 10
-DEFAULT_LLM_CALLS = 20
+#: Raised from 20 to 24 in WP9.1 (**D-028**), which is the move D-024 said would
+#: be needed the day a stage was added: *"if a stage is ever added to the loop …
+#: the iteration ceiling and the call ceiling stop fitting and one of them has to
+#: move."* The critic is that stage. The arithmetic, worst case:
+#:
+#:   8 iterations x 2 calls (plan + reflect)   16
+#:   compose, twice, because of the re-entry    2
+#:   critic,  twice, for the same reason        2
+#:   intake, when it is built (4.4 names it)    1
+#:                                             ---
+#:                                              21   against a ceiling of 24
+#:
+#: The three spare are the same headroom D-024 argued for and for the same
+#: reason: a run must be stopped by the ceiling that describes what it did — its
+#: iterations — and not by an accounting limit it hit first.
+DEFAULT_LLM_CALLS = 24
 DEFAULT_TOKENS = 150_000
 DEFAULT_WALL_SECONDS = 240.0
 

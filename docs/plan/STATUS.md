@@ -17,20 +17,20 @@ Current position: **Phases 0–5, 7 and 8 signed off. Phase 6 merged, its gate
                   a green suite. See "Second data source" below. Two of them
                   are already closed: **WP8.4** (#55) fixed the capability check
                   the hub table defeated, and **B-056** with it.
-Next step:        **Phase 9 / WP9.1** (`p9.1-critic`) — the deterministic
-                  critic, the LLM checklist half, and one bounded re-entry. Its
-                  two preconditions are both closed: **WP8.4** (#55) and
-                  **B-005** (#57). Build spec in the "Next step" section near the
-                  end of this file. The critic can now check that the date range
-                  in a statement matches the range the question stated, which
-                  D-027 is what made possible. **B-059** is the next P1 and lands
-                  in Phase 10, whose spec now requires the semantic layer to
-                  *import* what a database already carries.
+Next step:        **Phase 9 / WP9.2** (`p9.2-composer-evals`) — the composer's
+                  citations and limitations, and eval harness v1 with the twenty
+                  golden questions. **This is the Phase 9 gate PR.** The harness
+                  pins `as_of` to 2026-08-16 (D-027) and reads expected answers
+                  from `truths.json`, never hardcoding them. **WP9.1 is done**
+                  (#58): a draft is judged before it becomes an answer, and a
+                  wrong date range is caught without a model call. **B-059** is
+                  the next P1 and lands in Phase 10, whose spec now requires the
+                  semantic layer to *import* what a database already carries.
 Merge policy: ASK
 Blocked on user: Nothing blocks Phase 9. An Anthropic API key would close
                  **B-029 (P1)** and with it the Phase 6 gate; that blocks nothing
                  else.
-Last updated: 2026-08-16 by Claude Code (B-005 — the run is told what today is)
+Last updated: 2026-08-16 by Claude Code (WP9.1 — the hybrid critic)
 
 ---
 
@@ -1136,7 +1136,28 @@ unexplained.
       both right on the day they were measured. **D-027** gives the run an
       `as_of`, defaulted to the wall clock and pinned by the eval harness.
       The seed's `END_DATE` stays frozen and `truths.json` is untouched
-- [ ] WP9.1 Deterministic critic + LLM checklist + bounded re-entry
+- [x] WP9.1 Deterministic critic + LLM checklist + bounded re-entry (#58)
+      — two stages, and stage 1 is the one that matters. Every rule 4.5 names is
+      arithmetic over what is already durable: citations resolve to executions
+      this run produced, the **date range in the SQL covers the period the
+      question asked for** (which only became checkable when D-027 gave a run an
+      `as_of`), an answer is not built on zero rows without saying so, and a
+      figure appearing in no result is a **warning** — 4.5's own instruction,
+      because prose rounds and computes and blocking on that would refuse correct
+      arithmetic. Stage 2 is one `small`-tier call against a fixed rubric.
+      **A deterministic block skips stage 2 entirely**, which is what makes stage
+      1 free in the sense that matters: the M9 acceptance line is a wrong-date
+      draft caught with **no model call at all**, and the test asserts the call
+      count, not just the verdict. The re-entry is bounded at one by
+      `critic_passes` on the *state*, so an interrupted run cannot come back and
+      claim a fresh one; it moves through `validating` and back to `running`,
+      which is the transition WP7.1 added and nothing had used. **D-028** raises
+      the call ceiling 20 → 24, the move D-024 said would be needed the day a
+      stage was added, and the arithmetic is now asserted as a sum so the next
+      stage fails there rather than in a demo. One defect found by the fixtures
+      while building it: the capability rule first blocked on *any* catalog gap
+      rather than on a statement actually refused — a false block, the thing
+      WP8.4 spent itself avoiding, caught before it shipped
 - [ ] WP9.2 Composer (citations/limitations) + eval harness v1      ← gate PR
 - [ ] GATE: seeded-wrong-draft caught; 20 golden evals pass; sign-off
 
@@ -1208,55 +1229,49 @@ checkboxes in the same PR** — Phase 9's line and its BACKLOG row — because t
 STATUS guard keys on the last occurrence and B-039 already cost a red CI run on
 every PR raised after it merged.
 
-Then Phase 9 / **WP9.1 — the hybrid critic** (`p9.1-critic`).
-Plan §6 Phase 9, architecture Part 4.5 and M9.
+**WP9.1 is done** (#58). Next is Phase 9 / **WP9.2 — composer and eval
+harness v1** (`p9.2-composer-evals`), which is the **Phase 9 gate PR**.
+Plan §6 Phase 9, architecture 4.5 and M9.
 
 Build:
 
-- `agent/critic.py`, **deterministic half first and free**: every numeric claim
-  in a draft maps to a finding and an execution; the date range in the SQL
-  matches the range the question stated; filters required by applicable semantic
-  definitions are present (a hook now, definitions arrive in Phase 10);
-  row-count sanity, so an answer is not built on zero rows without saying so;
-  units and aggregation mismatch heuristics.
-- The **LLM half**: the `critic` role, a fixed checklist rubric, structured
-  verdict of `pass | revise(reasons) | insufficient_evidence`.
-- Loop wiring: **at most one** bounded re-entry on `revise` or
-  `insufficient_evidence` (arch M9); a second failure finalizes with limitations
-  listing the critic's reasons. `agent_runs` already has the `validating` status
-  and `ALLOWED_TRANSITIONS` already permits `validating → running` for exactly
-  this re-entry — WP7.1 put it there and nothing has used it yet.
-- **Tests (FakeLLM):** a seeded wrong-date-range draft caught by the
-  deterministic half **with no model call at all**; re-entry happens once and
-  only once; the verdict schema is enforced.
+- **The composer's limitations.** WP9.1 hands the critic's warnings to the run
+  and the second draft is *told* what was wrong, but `FinalizeIn` still has no
+  `limitations` field — the reasons reach the answer only as prose the model
+  chose to include. Give it the field, render it in the answer card, and make a
+  `WARN` finding travel there by construction rather than by persuasion.
+- **`ops/evals/`** — the twenty golden questions from plan §6, expected answers
+  read from `ops/seed/truths.json` and **never hardcoded**, run against the
+  FakeLLM so `make evals` is deterministic and free.
+- **`as_of` is pinned to 2026-08-16** in the harness (**D-027**). Keep the
+  relative phrasing in #2, #6, #11–13, #17 and #20 — those exist to test exactly
+  that handling — and absolute dates only in #1 and #18, which were always about
+  a fixed window. **#19 only works because of the anchor**: "a future date range"
+  means after `as_of`, and against a wall clock no date stays future.
+- `make evals` as a required CI check, plus `nightly-evals.yml` on a schedule
+  with real keys and a hard token cap (plan §4.1).
 
-What Phase 8 hands it:
+What WP9.1 hands it:
 
-- **A loop with somewhere to put a critic.** `loop.research` already ends by
-  returning a `LoopOutcome` the runner composes from, and `ResearchState` already
-  carries a `critic` field, declared empty in WP8.1a precisely so a checkpoint
-  written today stays readable by the code that fills it.
-- **Findings that already cite real executions.** `state.add_finding` refuses a
-  finding whose every citation was invented, so the deterministic critic starts
-  from claims that are at least resolvable.
-- **A trace that can show a verdict.** `critic_verdict` is already in 10.3's
-  closed vocabulary and already has a plain-words label in the trace UI, so
-  emitting one needs no new type and no UI change.
-- **Budgets that a re-entry has to fit inside.** An iteration costs two model
-  calls and a full run costs 18 against a ceiling of 20 (**D-024**); a bounded
-  critic re-entry has to come out of that headroom, so count it before adding it.
+- **A verdict that already knows how to be a limitation.** `CriticVerdict.warnings`
+  is separate from `.blocking` precisely so the composer can render one without
+  acting on it.
+- **A checked date range.** Eval #1 and #18 are absolute and #2 is relative, and
+  the critic now blocks a draft whose SQL missed the period — so an eval that
+  passes for the wrong reason fails here first.
+- **Headroom that was counted, not assumed.** D-028's arithmetic leaves three
+  calls spare against 24, and `test_the_call_ceiling_fits_the_run_that_spends_the_most`
+  asserts the sum.
 
 Two things to watch:
 
-- **B-052** — a structured call's output ceiling can be smaller than the schema
-  it must fill. The critic's verdict schema is small, but `FinalizeIn.answer` at
-  4,000 characters is the next one to hit this, and Phase 9 is the phase that
-  makes the composer work harder.
-- **B-038** — `agent_configs` has no store, so the org-level instructions a
-  critic would want to enforce ("revenue excludes cancelled orders") cannot reach
-  it. WP9.1's semantic-definition hook is written against something that does not
-  exist yet; that is fine and deliberate, but do not mistake the hook for the
-  feature.
+- **B-052** — `FinalizeIn.answer` is 4,000 characters against a default output
+  ceiling of 1,024 tokens, and adding `limitations` makes that schema bigger. The
+  critic's own call sets its ceiling explicitly for this reason; the composer's
+  does not, and WP9.2 is the phase that makes the composer work harder.
+- **B-060** — the eval suite is where "the same question twice gives the same
+  answer" stops being a hope. #20 is a duplicate of #11 phrased differently and
+  exists to check exactly that.
 
 ## Notes
 

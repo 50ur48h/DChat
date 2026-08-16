@@ -4,6 +4,43 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-028 — The call ceiling moves to 24, because the critic is the stage D-024 predicted
+Date: 2026-08-16 · Phase: 9 · PR: WP9.1
+Context: **D-024** fixed architecture 4.4's arithmetic — an iteration costs two
+model calls, so a run using all eight spends 16, plus intake and compose, giving
+18 against a ceiling of 20 — and said in as many words what would happen next:
+*"if a stage is ever added to the loop, or Observe is ever given a model, the
+iteration ceiling and the call ceiling stop fitting and one of them has to
+move."* WP9.1 adds that stage. A critic costs one call per composed draft, and
+architecture M9's bounded re-entry means a run may compose twice, so the worst
+case grows by four. Counting what the code actually does today rather than what
+4.4 describes: there is **no intake call** — nothing emits `intent_classified`
+and no role is asked for one — so a full run today is 16 + 1 = 17, and with the
+critic 16 + 2 + 2 = 20. Exactly at the ceiling, with nothing spare, and 21 the
+day intake is built.
+Options: (a) leave the ceiling at 20 and let `llm_calls` end the longest runs;
+(b) take the re-entry out of the iteration budget by stopping the loop at seven;
+(c) raise the ceiling.
+Decision: (c), to **24**. The arithmetic, worst case: 8 iterations x 2 = 16,
+compose twice = 2, critic twice = 2, intake when it exists = 1, total **21**
+against **24**. Why not the others: **(a)** would mean a run that used its
+iterations honestly is reported as `budget_exhausted` for an accounting reason
+rather than for the reason a person would recognise — 4.4's own principle is
+that a run stops at the ceiling describing what it did, and "reasoning limit"
+would be a lie about a run that simply thought eight times; **(b)** hides the
+cost of a feature inside a different feature's budget, and the iteration ceiling
+is the one number in 4.4 a reader can reason about.
+Consequences: `DEFAULT_LLM_CALLS` is 24 and architecture 4.4's arithmetic
+paragraph is rewritten to match, in this PR. `MAX_OVERRIDES["llm_calls"]` stays
+60, so the ceiling an organization may raise to is unchanged. The guard that
+made this deliberate rather than incidental was
+`test_the_defaults_are_the_numbers_the_architecture_names`, which failed the
+moment the constant moved — it now also asserts the **sum**, so the next stage
+added to the loop fails with the arithmetic in front of whoever added it rather
+than with a number to edit. The three spare calls are the same headroom D-024
+argued for and are not a rounding: a stage costing two calls per draft would fit,
+and one costing three would not, which is the signal the headroom exists to give.
+
 ## D-027 — The run is told what "today" is; the model does not choose
 Date: 2026-08-16 · Phase: 8 · PR: B-005 · Owner's direction
 Context: **B-005** was filed as an eval problem — the seed pins

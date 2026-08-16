@@ -24,6 +24,7 @@ from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from dataagent.agent import scheduler
+from dataagent.agent.critic import CriticOut
 from dataagent.agent.loop import Reflection
 from dataagent.agent.planner import Plan
 from dataagent.agent.scheduler import (
@@ -358,6 +359,9 @@ async def test_asking_over_http_answers_202_and_the_run_completes_behind_it(
         ).model_dump_json(),
         role="compose",
     )
+    # A run now ends with a critic pass (WP9.1), scripted explicitly so a
+    # critic that stopped running would fail here rather than pass quietly.
+    fake_llm.script(CriticOut(verdict="pass", reasons=[]).model_dump_json(), role="critic")
 
     app = create_app(settings=Settings(auth_mode="dev", env="ci", build_env="dev"))
     app.state.token_validator = _SubjectAsToken(context.actor_user_id)

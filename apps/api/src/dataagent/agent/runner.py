@@ -39,19 +39,22 @@ the same code moves behind a worker in V1.5 without a rewrite.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 
+from dataagent.agent import critic
 from dataagent.agent.budget import Budget, BudgetState
-from dataagent.agent.capability import CapabilityChasm, CapabilityGap, load_join_graph
-from dataagent.agent.context import build_context
+from dataagent.agent.capability import CapabilityChasm, CapabilityGap, JoinGraph, load_join_graph
+from dataagent.agent.context import ContextBundle, build_context
+from dataagent.agent.critic import CriticVerdict
 from dataagent.agent.loop import LoopOutcome, research
 from dataagent.agent.state import ResearchState, StateFinding
 from dataagent.agent.tools.base import ToolContext
 from dataagent.agent.tools.finalize import FINALIZE, FinalizeIn
 from dataagent.agent.tools.registry import ToolRegistry, default_registry
 from dataagent.config import Settings
+from dataagent.dal.policy import SourcePolicy
 from dataagent.llm.base import LLMError
 from dataagent.runs import service as runs
 from dataagent.runs.events import EventWriter
@@ -63,6 +66,16 @@ __all__ = ["RunOutcome", "execute_run", "relevant_pairs"]
 #: an ordinary completion, because nothing was overspent — the run simply had
 #: nothing further worth doing.
 _BUDGET_DIMENSIONS = frozenset({"iterations", "queries", "llm_calls", "tokens", "wall_seconds"})
+
+#: How many times a draft may be criticised. Two: the first answer, and the one
+#: re-entry architecture M9 allows. A third would make the critic a loop with no
+#: ceiling of its own, which is the thing 4.4's budgets exist to refuse.
+MAX_CRITIC_PASSES = 2
+
+#: The critic's verdict is three short reasons at most, so its output ceiling can
+#: be small — and is set explicitly rather than left to the default, because
+#: **B-052** is a ceiling silently below what a schema needs.
+CRITIC_OUTPUT_TOKENS = 800
 
 
 @dataclass(frozen=True, slots=True)
@@ -330,7 +343,163 @@ async def _investigate(
         # refusal it already wrote.
         return await _finalize_refusal(context, events, working, outcome.refusal)
 
-    return await _compose(context, events, working, outcome, settings)
+    # Compose, criticise, and — at most once — go round again (arch M9).
+    draft = await _compose(context, events, working, outcome, settings)
+    verdict = await _validate(context, events, working, outcome, draft, settings)
+
+    if verdict.blocked and _may_re_enter(working):
+        outcome, draft, verdict = await _second_pass(
+            context=context,
+            tools=tools,
+            events=events,
+            working=working,
+            bundle=bundle,
+            graph=graph,
+            dialect=policy.dialect,
+            save=save,
+            keep=keep,
+            verdict=verdict,
+            settings=settings,
+        )
+
+    state.critic = verdict.as_payload()
+    cited = await _verified_citations(draft.supported_by, working, events)
+    return await _write_ending(context, events, working, draft, cited)
+
+
+def _may_re_enter(working: _Working) -> bool:
+    """Whether the run has both permission and budget for one more pass.
+
+    Two conditions, and they fail differently. **Once** is architecture M9's
+    rule and is absolute — a critic that can keep sending a run back is a loop
+    with no ceiling, wearing a different name. The budget is the ordinary one:
+    a re-entry that cannot afford its own compose and critic would spend the
+    run's last calls producing nothing, so it is not started.
+    """
+    if working.state.critic_passes >= MAX_CRITIC_PASSES:
+        return False
+    return working.budget.exhausted() is None
+
+
+async def _validate(
+    context: ToolContext,
+    events: EventWriter,
+    working: _Working,
+    outcome: LoopOutcome,
+    draft: FinalizeIn,
+    settings: Settings | None,
+) -> CriticVerdict:
+    """Both critic stages, and the verdict in the trace.
+
+    Stage 1 is arithmetic and costs nothing. Stage 2 is one cheap call, and it is
+    **skipped entirely when stage 1 already blocked** — paying a model to confirm
+    what a rule established would be paying for a less reliable answer. It is
+    also skipped when the budget is spent, and the trace says which of the two
+    happened through `consulted_model`, because "the rules passed and a model
+    agreed" and "the rules passed and nobody looked" are different claims.
+    """
+    from dataagent.llm import service as llm
+    from dataagent.llm.base import CallLimits, Message
+
+    state, budget = working.state, working.budget
+    state.critic_passes += 1
+
+    evidence = critic.Evidence(
+        question=state.question,
+        as_of=date.fromisoformat(state.as_of) if state.as_of else datetime.now(UTC).date(),
+        state=state,
+        statements=await critic.statements_for(context.org_id, state.execution_ids()),
+        previews=outcome.previews,
+        dialect=(await source_policy_for(context)).dialect,
+    )
+    deterministic = critic.check(draft, evidence)
+
+    model: critic.CriticOut | None = None
+    blocked_already = any(finding.severity == critic.BLOCK for finding in deterministic)
+    if not blocked_already and budget.exhausted() is None:
+        completion = await llm.complete(
+            role="critic",
+            org_id=context.org_id,
+            messages=[Message(role="user", content=critic.rubric(draft, evidence, deterministic))],
+            schema=critic.CriticOut,
+            run_id=context.run_id,
+            actor_user_id=context.actor_user_id,
+            settings=settings,
+            # Small on purpose (B-052): the schema is three short reasons, and a
+            # ceiling below what a schema can need is how a structured call gets
+            # truncated mid-string.
+            limits=CallLimits(max_output_tokens=CRITIC_OUTPUT_TOKENS),
+        )
+        budget.spend_llm(completion.usage.total_tokens)
+        model = completion.parsed_as(critic.CriticOut)
+
+    verdict = critic.combine(deterministic, model)
+    await events.emit("critic_verdict", verdict.as_payload())
+    return verdict
+
+
+async def _second_pass(
+    *,
+    context: ToolContext,
+    tools: ToolRegistry,
+    events: EventWriter,
+    working: _Working,
+    bundle: ContextBundle,
+    graph: JoinGraph,
+    dialect: str,
+    save: Callable[[], Awaitable[None]],
+    keep: Callable[[StateFinding], Awaitable[None]],
+    verdict: CriticVerdict,
+    settings: Settings | None,
+) -> tuple[LoopOutcome, FinalizeIn, CriticVerdict]:
+    """The one bounded re-entry (arch M9), and its second verdict.
+
+    The run moves to `validating` and back to `running` — the transition WP7.1
+    put in `ALLOWED_TRANSITIONS` for exactly this and which nothing had used
+    until now, so the status a person sees while it happens is the truthful one
+    rather than a run that appears to have restarted.
+
+    Whatever the second verdict says, this returns and the run finalizes.
+    Architecture M9 allows *one* re-entry; a second failure is answered with the
+    limitations rather than a third attempt.
+    """
+    state = working.state
+    await runs.transition(org_id=context.org_id, run_id=context.run_id, status="validating")
+    await runs.transition(org_id=context.org_id, run_id=context.run_id, status="running")
+
+    # The critic's reasons become open questions, so the loop plans against them
+    # rather than repeating the investigation it just finished.
+    state.open_questions.extend(finding.detail for finding in verdict.blocking)
+    state.phase = "planning"
+    await save()
+
+    outcome = await research(
+        context=context,
+        tools=tools,
+        events=events,
+        state=state,
+        budget=working.budget,
+        bundle=bundle,
+        graph=graph,
+        dialect=dialect,
+        checkpoint=save,
+        record_finding=keep,
+        settings=settings,
+    )
+    draft = await _compose(
+        context, events, working, outcome, settings, correction=verdict.reasons()
+    )
+    second = await _validate(context, events, working, outcome, draft, settings)
+    return outcome, draft, second
+
+
+async def source_policy_for(context: ToolContext) -> SourcePolicy:
+    """The policy for this run's source, for whoever needs its dialect."""
+    from dataagent.dal.policy import source_policy
+
+    if context.data_source_id is None:  # pragma: no cover - execute_run requires one
+        raise ValueError("a run cannot be validated without a data source")
+    return await source_policy(context.org_id, context.data_source_id)
 
 
 async def _compose(
@@ -339,7 +508,8 @@ async def _compose(
     working: _Working,
     outcome: LoopOutcome,
     settings: Settings | None,
-) -> RunOutcome:
+    correction: str = "",
+) -> FinalizeIn:
     """One call that turns what the loop found into an answer that cites it.
 
     Given **summaries and execution ids**, never rows: the loop kept them out of
@@ -350,6 +520,12 @@ async def _compose(
     progress rule stopped the search, the answer has to say so — an answer that
     quietly presents partial evidence as complete is the failure architecture 4.4
     added budgets to make visible.
+
+    Returns the **draft**, not the ending. WP9.1 put the critic between the two:
+    a function that composed and recorded in one step left nowhere for a verdict
+    to change the outcome. ``correction`` carries the critic's reasons into the
+    second attempt, in the same shape as the caveat and for the same reason —
+    what an answer must acknowledge is given to the model, not hoped for.
     """
     from dataagent.llm import service as llm
     from dataagent.llm.base import Message
@@ -370,6 +546,17 @@ async def _compose(
         f"Result of {execution_id}:\n{rendered}" for execution_id, rendered in outcome.previews
     )
 
+    revise = ""
+    if correction:
+        # The second attempt. The critic's reasons are the instruction, so the
+        # answer either fixes what was wrong or says plainly that it could not.
+        revise = (
+            "\n\nA reviewer rejected your previous answer for these reasons:\n"
+            f"{correction}\n"
+            "Address each one. Where the evidence does not let you, say so in the "
+            "answer as a stated limitation rather than leaving it out."
+        )
+
     caveat = ""
     if outcome.caveat:
         caveat = (
@@ -382,7 +569,7 @@ async def _compose(
         f"The question was: {state.question}\n\n"
         f"Queries run, with what each returned:\n{evidence}\n\n"
         f"What you concluded along the way:\n{concluded}\n\n"
-        f"{results}{caveat}\n\n"
+        f"{results}{caveat}{revise}\n\n"
         "Answer the question in plain words for the person who asked. Use only "
         "these numbers. Cite in supported_by the execution ids your answer rests "
         "on. If the evidence does not actually answer the question, set answered "
@@ -398,10 +585,7 @@ async def _compose(
         settings=settings,
     )
     budget.spend_llm(completion.usage.total_tokens)
-    final = completion.parsed_as(FinalizeIn)
-
-    cited = await _verified_citations(final.supported_by, working, events)
-    return await _write_ending(context, events, working, final, cited)
+    return completion.parsed_as(FinalizeIn)
 
 
 async def _finalize_refusal(

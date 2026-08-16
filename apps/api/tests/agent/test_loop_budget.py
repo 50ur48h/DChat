@@ -23,14 +23,41 @@ from dataagent.agent.budget import (
 def test_the_defaults_are_the_numbers_the_architecture_names() -> None:
     """4.4 gives five figures. A drift here is a change to the product's cost
     profile, so it should have to be made deliberately rather than by editing a
-    constant that nothing checks."""
+    constant that nothing checks.
+
+    `llm_calls` moved from 20 to 24 in WP9.1 (**D-028**) — the move D-024 said
+    would be needed the day a stage was added to the loop. This test is what made
+    it deliberate rather than incidental, which is what it is for.
+    """
     budget = Budget()
 
-    assert (budget.iterations, budget.queries, budget.llm_calls) == (8, 10, 20)
+    assert (budget.iterations, budget.queries, budget.llm_calls) == (8, 10, 24)
     assert budget.tokens == 150_000
     assert budget.wall_seconds == 240.0
-    assert (DEFAULT_ITERATIONS, DEFAULT_QUERIES, DEFAULT_LLM_CALLS) == (8, 10, 20)
+    assert (DEFAULT_ITERATIONS, DEFAULT_QUERIES, DEFAULT_LLM_CALLS) == (8, 10, 24)
     assert (DEFAULT_TOKENS, DEFAULT_WALL_SECONDS) == (150_000, 240.0)
+
+
+def test_the_call_ceiling_fits_the_run_that_spends_the_most() -> None:
+    """The two ceilings have to agree, and this is the arithmetic that says so.
+
+    D-024 exists because they once did not: three model calls per iteration would
+    have needed 26 against a ceiling of 20, and the loop would have been cut short
+    by its own accounting rather than by its iteration budget. Written as a sum
+    rather than as a number so that adding a stage fails *here*, with the
+    arithmetic in front of whoever added it.
+    """
+    per_iteration = 2  # plan, then reflect
+    composes = 2  # the second is the critic's one bounded re-entry
+    critics = 2  # one verdict per composed draft
+    intake = 1  # 4.4 names it; not built yet, and counted anyway
+
+    worst = DEFAULT_ITERATIONS * per_iteration + composes + critics + intake
+
+    assert worst <= DEFAULT_LLM_CALLS, (
+        f"a full run needs {worst} calls against a ceiling of {DEFAULT_LLM_CALLS}; "
+        "raise the ceiling or take a stage out"
+    )
 
 
 def test_an_organization_may_lower_a_ceiling_freely() -> None:
@@ -137,9 +164,9 @@ def test_time_is_reported_before_any_other_ceiling() -> None:
 
 def test_exhaustion_reads_as_something_a_person_asked_for() -> None:
     """The caveat on a partial answer is read by whoever asked the question, so
-    it says the search stopped — not that `llm_calls` reached 20."""
+    it says the search stopped — not that `llm_calls` reached its ceiling."""
     state = BudgetState(budget=Budget())
-    for _ in range(20):
+    for _ in range(DEFAULT_LLM_CALLS):
         state.spend_llm()
 
     found = state.exhausted(now=state.started_at)

@@ -27,11 +27,13 @@ import json
 import re
 import uuid
 from datetime import UTC, date, datetime
+from typing import cast
 
 import pytest
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from dataagent.agent.critic import CriticOut
 from dataagent.agent.loop import ReflectFinding, Reflection
 from dataagent.agent.planner import Plan
 from dataagent.agent.runner import RunOutcome, execute_run
@@ -71,6 +73,13 @@ def _final(answer: str, *, answered: bool = True, cite: list[str] | None = None)
     return FinalizeIn(
         answer=answer, answered=answered, supported_by=cite or [], confidence="high"
     ).model_dump_json()
+
+
+def _passes() -> str:
+    """A critic that finds nothing. Scripted explicitly in every test that gets
+    as far as an answer, because a run now ends with a verdict and a fixture
+    that supplied one silently would hide the critic having stopped running."""
+    return CriticOut(verdict="pass", reasons=[]).model_dump_json()
 
 
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
@@ -130,6 +139,7 @@ async def test_a_question_becomes_sql_rows_and_a_cited_answer(
     fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql")
     fake_llm.script(_reflect(), role="plan")
     fake_llm.script(_cites_the_execution, role="compose")
+    fake_llm.script(_passes(), role="critic")
     run_id = await _run_for(context, "How many shops are there?")
 
     outcome = await _execute(context, run_id)
@@ -156,6 +166,7 @@ async def test_the_trace_tells_the_whole_story_in_order(
     fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql")
     fake_llm.script(_reflect(), role="plan")
     fake_llm.script(_cites_the_execution, role="compose")
+    fake_llm.script(_passes(), role="critic")
     run_id = await _run_for(context, "How many shops are there?")
 
     await _execute(context, run_id)
@@ -175,6 +186,9 @@ async def test_the_trace_tells_the_whole_story_in_order(
         "query_executed",
         "result_summarized",
         "reflection",
+        # The draft is judged before it becomes the answer (WP9.1): a verdict
+        # recorded after publication would be a review of something shipped.
+        "critic_verdict",
         "answer_composed",
         # The finding is written after the answer and before the ending: a
         # conclusion the trace does not mention is one the user cannot check.
@@ -189,6 +203,7 @@ async def test_the_execution_row_is_attributed_to_this_run(
     fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql")
     fake_llm.script(_reflect(), role="plan")
     fake_llm.script(_cites_the_execution, role="compose")
+    fake_llm.script(_passes(), role="critic")
     run_id = await _run_for(context, "How many shops are there?")
 
     outcome = await _execute(context, run_id)
@@ -233,6 +248,7 @@ async def test_a_hallucinated_column_is_corrected_on_the_next_iteration(
     fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql", times=1)
     fake_llm.script(_reflect(), role="plan", times=1)
     fake_llm.script(_cites_the_execution, role="compose")
+    fake_llm.script(_passes(), role="critic")
     run_id = await _run_for(context, "How much revenue?")
 
     outcome = await _execute(context, run_id)
@@ -256,6 +272,9 @@ async def test_a_hallucinated_column_is_corrected_on_the_next_iteration(
         "query_executed",
         "result_summarized",
         "reflection",
+        # The draft is judged before it becomes the answer (WP9.1): a verdict
+        # recorded after publication would be a review of something shipped.
+        "critic_verdict",
         "answer_composed",
         "finding_added",
         "run_finished",
@@ -272,6 +291,7 @@ async def test_the_next_plan_is_told_what_was_refused(
     fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql", times=1)
     fake_llm.script(_reflect(), role="plan", times=1)
     fake_llm.script(_cites_the_execution, role="compose")
+    fake_llm.script(_passes(), role="critic")
     run_id = await _run_for(context, "How much revenue?")
 
     await _execute(context, run_id)
@@ -290,6 +310,7 @@ async def test_the_same_statement_is_never_sent_twice(
     fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql")
     fake_llm.script(_reflect(done=False), role="plan")
     fake_llm.script(_cites_the_execution, role="compose")
+    fake_llm.script(_passes(), role="critic")
     run_id = await _run_for(context, "How many shops?")
 
     await _execute(context, run_id)
@@ -322,6 +343,7 @@ async def test_a_refusal_that_is_never_corrected_ends_honestly(
     fake_llm.script(_plan("SELECT revenue_total FROM shops"), role="sql")
     fake_llm.script(_reflect(done=False), role="plan")
     fake_llm.script(_final("I could not answer that.", answered=False), role="compose")
+    fake_llm.script(_passes(), role="critic")
     run_id = await _run_for(context, "How much revenue?")
 
     outcome = await _execute(context, run_id)
@@ -496,6 +518,7 @@ async def test_the_run_state_is_checkpointed_as_it_goes(
     fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql")
     fake_llm.script(_reflect(), role="plan")
     fake_llm.script(_cites_the_execution, role="compose")
+    fake_llm.script(_passes(), role="critic")
     run_id = await _run_for(context, "How many shops?")
 
     outcome = await _execute(context, run_id)
@@ -557,6 +580,7 @@ async def test_the_trace_records_the_date_relative_periods_were_resolved_against
     fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql")
     fake_llm.script(_reflect(), role="plan")
     fake_llm.script(_cites_the_execution, role="compose")
+    fake_llm.script(_passes(), role="critic")
     run_id = await _run_for(context, "How many shops did we have last month?")
 
     await execute_run(
@@ -582,6 +606,7 @@ async def test_a_pinned_date_reaches_the_prompt_the_model_is_given(
     fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql")
     fake_llm.script(_reflect(), role="plan")
     fake_llm.script(_cites_the_execution, role="compose")
+    fake_llm.script(_passes(), role="critic")
     run_id = await _run_for(context, "How many shops did we have last month?")
 
     await execute_run(
@@ -606,6 +631,7 @@ async def test_a_run_with_no_date_given_anchors_on_today(
     fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql")
     fake_llm.script(_reflect(), role="plan")
     fake_llm.script(_cites_the_execution, role="compose")
+    fake_llm.script(_passes(), role="critic")
     run_id = await _run_for(context, "How many shops are there?")
 
     await _execute(context, run_id)
@@ -613,3 +639,189 @@ async def test_a_run_with_no_date_given_anchors_on_today(
     events = await read_events(org_id=context.org_id, run_id=run_id)
     selected = next(e for e in events if e.type == "context_selected")
     assert selected.payload["as_of"] == datetime.now(UTC).date().isoformat()
+
+
+# ---------------------------------------------------------------------------
+# The critic, wired (WP9.1, architecture M9)
+# ---------------------------------------------------------------------------
+
+
+async def test_a_wrong_date_range_is_caught_without_asking_a_model(
+    context: ToolContext, fake_llm: FakeLLM
+) -> None:
+    """M9's acceptance line, end to end, and the half of it that costs nothing.
+
+    The question names July; the statement filters June. Stage 1 blocks, and
+    **no `critic` call is ever made** — paying a model to confirm arithmetic
+    would be paying for a less reliable version of an answer already in hand.
+    """
+    fake_llm.script(
+        _plan(
+            "SELECT count(*) AS n FROM shops WHERE opened_on >= CAST('2026-06-01' AS DATE) "
+            "AND opened_on < CAST('2026-07-01' AS DATE)"
+        ),
+        role="sql",
+        times=1,
+    )
+    fake_llm.script(_reflect(), role="plan", times=1)
+    fake_llm.script(_cites_the_execution, role="compose", times=1)
+    # The second pass: the loop replans, composes again, and this time the
+    # critic's LLM half is reached.
+    fake_llm.script(
+        _plan(
+            "SELECT count(*) AS n FROM shops WHERE opened_on >= CAST('2026-07-01' AS DATE) "
+            "AND opened_on < CAST('2026-08-01' AS DATE)"
+        ),
+        role="sql",
+        times=1,
+    )
+    fake_llm.script(_reflect(), role="plan", times=1)
+    fake_llm.script(_cites_the_execution, role="compose", times=1)
+    fake_llm.script(CriticOut(verdict="pass", reasons=[]).model_dump_json(), role="critic", times=1)
+
+    run_id = await _run_for(context, "How many shops opened in July 2026?")
+    await execute_run(
+        org_id=context.org_id,
+        run_id=run_id,
+        data_source_id=context.data_source_id or uuid.uuid4(),
+        actor_user_id=context.actor_user_id,
+        settings=build_settings(),
+        as_of=date(2026, 8, 16),
+    )
+
+    events = await read_events(org_id=context.org_id, run_id=run_id)
+    verdicts = [event for event in events if event.type == "critic_verdict"]
+    assert len(verdicts) == 2, "one verdict per composed draft"
+
+    first = verdicts[0].payload
+    assert first["verdict"] == "revise"
+    assert first["consulted_model"] is False, "arithmetic decided; no model was asked"
+    rules = [finding["rule"] for finding in cast("list[dict[str, str]]", first["findings"])]
+    assert rules == ["range_matches"]
+
+    # And the proof that the saving is real: exactly one critic call, for the
+    # second draft, not the first.
+    assert len(fake_llm.calls_for("critic")) == 1
+    assert len(fake_llm.calls_for("critic")) == 1
+
+
+async def test_the_re_entry_happens_once_and_only_once(
+    context: ToolContext, fake_llm: FakeLLM
+) -> None:
+    """Architecture M9 allows one bounded re-entry. A critic that can keep
+    sending a run back is a loop with no ceiling wearing a different name.
+
+    Both drafts are rejected here — the second by the model half — and the run
+    still finalizes rather than going round a third time.
+    """
+    for _ in range(2):
+        fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql", times=1)
+        fake_llm.script(_reflect(), role="plan", times=1)
+        fake_llm.script(_cites_the_execution, role="compose", times=1)
+        fake_llm.script(
+            CriticOut(
+                verdict="revise", reasons=["Still overstates the evidence."]
+            ).model_dump_json(),
+            role="critic",
+        )
+
+    run_id = await _run_for(context, "How many shops are there?")
+    outcome = await execute_run(
+        org_id=context.org_id,
+        run_id=run_id,
+        data_source_id=context.data_source_id or uuid.uuid4(),
+        actor_user_id=context.actor_user_id,
+        settings=build_settings(),
+    )
+
+    events = await read_events(org_id=context.org_id, run_id=run_id)
+    assert len([e for e in events if e.type == "critic_verdict"]) == 2
+    assert len(fake_llm.calls_for("critic")) == 2
+    assert len(fake_llm.calls_for("compose")) == 2, "two drafts, not three"
+    assert outcome.status == "completed", "a rejected second draft is still an ending"
+
+
+async def test_the_second_attempt_is_told_what_was_wrong_with_the_first(
+    context: ToolContext, fake_llm: FakeLLM
+) -> None:
+    """The critic's reasons are given to the composer, not hoped for — the same
+    shape the budget caveat already uses, and for the same reason."""
+    fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql", times=1)
+    fake_llm.script(_reflect(), role="plan", times=1)
+    fake_llm.script(_cites_the_execution, role="compose", times=1)
+    fake_llm.script(
+        CriticOut(
+            verdict="revise", reasons=["The answer treats a correlation as a cause."]
+        ).model_dump_json(),
+        role="critic",
+    )
+    fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql", times=1)
+    fake_llm.script(_reflect(), role="plan", times=1)
+    fake_llm.script(_cites_the_execution, role="compose", times=1)
+    fake_llm.script(CriticOut(verdict="pass", reasons=[]).model_dump_json(), role="critic", times=1)
+
+    run_id = await _run_for(context, "How many shops are there?")
+    await execute_run(
+        org_id=context.org_id,
+        run_id=run_id,
+        data_source_id=context.data_source_id or uuid.uuid4(),
+        actor_user_id=context.actor_user_id,
+        settings=build_settings(),
+    )
+
+    second = fake_llm.calls_for("compose")[1]
+    prompt = " ".join(m.content for m in second.request.messages)
+    assert "A reviewer rejected your previous answer" in prompt
+    assert "treats a correlation as a cause" in prompt
+
+
+async def test_a_run_that_passes_is_criticised_once_and_left_alone(
+    context: ToolContext, fake_llm: FakeLLM
+) -> None:
+    """The common path: one draft, one verdict, no second pass."""
+    fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql", times=1)
+    fake_llm.script(_reflect(), role="plan", times=1)
+    fake_llm.script(_cites_the_execution, role="compose", times=1)
+    fake_llm.script(CriticOut(verdict="pass", reasons=[]).model_dump_json(), role="critic", times=1)
+
+    run_id = await _run_for(context, "How many shops are there?")
+    outcome = await execute_run(
+        org_id=context.org_id,
+        run_id=run_id,
+        data_source_id=context.data_source_id or uuid.uuid4(),
+        actor_user_id=context.actor_user_id,
+        settings=build_settings(),
+    )
+
+    events = await read_events(org_id=context.org_id, run_id=run_id)
+    verdicts = [e for e in events if e.type == "critic_verdict"]
+    assert len(verdicts) == 1
+    assert verdicts[0].payload["verdict"] == "pass"
+    assert verdicts[0].payload["consulted_model"] is True
+    assert len(fake_llm.calls_for("compose")) == 1
+    assert outcome.answered is True
+
+
+async def test_the_verdict_schema_is_enforced(context: ToolContext, fake_llm: FakeLLM) -> None:
+    """A verdict outside the three architecture 4.5 names is not a verdict.
+
+    Scripted as a plausible-looking synonym, because that is what a real model
+    produces when a schema is a suggestion rather than a constraint.
+    """
+    fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql", times=1)
+    fake_llm.script(_reflect(), role="plan", times=1)
+    fake_llm.script(_cites_the_execution, role="compose", times=1)
+    fake_llm.script('{"verdict": "looks_fine", "reasons": []}', role="critic", times=1)
+
+    run_id = await _run_for(context, "How many shops are there?")
+    outcome = await execute_run(
+        org_id=context.org_id,
+        run_id=run_id,
+        data_source_id=context.data_source_id or uuid.uuid4(),
+        actor_user_id=context.actor_user_id,
+        settings=build_settings(),
+    )
+
+    # The run does not silently accept it. It fails as a platform error rather
+    # than passing an unvalidated verdict off as a review.
+    assert outcome.status == "failed"
