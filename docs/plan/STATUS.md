@@ -1,88 +1,152 @@
 # STATUS — data-agent build
 
-Current position: **Phases 0–5 and 7 signed off. Phase 6 merged, its gate
-                  partially met and deliberately unticked. Phase 8 starts now.**
-                  The **Phase 7 gate was signed off on 2026-08-16** (#45): a
-                  question asked in a browser is answered with a citation that
-                  opens into the SQL behind it, and a question the data cannot
-                  answer is honestly refused. The product does the thing it is
-                  for, in front of a person.
-Next step:        **The Phase 8 GATE is yours** — the manual test script is in
-                  the WP8.3b PR's body. Once signed off, Phase 9 / **WP9.1**
-                  (`p9.1-critic`), whose precondition **B-005** must be closed
-                  first. Phase 8's
-                  precondition (**B-039**) is closed, and its flagship refusal —
-                  *"Which menu items sell best?"* — was already seen working live
-                  during Phase 7's verification, so WP8.2 starts from a known-good
-                  position rather than a hypothesis. Build spec in the "Next step"
-                  section near the end of this file.
+Current position: **Phases 0–5, 7 and 8 signed off. Phase 6 merged, its gate
+                  partially met and deliberately unticked.** The **Phase 8 gate
+                  was signed off on 2026-08-16** (#52): the revenue-decline
+                  question answered **$938.28** in two research steps against a
+                  cap of eight, *"which menu items sell best?"* refused honestly
+                  with zero queries, and a mid-run refresh replayed the whole
+                  trace. A question is now investigated rather than answered in
+                  one shot, bounded by ceilings the controller enforces, refused
+                  deterministically when the schema cannot answer it, and visible
+                  step by step in a record that cannot be rewritten.
+Next step:        **B-005 first — it is an owner decision and Phase 9 cannot
+                  start without it.** Then Phase 9 / **WP9.1** (`p9.1-critic`):
+                  the deterministic critic, the LLM checklist half, and one
+                  bounded re-entry. Build spec in the "Next step" section near
+                  the end of this file.
 Merge policy: ASK
-Blocked on user: nothing for Phase 8. An Anthropic API key would close B-029 and
-                 the Phase 6 gate. **B-005 (P1) blocks the start of Phase 9** and
-                 is the one to raise before evals are written against a window
-                 that drifts — worth deciding during Phase 8 rather than at its
-                 end.
-Last updated: 2026-08-16 by Claude Code (Phase 7 gate signed off; B-046–B-048 filed)
+Blocked on user: **B-005 (P1)** — the seed dataset's fixed end date, which Phase
+                 9's own line makes a precondition. It needs an answer, not an
+                 implementation. Separately, an Anthropic API key would close
+                 **B-029 (P1)** and with it the Phase 6 gate; that blocks
+                 nothing else.
+Last updated: 2026-08-16 by Claude Code (session end — Phase 8 signed off)
 
 ---
 
 ## ⚠ Session-end handoff — read this before starting anything
 
-Phase 7 is signed off (#45). Phase 8 is next, and nothing is in flight.
+**Phase 8 is built, walked and signed off.** Everything this session produced is
+on `main`. Nothing is in flight: no branch, no open PR, no dirty tree.
 
-1. **Session ritual (plan §7.1) as normal.** `git fetch --all`, `gh pr list`.
-   Both should be quiet; `main` is at the Phase 7 gate sign-off.
-2. **Confirm the browser is running your code before believing anything.**
-   `next dev` in the web container does not see host edits — file-watch events do
-   not cross the Windows bind mount — so an edited file can sit in the container
-   while the served chunk holds the previous version (**B-045**). This cost a
-   whole gate cycle: a correct fix was reported as broken because it had never
-   run. `docker compose restart web`, then grep the *served* chunk, as CLAUDE.md
-   now shows.
-3. **Run the gate before asking anyone to.** The owner's standing instruction, and
-   it earned itself here: running the M7 question live before writing the script
-   found **three** blockers a fully green suite could not see (**B-041**,
-   **B-042**, **B-043**). Read the run's *trace* rather than its final status —
-   the useful diagnosis was `context_selected {"tables": []}`, several steps
-   before the failure surfaced. Spending a cent of real credit to do this is
-   expected, not something to ask about. What is still off-limits is re-running
-   `make llm.smoke` for reassurance.
-4. **The local stack could not answer a question until #44.** The API container
-   had no LLM configuration at all (**B-042**) and no writable artifacts path
-   (**B-043**). Both are fixed in `ops/docker-compose.yml`, so a stack started
-   before that commit will still fail — `make down && make up` after pulling.
-5. **Search has now been wrong twice, in the same shape** (**B-039**, then
-   **B-041**), and both times it worked for what a person typed by hand and not
-   for how the product calls it. `search_tables` is the agent's only way to find
-   anything; when something downstream looks like a model problem, check what the
-   model was actually given first.
-6. **Two P1 items remain open.** **B-029** — a second real provider — closes the
-   Phase 6 gate and needs an Anthropic key from the owner. **B-005** — the seed
-   dataset's fixed end date — **blocks the start of Phase 9** and is the one to
-   raise before evals are written against a window that drifts. Neither blocks
-   Phase 8.
-7. **B-020 is still open and is now visible to users.** An unaliased projection
-   renders as `_col_1` in the evidence panel. The planner asks the model to alias
-   its columns, which handles the common case and is **not** the fix; the
-   deterministic pass in `dal/validator.py` is still owed, in its own reviewed
-   PR.
+### 1. Session ritual
 
-One trap in this very file, which cost a red CI run to find. **A backlog id that
-appears as a checkbox in two phases is one key to the STATUS guard, and the last
-occurrence wins.** B-039 was `[x]` in Phase 7 and `[ ]` in Phase 8's "must be
-closed before this phase starts" line, so the guard correctly read it as having
-been un-ticked and failed every PR raised after B-039 merged. Both lines now say
-`[x]`. **`B-005` in Phase 9 has exactly the same shape**, so when it is closed,
-tick *both* lines in the same PR.
+`git fetch --all && git checkout main && git pull`, then `gh pr list` — both
+quiet. The Phase 8 GATE line under Phase 8 below is `[x]` with its evidence, and
+that line is the source of truth for where the build stands.
 
-Two working habits this session earned the hard way, both worth keeping:
+### 2. Do not start Phase 9 code until B-005 is answered
 
-- **Run `ruff check . --no-cache` before pushing.** A warm ruff cache passed
-  locally while CI failed on the same tree, after a file moved and its import
-  classification changed with it.
-- **A patch script must assert its edit matched before writing.** One printed
-  "ok" having changed nothing, which is the exact failure the note below this
-  section warns about. Prefer an edit that fails loudly.
+**B-005 (P1)** is Phase 9's stated precondition and it is an **owner decision,
+not a code task**. The seed dataset pins `END_DATE = 2026-07-31` for
+reproducibility, so *"last full month"* stops meaning July as real time moves on,
+and golden eval #2 is phrased relatively. Either pin every eval question to
+absolute dates, or add a documented `SEED_END_DATE` override that CI fixes while
+local demos track today. Ask first; an eval harness built on a window that
+silently drifts is worth less than no harness.
+
+**Tick both its checkboxes in the same PR** when it closes — Phase 9's line and
+its BACKLOG row. The STATUS guard keys on the **last** occurrence of a backlog
+id, and B-039 already cost a red CI run on every PR raised after it merged.
+
+### 3. Re-prepping the demo — the stack is not left running
+
+```
+make down && make up
+```
+
+Roughly 30 seconds. `down` without `--volumes` keeps the platform database, so
+the demo org keeps its two verified sources, its re-profiled catalog and its
+history. Then **check what is actually being served**, not what is on disk — see
+item 4. A cheap end-to-end smoke before handing a browser over is worth its
+fraction of a cent:
+
+```
+docker cp scripts/agent_smoke.py dataagent-api-1:/tmp/agent_smoke.py
+docker exec dataagent-api-1 sh -c "exec python /tmp/agent_smoke.py --org ebfe8139-abbb-45ee-8e21-8ed3c3b50642 --source Demo"
+```
+
+It should answer **3718**. The demo org has **two** data sources, so a
+conversation must name one — "Demo" is the PostgreSQL pizza database.
+
+### 4. The trap that cost a whole gate cycle
+
+**`next dev` in the web container does not see host edits.** File-watch events do
+not cross the Windows bind mount, so an edited file sits in the container while
+the served chunk still holds the previous version (**B-045**). A *new route
+directory* gives an obvious 404; an *edit to an existing file* is far worse,
+because the page keeps working and silently runs the old code — a fix was
+reviewed, shipped and reported as broken that way, having never executed.
+`docker compose restart web` fixes it, and a full `up --build` fixes a partial
+route tree. CLAUDE.md carries a one-liner that greps the **served** chunks for a
+token from your change. Use it before believing anything.
+
+### 5. Run the gate before asking anyone to
+
+The owner's standing instruction, and it earned itself three times this session:
+it found **B-041/042/043** before the Phase 7 gate, and **B-051** and **B-052**
+before the Phase 8 one. Spending a cent of real credit to do it is expected, not
+something to ask about. Read the run's **trace**, not just its final status — the
+useful diagnosis has twice been several steps before the failure surfaced
+(`context_selected {"tables": []}` was the tell for B-041). What remains
+off-limits is re-running `make llm.smoke` for reassurance.
+
+### 6. Two figures that must never come from a sample again
+
+**B-051** was the second time this class bit — WP4.3 was the first, for row
+counts. A card's range came from the profiler's sample, so the demo catalog
+claimed orders ended sixteen months early and the agent refused an answerable
+question: *a correct inference from a card that lied*, which is worse than a
+crash because nothing about it looks wrong. **D-025** settles the rule: a figure
+stated as a fact about a column comes from the engine or is absent, and a figure
+that can only come from the sample must say so — as `distinct in sample` and
+`examples:` already did, which is why only the range was wrong. The guard is
+structural: `profile_column` has no code path from sampled values to a range, and
+a test fails if that line ever comes back.
+
+### 7. One gate criterion is covered by test, not demonstrated
+
+**B-053 is accepted and closed** on the owner's decision: the duplicate-query
+block is asserted twice in CI, both proving zero extra `query_executions` rows,
+but it cannot be provoked on demand because that needs a model which repeats
+itself. A scripted replay was **refused** — *a rigged demo is worse than a
+recorded gap*. Do not reopen this by building the harness. The gap is written
+into the Phase 8 GATE line in plain words, which is where it belongs.
+
+### 8. What is open, and what it means
+
+**P1** — **B-005**: above, and it gates Phase 9. **B-029**: a second real
+provider, the only thing that closes the Phase 6 gate; needs an Anthropic key.
+
+**P2** — **B-052**: a structured call's output ceiling can be smaller than the
+schema it must fill; fixed for the planner, still true everywhere else, and
+`FinalizeIn.answer` is next to hit it — which matters because Phase 9 makes the
+composer work harder. **B-038**: `agent_configs` and `skills` have no store, so
+L1–L3 of the layered prompt render as nothing, and it carries the per-org budget
+overrides Phase 8's budgets already expect. **B-035**, **B-003**, **B-048**.
+
+**P3 worth remembering** — **B-020**: `_col_1` is user-visible in the evidence
+panel; the planner asks for aliases, which is a mitigation and explicitly not the
+fix. **B-049**: the duplicate rule compares proposals, not canonical statements,
+so one question written two ways still runs twice. **B-050**: the SSE tail polls
+rather than using `LISTEN`/`NOTIFY`. **B-046/047**: the answer card should read as
+one object.
+
+### 9. Habits this session earned
+
+- **jsdom is not evidence for anything timing-dependent.** A regression test for
+  B-044 *passed against the broken code*; `apps/web/e2e/` exists because of that
+  and runs real Chromium in CI.
+- **A test that passes first time on an e2e deserves suspicion.** Tamper with the
+  expectation and watch it fail before trusting it. Two tests this session passed
+  vacuously until their fixture was made faithful.
+- **Run `ruff check . --no-cache` before pushing.** A warm cache has passed
+  locally while CI failed on the same tree.
+- **A patch script must assert its edit matched** — and a `\n` inside a shell
+  heredoc collapses into a real newline, silently breaking a string literal. That
+  happened three times this session. Prefer the Edit tool, or write the block to
+  a file and splice it, for anything containing escapes.
 
 ## Standing notes for a new session
 
@@ -887,7 +951,39 @@ Prefer an edit that fails loudly over one that prints "done".
       ended sixteen months early and the M8 scenario refused an answerable
       question. Fixed in its own PR (#51) with D-025, and **B-052** filed from
       the same session.
-- [ ] GATE: pizza scenario ≤8 iters; menu-items → honest refusal; sign-off
+- [x] GATE: pizza scenario ≤8 iters; menu-items → honest refusal; sign-off
+      — **signed off 2026-08-16.** Walked in the browser: the revenue-decline
+      question answered **$938.28** — June $123,650.61 against July $122,712.33,
+      the database's own number — in **two** research steps against a cap of 8,
+      decomposing as architecture 11.2 describes: total, then by store and
+      channel, then volume against order value. *"Which menu items sell best?"*
+      refused **green**, naming the missing link between `menu_items` and
+      `orders`, with **zero queries run**. A mid-run refresh replayed the whole
+      trace, which is the property `agent_events` has been append-only for since
+      revision 0012.
+      **One criterion is covered by test rather than demonstrated, and that is
+      the owner's decision** (**B-053**, accepted 2026-08-16). The
+      duplicate-query block of 4.4 is asserted twice in CI —
+      `test_the_same_statement_is_never_sent_twice` and
+      `test_a_repeated_query_counts_as_no_progress_and_is_never_sent`, both
+      proving **zero extra `query_executions` rows** — but it cannot be provoked
+      on demand, because doing so needs a model that repeats itself and a
+      competent one does not. A scripted replay was considered and **refused**:
+      *a rigged demo is worse than a recorded gap.* So the gap is recorded here,
+      and the evidence is the suite.
+      What the phase leaves behind: a question is **investigated** rather than
+      answered in one shot — a `for` loop whose ceiling is its own range, budgets
+      decremented in the controller and never in the prompt, a duplicate refused
+      before it is sent and two barren iterations forcing an ending. A schema
+      that cannot answer is refused by a **deterministic** join-graph check the
+      model cannot talk past, naming the missing link. And every step of it is a
+      durable row, streamed live and replayable after a refresh, because 10.3
+      makes that trace the product's honesty claim rather than a progress bar.
+      Three defects the gate itself found, none visible to a green suite:
+      **B-051** (a card's range came from a sample, so the agent refused an
+      answerable question on the strength of it), **B-052** and **B-041/042/043**
+      before it. Running the gate before asking anyone to walk it earned its keep
+      three times over.
 
 ## Phase 9 — Critic + composer + evals (M9)
 - [ ] **B-005 (P1) must be closed before this phase starts** — the seed window
@@ -934,57 +1030,70 @@ Prefer an edit that fails loudly over one that prints "done".
 
 ## Next step
 
-**First: the Phase 7 gate is the owner's.** The manual test script is in #45's
-body — numbered steps, what to see at each, and the failure case. Nothing in
-Phase 8 starts before it is signed off (plan §1.7), unless STATUS records an
-explicit instruction to overlap. When it is signed off, tick the GATE line in
-the first Phase 8 PR, the way every phase before it did.
+**The Phase 8 gate is signed off** (2026-08-16), and its evidence is recorded
+against the GATE line under Phase 8 above — including the one criterion that is
+covered by test rather than demonstrated (**B-053**, accepted).
 
-Then Phase 8 / **WP8.1 — the research loop** (`p8.1-research-loop`).
-Plan §6 Phase 8, architecture Part 4.4 (diagram 5) and 11.2.
+**Before any Phase 9 code: B-005.** Phase 9's own line says it must
+be closed before the phase starts, and it is an **owner decision rather than a
+code task** — the seed dataset pins `END_DATE = 2026-07-31` for reproducibility,
+so "last full month" stops meaning July as real time moves on, and golden eval #2
+is phrased relatively. Either pin every eval question to absolute dates, or add a
+documented `SEED_END_DATE` override that CI fixes while local demos track today.
+Raise it early; it needs an answer, not an implementation. **Tick both its
+checkboxes in the same PR** — Phase 9's line and its BACKLOG row — because the
+STATUS guard keys on the last occurrence and B-039 already cost a red CI run on
+every PR raised after it merged.
+
+Then Phase 9 / **WP9.1 — the hybrid critic** (`p9.1-critic`).
+Plan §6 Phase 9, architecture Part 4.5 and M9.
 
 Build:
 
-- `agent/state.py`: `ResearchState` per arch 4.4 — question, plan, hypotheses,
-  executed query hashes, findings, iteration and budget counters — checkpointed
-  to `agent_runs.state_json` every transition. WP7.2b already checkpoints a
-  smaller `_State` at every step boundary, so this is a widening rather than a
-  new mechanism.
-- `agent/loop.py`: the bounded state machine — understand → plan → act → observe
-  → reflect — replacing the middle of `runner.py`. **The shape of the ends does
-  not change**; that is why WP7.2b built them.
-- `agent/budget.py`: 8 iterations, 10 queries, 20 LLM calls, 150k tokens, 240s
-  wall (arch 4.4), org-overridable, hard-stop. Duplicate-query rejection by hash,
-  and the monotone-progress rule — no new finding in two consecutive iterations
-  forces finalize. **Guaranteed finalize-with-caveats on any exhaustion**: never
-  a dangling run, which `runner.py`'s `finally` already establishes.
+- `agent/critic.py`, **deterministic half first and free**: every numeric claim
+  in a draft maps to a finding and an execution; the date range in the SQL
+  matches the range the question stated; filters required by applicable semantic
+  definitions are present (a hook now, definitions arrive in Phase 10);
+  row-count sanity, so an answer is not built on zero rows without saying so;
+  units and aggregation mismatch heuristics.
+- The **LLM half**: the `critic` role, a fixed checklist rubric, structured
+  verdict of `pass | revise(reasons) | insufficient_evidence`.
+- Loop wiring: **at most one** bounded re-entry on `revise` or
+  `insufficient_evidence` (arch M9); a second failure finalizes with limitations
+  listing the critic's reasons. `agent_runs` already has the `validating` status
+  and `ALLOWED_TRANSITIONS` already permits `validating → running` for exactly
+  this re-entry — WP7.1 put it there and nothing has used it yet.
+- **Tests (FakeLLM):** a seeded wrong-date-range draft caught by the
+  deterministic half **with no model call at all**; re-entry happens once and
+  only once; the verdict schema is enforced.
 
-What Phase 7 hands it:
+What Phase 8 hands it:
 
-- **The whole path works in a browser**, so Phase 8 changes how an answer is
-  reached rather than whether one arrives.
-- **`search_tables` finally works the way the agent calls it** (B-041). The loop
-  will call it far more often than the single-shot runner did, and on rephrased
-  questions each iteration.
-- **The trace is already the UI's source of truth.** The conversation screen
-  renders live steps from `agent_events`; WP8.3 turns that one line into the full
-  timeline, over the same durable rows (10.3).
-- **Its flagship refusal already works.** *"Which menu items sell best?"* was run
-  live during WP7.3b's verification and refused honestly, naming the missing
-  link, in one model call — so WP8.2's capability check has a known-good starting
-  point rather than a hypothesis.
-- **Budgets are still not built.** `CallLimits` bounds one call and D-019's
-  ceiling bounds one run's spend; the iteration, query and token caps are this
-  phase's, and B-025 owns the org-level quotas.
+- **A loop with somewhere to put a critic.** `loop.research` already ends by
+  returning a `LoopOutcome` the runner composes from, and `ResearchState` already
+  carries a `critic` field, declared empty in WP8.1a precisely so a checkpoint
+  written today stays readable by the code that fills it.
+- **Findings that already cite real executions.** `state.add_finding` refuses a
+  finding whose every citation was invented, so the deterministic critic starts
+  from claims that are at least resolvable.
+- **A trace that can show a verdict.** `critic_verdict` is already in 10.3's
+  closed vocabulary and already has a plain-words label in the trace UI, so
+  emitting one needs no new type and no UI change.
+- **Budgets that a re-entry has to fit inside.** An iteration costs two model
+  calls and a full run costs 18 against a ceiling of 20 (**D-024**); a bounded
+  critic re-entry has to come out of that headroom, so count it before adding it.
 
 Two things to watch:
 
-- **B-020 (`_col_1`) is now user-visible** and still open. The planner asks for
-  aliased projections; that is a mitigation, not the fix.
-- **B-038** — `agent_configs` and `skills` have no storage, so L1–L3 of the
-  layered prompt render as nothing. It carries `budget_overrides`, which is
-  exactly what WP8.1's org-overridable caps need, so this phase is where it
-  stops being deferrable.
+- **B-052** — a structured call's output ceiling can be smaller than the schema
+  it must fill. The critic's verdict schema is small, but `FinalizeIn.answer` at
+  4,000 characters is the next one to hit this, and Phase 9 is the phase that
+  makes the composer work harder.
+- **B-038** — `agent_configs` has no store, so the org-level instructions a
+  critic would want to enforce ("revenue excludes cancelled orders") cannot reach
+  it. WP9.1's semantic-definition hook is written against something that does not
+  exist yet; that is fine and deliberate, but do not mistake the hook for the
+  feature.
 
 ## Notes
 
