@@ -162,6 +162,9 @@ async def test_the_trace_tells_the_whole_story_in_order(
     assert await _types(context, run_id) == [
         "run_started",
         "context_selected",
+        # The join graph is checked once, up front, and the verdict is in the
+        # trace whether or not it found anything (4.3).
+        "capability_checked",
         # One iteration, and every stage of it is visible: the loop's steps are
         # what WP8.3's timeline will render, so a stage missing here is a stage
         # missing from the product's account of itself.
@@ -239,6 +242,7 @@ async def test_a_hallucinated_column_is_corrected_on_the_next_iteration(
     assert await _types(context, run_id) == [
         "run_started",
         "context_selected",
+        "capability_checked",
         "step_started",
         "plan_created",
         "tool_called",

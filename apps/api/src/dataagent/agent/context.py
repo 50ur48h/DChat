@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from dataagent.catalog.browse import CatalogTableView
 from dataagent.catalog.search import CardHit
@@ -179,10 +179,27 @@ class ContextBundle:
     agent_instructions: str | None = None
     skills: tuple[str, ...] = ()
     token_budget: int = DEFAULT_TOKEN_BUDGET
+    #: Pairs of tables this database cannot join, established deterministically
+    #: from `catalog_relationships` (WP8.2). Rendered at **L0**, not L4: L4 is
+    #: framed as a customer's own records and explicitly not instructions, while
+    #: this is a fact the platform established and a rule the model must obey.
+    #: L0 is also never truncated, and a schema limit dropped to fit a budget
+    #: would be a limit the model never saw.
+    capability_note: str | None = None
 
     @property
     def table_names(self) -> tuple[str, ...]:
         return tuple(card.qualified for card in self.cards)
+
+    def with_capability_note(self, note: str) -> ContextBundle:
+        """A copy carrying what the join graph found.
+
+        A copy because the bundle is frozen and the check runs after it is
+        built — and because the model being *told* is a courtesy, not the
+        control: `loop.research` checks every proposed statement whether or not
+        this note was accurate (4.3).
+        """
+        return replace(self, capability_note=note)
 
 
 class ContextTooLargeError(Exception):
@@ -204,6 +221,12 @@ def _layers(
     the shape of the prompt.
     """
     layers = [Layer(tag="L0", title="Platform rules", body=PLATFORM_RULES)]
+
+    if bundle.capability_note:
+        # Tagged L0 so it is never dropped to fit a budget: a schema limit the
+        # model did not see is a limit that does not exist as far as it is
+        # concerned.
+        layers.append(Layer(tag="L0", title="Schema limits", body=bundle.capability_note.strip()))
 
     if bundle.org_instructions:
         layers.append(
