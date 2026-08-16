@@ -75,6 +75,7 @@ class Result:
     iterations: int = 0
     queries: int = 0
     limitations: int = 0
+    tokens: int = 0
     answer: str = ""
 
     def fail(self, why: str) -> None:
@@ -307,6 +308,7 @@ async def run_case(
     result.citations = len(outcome.execution_ids)
     result.iterations = outcome.iterations
     result.limitations = len(outcome.limitations)
+    result.tokens = await tokens_spent(org_id, asked.run_id)
 
     async with org_session(org_id) as session:
         rows = (
@@ -402,6 +404,30 @@ def _single_value(artifacts: dict[str, dict[str, Any]], column: str) -> Any:
     return None
 
 
+async def tokens_spent(org_id: uuid.UUID, run_id: uuid.UUID) -> int:
+    """What this run cost, from the ledger rather than from anyone's tally.
+
+    `usage_ledger` is the authoritative record, and reading it here is what makes
+    `EVALS_TOKEN_BUDGET` a ceiling rather than a hope: a live suite that has gone
+    wrong stops, instead of billing until somebody notices in the morning.
+    """
+    from sqlalchemy import text
+
+    from dataagent.tenancy.session import org_session
+
+    async with org_session(org_id) as session:
+        total = (
+            await session.execute(
+                text(
+                    "SELECT COALESCE(SUM(input_tokens + output_tokens), 0) "
+                    "FROM usage_ledger WHERE run_id = :r"
+                ),
+                {"r": run_id},
+            )
+        ).scalar_one()
+    return int(total or 0)
+
+
 async def artifacts_for(org_id: uuid.UUID, execution_ids: list[str]) -> dict[str, dict[str, Any]]:
     """Every stored result for this run, keyed by execution."""
     if not execution_ids:
@@ -459,20 +485,33 @@ async def main(argv: list[str] | None = None) -> int:
     print(f"{len(cases)} golden questions · {mode} · as_of {AS_OF}\n")
 
     results: list[Result] = []
+    spent = 0
     for case in cases:
+        # Checked *before* the question, not after: a budget that stops once it
+        # is already over is a report rather than a ceiling.
+        if live and spent >= TOKEN_BUDGET:
+            print(f"\n  stopped: {spent:,} tokens against a budget of {TOKEN_BUDGET:,}")
+            break
         try:
             outcome = await run_case(case, truths, target, live=live)
         except Exception as error:
             outcome = Result(id=case["id"], question=case["question"])
             outcome.fail(f"{type(error).__name__}: {error}")
+        spent += outcome.tokens
         results.append(outcome)
         mark = "PASS" if outcome.passed else "FAIL"
-        print(f"  [{mark}] {outcome.id:>2}. {outcome.question[:62]}")
+        cost = f"  {outcome.tokens:>7,} tok" if live else ""
+        print(f"  [{mark}] {outcome.id:>2}. {outcome.question[:56]}{cost}")
         for why in outcome.failures:
             print(f"          {why}")
 
     passed = sum(1 for outcome in results if outcome.passed)
-    print(f"\n{passed}/{len(results)} passed")
+    tail = f" · {spent:,} tokens" if live else ""
+    print(f"\n{passed}/{len(results)} passed{tail}")
+    if len(results) < len(cases):
+        # An unasked question is not a passing one.
+        print(f"{len(cases) - len(results)} question(s) were never asked")
+        return 1
     if args.json:
         print(
             json.dumps(

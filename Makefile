@@ -114,6 +114,12 @@ migration: .env ## Autogenerate a revision: make migration m="add widgets"
 secrets.key: ## Print a fresh LOCAL_SECRETS_KEY line to paste into .env
 	@$(UV_API) python -c "from cryptography.fernet import Fernet; print('LOCAL_SECRETS_KEY=' + Fernet.generate_key().decode())"
 
+.PHONY: preflight
+preflight: lint typecheck check.status test ## Everything CI will run, in CI's order
+	@printf '
+Preflight clean. Safe to push.
+'
+
 .PHONY: check.status
 check.status: ## Fail if STATUS.md lost its phase checklist or signed-off work
 	bash scripts/check_status.sh --selftest
@@ -129,13 +135,19 @@ check.truths: ## Fail if truths.json and the seed generator disagree
 # ---------------------------------------------------------------------------
 # apps/api
 # ---------------------------------------------------------------------------
+# `--no-cache` on every lint recipe, deliberately. A warm ruff cache has twice
+# reported a clean tree that CI then failed on — the cache keys on content ruff
+# has already seen, and a file edited between runs can slip through. The rule
+# that follows is the only one that works: the target a developer runs must be
+# the same command CI runs, with nothing between them that could differ. Costs a
+# few seconds; has cost two red builds so far.
 .PHONY: install.api lint.api fmt.api typecheck.api test.api test.rls test.dal test.llm api.dev build.api llm.smoke agent.smoke
 install.api: ## Sync the API virtualenv from uv.lock
 	uv sync --directory $(API_DIR)
 
 lint.api: ## ruff check + format check
-	$(UV_API) ruff check .
-	$(UV_API) ruff format --check .
+	$(UV_API) ruff check --no-cache .
+	$(UV_API) ruff format --check --no-cache .
 
 fmt.api: ## ruff format + autofix
 	$(UV_API) ruff format .
@@ -174,8 +186,8 @@ build.api: ## Build the production API image
 # ---------------------------------------------------------------------------
 .PHONY: lint.seed
 lint.seed: ## ruff check the seed scripts
-	$(UV_API) ruff check --config pyproject.toml ../../ops
-	$(UV_API) ruff format --check --config pyproject.toml ../../ops
+	$(UV_API) ruff check --no-cache --config pyproject.toml ../../ops
+	$(UV_API) ruff format --check --no-cache --config pyproject.toml ../../ops
 
 # ---------------------------------------------------------------------------
 # apps/web
@@ -204,4 +216,10 @@ build.web: ## Build the production web image
 
 .PHONY: evals
 evals: .env ## Run the 20 golden evals (FakeLLM by default; EVALS_LIVE=1 for real models)
+	$(UV_API) --with pyyaml python ../../ops/evals/runner.py $(ARGS)
+
+evals.docker: .env ## Same, but inside the api container — for the compose stack
 	$(SHELL) ops/scripts/evals.sh $(ARGS)
+
+evals.setup: .env ## Create the org, register the seed source, build its catalog
+	$(UV_API) python ../../ops/evals/provision.py

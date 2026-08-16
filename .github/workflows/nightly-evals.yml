@@ -1,0 +1,136 @@
+# The golden questions against real models (plan §4.1, WP9.2b).
+#
+# The CI job runs these with the FakeLLM: the SQL comes from `golden.yaml`, so
+# what it proves is that the catalog, the DAL, the critic and the composer hold.
+# It cannot say whether a *real* model, shown a real catalog, writes SQL that is
+# right — and that is a different question, worth money, and worth asking on a
+# schedule rather than on every push.
+#
+# **Deliberately not a merge blocker.** A model provider having a bad night is
+# not a reason to stop shipping, and a required check that fails for reasons
+# nobody controls is a check people learn to rerun without reading. This one
+# reports; a person decides.
+#
+# Two ceilings, because this spends real money unattended: `EVALS_TOKEN_BUDGET`
+# stops a run that has gone wrong, and the concurrency group stops two nights
+# overlapping if one is slow.
+
+name: nightly-evals
+
+on:
+  schedule:
+    # 03:00 UTC — after the day's merges, before anyone reads the result.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      only:
+        description: "Question ids to run, space separated. Empty runs all twenty."
+        required: false
+        default: ""
+
+concurrency:
+  group: nightly-evals
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    # Long enough for twenty real investigations, short enough that a wedged run
+    # does not bill until someone notices in the morning.
+    timeout-minutes: 45
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:test@localhost:5432/dataagent
+      APP_DATABASE_URL: postgresql+asyncpg://dataagent_app:apptest@localhost:5432/dataagent
+      APP_DB_PASSWORD: apptest
+      SEED_PIZZA_HOST: localhost
+      SEED_PIZZA_PORT: "5432"
+      SEED_PIZZA_DB: pizza
+      SEED_PIZZA_USER: postgres
+      SEED_PIZZA_PASSWORD: test
+      SEED_PIZZA_READONLY_USER: pizza_readonly
+      SEED_PIZZA_READONLY_PASSWORD: evalsreadonly
+      TLS_LOCAL_HOSTS: localhost
+      SECRETS_BACKEND: local
+      LOCAL_SECRETS_PATH: ${{ github.workspace }}/ops/.secrets/evals.json
+      # What makes this run different from the required check.
+      EVALS_LIVE: "1"
+      # A hard ceiling on the whole suite. Not a suggestion to a model: the
+      # harness stops when it is reached.
+      EVALS_TOKEN_BUDGET: "400000"
+      LLM_PROVIDERS: ${{ vars.LLM_PROVIDERS }}
+      LLM_MODELS: ${{ vars.LLM_MODELS }}
+      LLM_ROLE_MAP: ${{ vars.LLM_ROLE_MAP }}
+      LLM_PRICES: ${{ vars.LLM_PRICES }}
+      LLM_RUN_COST_LIMIT_USD: ${{ vars.LLM_RUN_COST_LIMIT_USD }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+      - name: Refuse to run without a key
+        run: |
+          if [ -z "${OPENAI_API_KEY}" ] && [ -z "${ANTHROPIC_API_KEY}" ]; then
+            echo "No provider key is configured, so a live run would prove nothing." >&2
+            echo "Set OPENAI_API_KEY or ANTHROPIC_API_KEY as a repository secret." >&2
+            exit 1
+          fi
+      - name: Install
+        run: uv sync --locked --directory apps/api
+      - name: A key for the local secrets store
+        run: |
+          mkdir -p ops/.secrets
+          echo "LOCAL_SECRETS_KEY=$(uv run --directory apps/api python -c \
+            'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" \
+            >> "$GITHUB_ENV"
+      - name: The platform database
+        run: |
+          psql "postgresql://postgres:test@localhost:5432/postgres" \
+            -c "CREATE DATABASE dataagent"
+          uv run --directory apps/api alembic upgrade head
+          psql "postgresql://postgres:test@localhost:5432/dataagent" \
+            -c "ALTER ROLE dataagent_app WITH LOGIN PASSWORD 'apptest'"
+      - name: The pizza fixture
+        run: |
+          psql "postgresql://postgres:test@localhost:5432/postgres" \
+            -c "CREATE DATABASE pizza"
+          uv run ops/seed/seed_pizza.py
+      - name: An organization, a registered source and its catalog
+        run: |
+          uv run --directory apps/api python ../../ops/evals/provision.py | tee /tmp/provision.log
+          grep '^EVALS_ORG_ID=' /tmp/provision.log >> "$GITHUB_ENV"
+      - name: The twenty golden questions, against real models
+        id: run
+        run: |
+          make evals ARGS="${{ inputs.only && format('--only {0}', inputs.only) || '' }}" \
+            | tee /tmp/evals.log
+      # Written whether the run passed or failed: a failing night is exactly the
+      # one whose summary someone needs to read, and a summary that only appears
+      # on success is a summary nobody reads.
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Nightly evals — live"
+            echo
+            echo '```'
+            tail -n 40 /tmp/evals.log 2>/dev/null || echo "(the run produced no output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -184,7 +184,13 @@ async def test_a_retried_send_returns_the_run_that_already_exists(api: Api) -> N
     _, messages = await api.call(
         "GET", f"/v1/orgs/{org_id}/conversations/{conversation_id}/messages", "alice"
     )
-    assert len(messages) == 1
+    # The *user's* messages, not every message. A total counts the assistant's
+    # reply too, and whether that has been written yet is a race against the run
+    # this test just started — which made this fail intermittently in a
+    # randomly-ordered full suite while passing alone (B-063). Idempotency is a
+    # claim about what the sender created, so that is what it asserts.
+    asked = [message for message in messages if message["role"] == "user"]
+    assert len(asked) == 1
 
 
 async def test_a_send_without_an_idempotency_key_is_refused(api: Api) -> None:
