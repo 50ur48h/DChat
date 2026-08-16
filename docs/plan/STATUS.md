@@ -1146,6 +1146,10 @@ unexplained.
 - [ ] WP11.2 History/catalog/members polish + Playwright smoke      ← gate PR
       — carries **B-017**: recovery when an org has no Admin who can sign in
       (owner's call 2026-08-12, moved forward from Phase 12)
+      — and **B-061** with **B-020**: internal identifiers and the wrong
+      currency symbol reaching the reader in prose. Grouped by the owner on
+      2026-08-16 because they are one family — the system's own representation
+      surfacing where a person reads — and one rule fixes both
       — and **B-046** and **B-047**, both owner requests at the Phase 7 sign-off:
       fold the status and confidence badges *into* the answer bubble rather than
       a separate box below it, and highlight the numbers, dates and names in an
