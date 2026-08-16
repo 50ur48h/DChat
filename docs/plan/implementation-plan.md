@@ -767,11 +767,17 @@ Format per WP: **Branch → Build → Tests → Accept** (accept = commands/chec
 - Loop wiring: at most **one** bounded re-entry on revise/insufficient (arch M9); second failure → finalize with limitations listing the critic's reasons.
 - **Tests (FakeLLM):** seeded wrong-date-range draft caught by the deterministic half (no LLM needed); re-entry happens once and only once; verdict schema enforced.
 
-### WP9.2 — Composer + eval harness v1 — `p9.2-composer-evals` *(gate PR)*
+### WP9.2a — Composer + eval harness — `p9.2a-composer-evals`
 - `agent/composer.py`: final answer assembly — direct answer, evidence citations (execution ids), method notes, explicit limitations/caveats block; findings marked `cited=true` when used.
 - `ops/evals/`: `golden.yaml` — 20 questions over the seed DB across arch classes (single-shot, multi-step, refusal, ambiguous, policy-masked column) each with checks (`must_cite`, `sql_must_contain`/`must_not_contain`, `must_refuse`, numeric tolerance vs known seed truths); `runner.py` executes via the real agent stack with **FakeLLM scripts** for CI determinism, and with real LLMs when `EVALS_LIVE=1`.
 - CI: `make evals` (FakeLLM) required; `.github/workflows/nightly-evals.yml` (schedule + dispatch, `EVALS_LIVE=1`, hard `EVALS_TOKEN_BUDGET`, uses repo secrets, posts summary to the run log — not a merge blocker).
 - **Every eval run pins `as_of` (D-027, B-005).** The harness passes a fixed date to `execute_run`, so a relative question resolves to the same window in a year's time as it does today — that is the entire mechanism, and the seed's `END_DATE` stays frozen because of it. Pin it to **2026-08-16**, two weeks past the fixture's last row, so *"last full month"* means July 2026 and matches `truths.json`. Keep the relative phrasing everywhere it is the point: #2, #6, #11–13, #17 and #20 exist to test that handling, and rewriting them as absolute dates would delete the coverage rather than stabilise it. Use absolute dates only where the question was always about a fixed window — #1 (July 2026) and #18 (Mar 1–15) already are. **#19 needs the anchor to be expressible at all**: "a future date range" means *after `as_of`*, and with a wall-clock anchor there is no date that stays future.
+- **Accept:** the twenty pass locally against the real seed; the answer card renders citations and limitations.
+
+### WP9.2b — Evals in CI + nightly — `p9.2b-evals-ci` *(gate PR)*
+- **Split from WP9.2 by the owner on 2026-08-16.** The composer and the harness are one thing to review; the CI provisioning is another, and the second is what turns the first into a regression net rather than twenty questions that run when someone remembers.
+- CI **seeds and registers its own source**: a step that builds the pizza dataset into the workflow's Postgres service, creates an org and a read-only login, registers it, discovers and profiles the catalog, then runs `make evals`. Required check. **FakeLLM only in CI** — owner's direction: it costs nothing, stays deterministic, and the model's own quality is the nightly job's business.
+- `.github/workflows/nightly-evals.yml` (schedule + dispatch, `EVALS_LIVE=1`, hard `EVALS_TOKEN_BUDGET`, repo secrets, summary in the run log — **not** a merge blocker).
 - **Accept/GATE (arch M9):** all 20 golden evals pass in CI; live eval run recorded once with results in the PR; answers in UI show citations + limitations; sign-off.
 
 ---

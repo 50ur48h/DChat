@@ -351,3 +351,84 @@ describe("<ConversationThread />", () => {
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
 });
+
+describe("what the answer does not establish", () => {
+  it("shows the limitations beside the answer", async () => {
+    routeFetch({
+      run: {
+        ...ANSWERED,
+        limitations: [
+          "The investigation stopped before it was finished: I reached the maximum number of research steps for one question.",
+          "9,999.00 appears in no result this run returned.",
+        ],
+      },
+    });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    expect(await screen.findByText(/2 things to know/i)).toBeInTheDocument();
+    expect(screen.getByText(/maximum number of research steps/i)).toBeInTheDocument();
+    expect(screen.getByText(/appears in no result/i)).toBeInTheDocument();
+  });
+
+  it("says nothing at all when there is nothing to say", async () => {
+    // A clean run should not be made to sound uncertain. An empty list is a
+    // result, not a gap, so the section is absent rather than empty.
+    routeFetch({ run: { ...ANSWERED, limitations: [] } });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    await screen.findByText(/answered/i);
+    expect(screen.queryByText(/things to know/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/one thing to know/i)).not.toBeInTheDocument();
+  });
+
+  it("counts one limitation in the singular", async () => {
+    routeFetch({ run: { ...ANSWERED, limitations: ["Only one query returned rows."] } });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    expect(await screen.findByText(/one thing to know/i)).toBeInTheDocument();
+  });
+});
+
+describe("which findings are evidence", () => {
+  it("shows only the findings the answer rests on", async () => {
+    routeFetch({
+      run: {
+        ...ANSWERED,
+        answer: "Revenue fell because of delivery at one store.",
+        findings: [
+          { id: "f1", statement: "Revenue fell 12%.", support: ["x1"], confidence: "high", cited: true },
+          { id: "f2", statement: "A step along the way.", support: ["x2"], confidence: "low", cited: false },
+        ],
+      },
+    });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    expect(await screen.findByText("Revenue fell 12%.")).toBeInTheDocument();
+    // The uncited one is the investigation's working and lives in the trace.
+    expect(screen.queryByText("A step along the way.")).not.toBeInTheDocument();
+  });
+
+  it("falls back to showing every finding when none is marked", async () => {
+    // Runs written before WP9.2 have no `cited` on any finding. Filtering them
+    // all away would empty the evidence panel of every older answer.
+    routeFetch({
+      run: {
+        ...ANSWERED,
+        answer: "Two things happened.",
+        findings: [
+          { id: "f1", statement: "The first thing.", support: ["x1"], confidence: "high" },
+          { id: "f2", statement: "The second thing.", support: ["x1"], confidence: "high" },
+        ],
+      },
+    });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    expect(await screen.findByText("The first thing.")).toBeInTheDocument();
+    expect(screen.getByText("The second thing.")).toBeInTheDocument();
+  });
+});

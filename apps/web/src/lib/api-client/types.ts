@@ -232,6 +232,12 @@ export interface Finding {
   statement: string;
   support: string[];
   confidence: string;
+  /**
+   * True when the composed answer rests on this finding (WP9.2). A run reaches
+   * several conclusions and an answer uses some; the rest are the
+   * investigation's working and belong in the trace, not under the answer.
+   */
+  cited: boolean;
 }
 
 export interface Run {
@@ -242,6 +248,14 @@ export interface Run {
   question: string;
   answer: string | null;
   findings: Finding[];
+  /**
+   * What this answer does not establish, in plain words — a ceiling that stopped
+   * the search, a reviewer's warning, a period the data does not cover.
+   * Assembled by the platform rather than written by the model, so it cannot be
+   * hedged away. Rendered beside the answer and never instead of it; empty is
+   * the common case and a good one.
+   */
+  limitations: string[];
   started_at: string | null;
   finished_at: string | null;
   failure_reason: string | null;
@@ -503,7 +517,8 @@ function isFinding(value: unknown): value is Finding {
     typeof value.statement === "string" &&
     typeof value.confidence === "string" &&
     Array.isArray(value.support) &&
-    value.support.every((id) => typeof id === "string")
+    value.support.every((id) => typeof id === "string") &&
+    (value.cited === undefined || typeof value.cited === "boolean")
   );
 }
 
@@ -517,7 +532,10 @@ export function isRun(value: unknown): value is Run {
     isNullableString(value.answer) &&
     isNullableString(value.failure_reason) &&
     Array.isArray(value.findings) &&
-    value.findings.every(isFinding)
+    value.findings.every(isFinding) &&
+    (value.limitations === undefined ||
+      (Array.isArray(value.limitations) &&
+        value.limitations.every((note) => typeof note === "string")))
   );
 }
 

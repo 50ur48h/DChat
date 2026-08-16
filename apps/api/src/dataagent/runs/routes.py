@@ -114,6 +114,13 @@ class FindingOut(BaseModel):
         description="Query execution ids backing this statement — the citation trail.",
     )
     confidence: str = Field(description="high | medium | low")
+    cited: bool = Field(
+        default=False,
+        description=(
+            "True when the composed answer rests on this finding. The rest are "
+            "the investigation's working and belong in the trace."
+        ),
+    )
 
 
 class RunOut(BaseModel):
@@ -137,6 +144,15 @@ class RunOut(BaseModel):
         default=None, description="Null means unpriced, never free."
     )
     model_usage: dict[str, object] = Field(default_factory=dict[str, object])
+    limitations: list[str] = Field(
+        default_factory=list[str],
+        description=(
+            "What this answer does not establish, in plain words — a ceiling that "
+            "stopped the search, a reviewer's warning, a period the data does not "
+            "cover. Shown with the answer, never instead of it. Empty is the "
+            "common case."
+        ),
+    )
 
 
 class ExecutionOut(BaseModel):
@@ -369,6 +385,7 @@ async def get_run(
                 statement=finding.statement,
                 support=finding.support,
                 confidence=finding.confidence,
+                cited=finding.cited,
             )
             for finding in view.findings
         ],
@@ -377,6 +394,7 @@ async def get_run(
         failure_reason=view.failure_reason,
         cost_estimate=view.cost_estimate,
         model_usage=view.model_usage,
+        limitations=view.limitations,
     )
 
 

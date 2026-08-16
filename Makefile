@@ -201,3 +201,7 @@ web.dev: ## next dev on :3000
 
 build.web: ## Build the production web image
 	docker build --target prod -t dataagent-web:local $(WEB_DIR)
+
+.PHONY: evals
+evals: .env ## Run the 20 golden evals (FakeLLM by default; EVALS_LIVE=1 for real models)
+	$(SHELL) ops/scripts/evals.sh $(ARGS)

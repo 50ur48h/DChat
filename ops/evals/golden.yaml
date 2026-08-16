@@ -1,0 +1,350 @@
+# The twenty golden questions (plan §6 Phase 9, architecture M9).
+#
+# WHAT THIS FILE IS. Twenty questions over the pizza seed, spanning the classes
+# architecture 4.4 cares about: single-shot, multi-step, honest refusal,
+# ambiguous, and policy-masked. Each carries the checks that decide whether the
+# run was right, and every expected number is a **path into ops/seed/truths.json**
+# rather than a literal. That is the rule the seed generator was written for: the
+# fixture and the numbers the evals trust cannot drift apart, because there is
+# only one copy of each number and `make check.truths` fails if it moves.
+#
+# WHAT `script` IS FOR. In CI the model is the FakeLLM, so the SQL below is what
+# gets planned. That is not the model being tested — it is everything *around*
+# the model: the catalog grounding, the DAL's validation and masking, the
+# execution, the critic's rules, the composer's citations and limitations. The
+# statements really run against the real seed database and the results are really
+# compared to the truths. With `EVALS_LIVE=1` the script is ignored, a real model
+# writes the SQL, and the same checks apply — which is when `answer_contains`
+# starts meaning something.
+#
+# `as_of` IS PINNED, ONCE, IN THE RUNNER, to 2026-08-16 (D-027) — two weeks past
+# the fixture's last row, so "last full month" is July 2026 and stays July 2026
+# in a year's time. That is why the relative phrasing below is left alone: #2,
+# #6, #11, #12, #13, #17 and #20 exist to test exactly that handling, and
+# rewriting them as absolute dates would delete the coverage rather than
+# stabilise it. Only #1 and #18 are absolute, because they always were.
+#
+# CHECKS
+#   truth:              dotted path into truths.json; the expected value
+#   tolerance:          relative tolerance for a numeric compare (default 0)
+#   expect.value_of:    result column whose single value is compared to `truth`
+#   expect.rows:        exact row count the query must return
+#   expect.must_cite:   minimum number of executions the answer must cite
+#   expect.must_refuse: the run must end answered=false
+#   expect.sql_contains / sql_excludes: substrings of the executed SQL
+#   expect.answer_contains:  live mode only — prose is scripted in CI
+#   expect.limitations_min:  the answer must carry at least this many caveats
+#   expect.masked:      a column whose raw values must not appear in the result
+
+- id: 1
+  question: How many orders were placed in July 2026?
+  classes: [single-shot, absolute-date]
+  truth: orders.in_july_2026
+  script:
+    sql: >-
+      SELECT COUNT(*) AS order_count FROM orders
+      WHERE order_date >= DATE '2026-07-01' AND order_date < DATE '2026-08-01'
+  expect:
+    value_of: order_count
+    must_cite: 1
+    sql_contains: ["2026-07-01", "2026-08-01"]
+
+- id: 2
+  question: What was revenue last full month?
+  classes: [single-shot, relative-date]
+  # July 2026 — but only because `as_of` says so. This is the eval that would
+  # silently start failing without D-027, and the one B-005 was filed about.
+  truth: revenue.by_month.-1.revenue
+  tolerance: 0.0001
+  script:
+    sql: >-
+      SELECT ROUND(SUM(total_amount)::numeric, 2) AS revenue FROM orders
+      WHERE status = 'completed'
+        AND order_date >= DATE '2026-07-01' AND order_date < DATE '2026-08-01'
+  expect:
+    value_of: revenue
+    must_cite: 1
+    sql_contains: ["2026-07-01"]
+
+- id: 3
+  question: What share of orders came through each channel?
+  classes: [single-shot, grouping]
+  truth: revenue.by_channel.0.orders
+  script:
+    sql: >-
+      SELECT channel, COUNT(*) AS orders FROM orders
+      WHERE status = 'completed' GROUP BY channel ORDER BY channel
+  expect:
+    rows: 3
+    must_cite: 1
+
+- id: 4
+  question: Which store brought in the most revenue?
+  classes: [single-shot, ranking]
+  truth: revenue.top_store_by_revenue
+  script:
+    sql: >-
+      SELECT store_id, ROUND(SUM(total_amount)::numeric, 2) AS revenue FROM orders
+      WHERE status = 'completed' GROUP BY store_id ORDER BY revenue DESC LIMIT 1
+  expect:
+    value_of: store_id
+    must_cite: 1
+
+- id: 5
+  question: Which week had the lowest revenue?
+  classes: [single-shot, ranking, time-bucket]
+  truth: revenue.slowest_week_starting
+  script:
+    sql: >-
+      SELECT DATE_TRUNC('week', order_date)::date AS week_start,
+             ROUND(SUM(total_amount)::numeric, 2) AS revenue
+      FROM orders WHERE status = 'completed'
+      GROUP BY week_start ORDER BY revenue ASC LIMIT 1
+  expect:
+    value_of: week_start
+    must_cite: 1
+
+- id: 6
+  question: Show me the revenue trend over the last six months.
+  classes: [multi-row, relative-date, chart]
+  truth: revenue.by_month.-1.revenue
+  tolerance: 0.0001
+  script:
+    sql: >-
+      SELECT TO_CHAR(DATE_TRUNC('month', order_date), 'YYYY-MM') AS month,
+             ROUND(SUM(total_amount)::numeric, 2) AS revenue
+      FROM orders WHERE status = 'completed'
+        AND order_date >= DATE '2026-02-01' AND order_date < DATE '2026-08-01'
+      GROUP BY month ORDER BY month
+  expect:
+    rows: 6
+    must_cite: 1
+
+- id: 7
+  question: What is the average order value for each channel?
+  classes: [single-shot, grouping]
+  truth: revenue.by_channel.0.average_order_value
+  tolerance: 0.01
+  script:
+    sql: >-
+      SELECT channel, ROUND(AVG(total_amount)::numeric, 2) AS average_order_value
+      FROM orders WHERE status = 'completed' GROUP BY channel ORDER BY channel
+  expect:
+    rows: 3
+    must_cite: 1
+
+- id: 8
+  question: What proportion of orders were cancelled?
+  classes: [single-shot, ratio]
+  truth: orders.cancelled_rate
+  tolerance: 0.001
+  script:
+    sql: >-
+      SELECT ROUND(
+        (COUNT(*) FILTER (WHERE status = 'cancelled'))::numeric / COUNT(*), 6
+      ) AS cancelled_rate FROM orders
+  expect:
+    value_of: cancelled_rate
+    must_cite: 1
+
+- id: 9
+  question: Which menu items sell best?
+  classes: [refusal]
+  # There is no order_items table and no join path from orders to menu_items.
+  # The whole point: a confident answer here would be computed from a cartesian
+  # product and would look exactly like a real one.
+  script:
+    refuse: >-
+      This database has orders and menu_items, but nothing linking them, so
+      item-level sales cannot be computed.
+  expect:
+    must_refuse: true
+    must_cite: 0
+    queries_run: 0
+
+- id: 10
+  question: What proportion of customers ordered more than once?
+  classes: [single-shot, ratio]
+  truth: customers.repeat_rate
+  tolerance: 0.001
+  script:
+    sql: >-
+      SELECT ROUND(
+        (COUNT(*) FILTER (WHERE order_count > 1))::numeric / NULLIF(COUNT(*), 0), 6
+      ) AS repeat_rate
+      FROM (SELECT customer_id, COUNT(*) AS order_count FROM orders
+            GROUP BY customer_id) AS per_customer
+  expect:
+    value_of: repeat_rate
+    must_cite: 1
+
+- id: 11
+  question: Why did revenue decline recently?
+  classes: [multi-step, relative-date]
+  truth: decline.overall_pct
+  tolerance: 0.02
+  script:
+    steps:
+      - sql: >-
+          SELECT ROUND(SUM(total_amount) FILTER (
+                   WHERE order_date >= DATE '2026-06-06')::numeric, 2) AS recent,
+                 ROUND(SUM(total_amount) FILTER (
+                   WHERE order_date < DATE '2026-06-06')::numeric, 2) AS previous
+          FROM orders WHERE status = 'completed' AND order_date >= DATE '2026-04-11'
+        finding: Revenue fell between the two eight-week windows.
+      - sql: >-
+          SELECT store_id, channel,
+                 ROUND(SUM(total_amount) FILTER (
+                   WHERE order_date >= DATE '2026-06-06')::numeric, 2) AS recent,
+                 ROUND(SUM(total_amount) FILTER (
+                   WHERE order_date < DATE '2026-06-06')::numeric, 2) AS previous
+          FROM orders WHERE status = 'completed' AND order_date >= DATE '2026-04-11'
+          GROUP BY store_id, channel ORDER BY store_id, channel
+        finding: The fall is concentrated in one store and one channel.
+  expect:
+    must_cite: 2
+    min_iterations: 2
+
+- id: 12
+  question: Which store drove the recent revenue decline?
+  classes: [multi-step, relative-date]
+  truth: decline.store_id
+  script:
+    sql: >-
+      SELECT store_id,
+             ROUND((SUM(total_amount) FILTER (WHERE order_date >= DATE '2026-06-06')
+                    - SUM(total_amount) FILTER (WHERE order_date < DATE '2026-06-06'))::numeric,
+                   2) AS change
+      FROM orders WHERE status = 'completed' AND order_date >= DATE '2026-04-11'
+      GROUP BY store_id ORDER BY change ASC LIMIT 1
+  expect:
+    value_of: store_id
+    must_cite: 1
+
+- id: 13
+  question: Was the recent decline specific to one channel?
+  classes: [multi-step, relative-date]
+  truth: decline.channel
+  script:
+    sql: >-
+      SELECT channel,
+             ROUND((SUM(total_amount) FILTER (WHERE order_date >= DATE '2026-06-06')
+                    - SUM(total_amount) FILTER (WHERE order_date < DATE '2026-06-06'))::numeric,
+                   2) AS change
+      FROM orders WHERE status = 'completed' AND order_date >= DATE '2026-04-11'
+      GROUP BY channel ORDER BY change ASC LIMIT 1
+  expect:
+    value_of: channel
+    must_cite: 1
+
+- id: 14
+  question: Which day of the week is busiest?
+  classes: [single-shot, ranking]
+  truth: orders.busiest_weekday
+  script:
+    sql: >-
+      SELECT LOWER(TRIM(TO_CHAR(order_date, 'Day'))) AS weekday, COUNT(*) AS orders
+      FROM orders GROUP BY weekday ORDER BY orders DESC LIMIT 1
+  expect:
+    value_of: weekday
+    must_cite: 1
+
+- id: 15
+  question: How many staff work at each store?
+  classes: [single-shot, join]
+  truth: staff_by_store.0.staff
+  script:
+    sql: >-
+      SELECT s.id AS store_id, COUNT(*) AS staff
+      FROM staff st JOIN stores s ON s.id = st.store_id
+      GROUP BY s.id ORDER BY s.id
+  expect:
+    rows: 6
+    must_cite: 1
+
+- id: 16
+  question: How many customers do we have an email address for?
+  classes: [single-shot, masked-column]
+  # `customers.email` is auto-masked (WP4.2). It may be counted; its values may
+  # not come back. The check is on the *result*, because the policy is enforced
+  # by the DAL and not by anyone's good intentions.
+  truth: row_counts.customers
+  script:
+    sql: SELECT COUNT(email) AS with_email FROM customers
+  expect:
+    value_of: with_email
+    must_cite: 1
+    masked: customers.email
+
+- id: 17
+  question: How are we doing?
+  classes: [ambiguous]
+  # No single right answer. What is checked is that it does not pretend there is
+  # one: a bounded diagnostic that states what it looked at.
+  script:
+    sql: >-
+      SELECT COUNT(*) AS orders, ROUND(SUM(total_amount)::numeric, 2) AS revenue
+      FROM orders WHERE status = 'completed'
+        AND order_date >= DATE '2026-07-01' AND order_date < DATE '2026-08-01'
+  expect:
+    must_cite: 1
+
+- id: 18
+  question: What was revenue between 1 March 2026 and 15 March 2026?
+  classes: [single-shot, absolute-date, bounded-range]
+  truth: date_range_example.revenue
+  tolerance: 0.0001
+  script:
+    sql: >-
+      SELECT ROUND(SUM(total_amount)::numeric, 2) AS revenue FROM orders
+      WHERE status = 'completed'
+        AND order_date >= DATE '2026-03-01' AND order_date < DATE '2026-03-16'
+  expect:
+    value_of: revenue
+    must_cite: 1
+    sql_contains: ["2026-03-01"]
+    sql_excludes: ["CURRENT_DATE", "NOW()"]
+
+- id: 19
+  question: How many orders were placed in November 2026?
+  classes: [empty-result, honesty]
+  # After `as_of`, so the seed has nothing there. "Future" is only expressible
+  # because the anchor is fixed (D-027); against a wall clock no date stays future.
+  script:
+    sql: >-
+      SELECT COUNT(*) AS order_count FROM orders
+      WHERE order_date >= DATE '2026-11-01' AND order_date < DATE '2026-12-01'
+  expect:
+    value_is: 0
+    value_of: order_count
+    must_cite: 1
+
+- id: 20
+  question: What is behind the drop in revenue over the last couple of months?
+  classes: [multi-step, relative-date, stability]
+  # #11 asked another way. Same window, same conclusion — this is where "the
+  # same question twice gives the same answer" stops being a hope (B-060).
+  truth: decline.overall_pct
+  tolerance: 0.02
+  script:
+    steps:
+      - sql: >-
+          SELECT ROUND(SUM(total_amount) FILTER (
+                   WHERE order_date >= DATE '2026-06-06')::numeric, 2) AS recent,
+                 ROUND(SUM(total_amount) FILTER (
+                   WHERE order_date < DATE '2026-06-06')::numeric, 2) AS previous
+          FROM orders WHERE status = 'completed' AND order_date >= DATE '2026-04-11'
+        finding: Revenue fell between the two eight-week windows.
+      - sql: >-
+          SELECT store_id,
+                 ROUND(SUM(total_amount) FILTER (
+                   WHERE order_date >= DATE '2026-06-06')::numeric, 2) AS recent,
+                 ROUND(SUM(total_amount) FILTER (
+                   WHERE order_date < DATE '2026-06-06')::numeric, 2) AS previous
+          FROM orders WHERE status = 'completed' AND order_date >= DATE '2026-04-11'
+          GROUP BY store_id ORDER BY store_id
+        finding: One store accounts for most of the fall.
+  expect:
+    must_cite: 2
+    min_iterations: 2
+    same_conclusion_as: 11

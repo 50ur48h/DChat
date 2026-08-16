@@ -17,20 +17,21 @@ Current position: **Phases 0–5, 7 and 8 signed off. Phase 6 merged, its gate
                   a green suite. See "Second data source" below. Two of them
                   are already closed: **WP8.4** (#55) fixed the capability check
                   the hub table defeated, and **B-056** with it.
-Next step:        **Phase 9 / WP9.2** (`p9.2-composer-evals`) — the composer's
-                  citations and limitations, and eval harness v1 with the twenty
-                  golden questions. **This is the Phase 9 gate PR.** The harness
-                  pins `as_of` to 2026-08-16 (D-027) and reads expected answers
-                  from `truths.json`, never hardcoding them. **WP9.1 is done**
-                  (#58): a draft is judged before it becomes an answer, and a
-                  wrong date range is caught without a model call. **B-059** is
-                  the next P1 and lands in Phase 10, whose spec now requires the
-                  semantic layer to *import* what a database already carries.
+Next step:        **Phase 9 / WP9.2b** (`p9.2b-evals-ci`) — the evals as a
+                  **required CI check**, which needs CI to seed a pizza database,
+                  register it and profile it before `make evals` runs. FakeLLM
+                  only there (owner's direction): it costs nothing and stays
+                  deterministic, and model quality is the nightly job's business.
+                  Plus `nightly-evals.yml` with `EVALS_LIVE=1` and a hard token
+                  cap. **This is the Phase 9 gate PR**, and it also owes the live
+                  eval run recorded in its body. **WP9.2a is done** (#59): 20/20
+                  golden questions pass locally against the real seed, and the
+                  answer card renders citations and limitations.
 Merge policy: ASK
 Blocked on user: Nothing blocks Phase 9. An Anthropic API key would close
                  **B-029 (P1)** and with it the Phase 6 gate; that blocks nothing
                  else.
-Last updated: 2026-08-16 by Claude Code (WP9.1 — the hybrid critic)
+Last updated: 2026-08-16 by Claude Code (WP9.2a — composer and eval harness)
 
 ---
 
@@ -182,7 +183,21 @@ one object.
    account with `GET /v1/models` *before* writing them into `LLM_MODELS` — the
    same check done for OpenAI. A pricing page says what exists, not what a key
    may call. That habit is B-027, still unautomated.
-5. **There are two customer databases now, and only one of them is a fixture.**
+5. **A false block is the critic's characteristic failure — test for it every
+   time.** Owner's direction, 2026-08-16, after the third one in a session. A
+   rule that fires on a legitimate question is worse than a rule that misses,
+   because a fluent refusal of an answerable question teaches people the product
+   is broken while a miss merely leaves things as they were. All three came from
+   a check that was *nearly* right: the capability rule fired on any catalog gap
+   rather than on a statement actually refused; the numbers rule warned that
+   "2026" appeared in no result, having read the year out of the question; and
+   the range rule read "March 2026" out of *"between 1 March 2026 and 15 March
+   2026"* and rejected correct SQL. **So every new critic rule ships with two
+   tests: one proving it fires on the thing it is for, and one proving it does
+   *not* fire on a legitimate question near it.** The second is the one that
+   catches this class, and golden eval #18 is the first test that found a false
+   block before a human did — which is the whole argument for the eval suite.
+6. **There are two customer databases now, and only one of them is a fixture.**
    `Demo` is the pizza generator, whose numbers `truths.json` and the Phase 9
    evals depend on — do not touch it. `F&B demo` is a real operator's warehouse
    loaded from a SQLite file the owner supplied, which lives in `.SampleData/`
@@ -1158,7 +1173,19 @@ unexplained.
       while building it: the capability rule first blocked on *any* catalog gap
       rather than on a statement actually refused — a false block, the thing
       WP8.4 spent itself avoiding, caught before it shipped
-- [ ] WP9.2 Composer (citations/limitations) + eval harness v1      ← gate PR
+- [x] WP9.2a Composer (citations/limitations) + eval harness (#59)
+      — the answer grew its other three parts. **Limitations are assembled, not
+      requested**: a model asked for its own caveats writes hedging or nothing,
+      so `agent/composer.py` builds them from what the run knows — the ceiling
+      that stopped the search, the critic's warnings, queries that came back
+      empty. Revision 0015 puts them on `agent_runs` rather than inside `state`,
+      because a limitation is part of the answer and the card should not read the
+      agent's own scratchpad to decide what to show a person. `findings.cited`
+      marks what the answer rests on, matched by **shared execution** rather than
+      by text, so rephrasing does not lose the link. `ops/evals/` holds the
+      twenty golden questions with every expected number a **path into
+      `truths.json`**, and **20/20 pass** against the real seed
+- [ ] WP9.2b Evals in CI (seed + register + required check) + nightly  ← gate PR
 - [ ] GATE: seeded-wrong-draft caught; 20 golden evals pass; sign-off
 
 ## Phase 10 — Knowledge + semantic layer (M10)

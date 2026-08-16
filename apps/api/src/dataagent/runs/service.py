@@ -179,6 +179,10 @@ class FindingView:
     #: through.
     support: list[str]
     confidence: str
+    #: True when the composed answer rests on this finding (WP9.2). The card
+    #: shows the cited ones as evidence and leaves the rest in the trace, where
+    #: they are the investigation's working rather than its conclusion.
+    cited: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +200,9 @@ class RunView:
     failure_reason: str | None = None
     cost_estimate: Decimal | None = None
     model_usage: dict[str, object] = field(default_factory=dict[str, object])
+    #: What this answer does not establish. Rendered beside the answer, never
+    #: instead of it, and empty is both the common case and a good one.
+    limitations: list[str] = field(default_factory=list[str])
 
 
 @dataclass(frozen=True, slots=True)
@@ -622,6 +629,7 @@ async def _run_view(session: AsyncSession, run: AgentRun) -> RunView:
                 statement=finding.statement,
                 support=[str(item) for item in finding.support],
                 confidence=finding.confidence,
+                cited=finding.cited,
             )
             for finding in findings
         ],
@@ -630,6 +638,7 @@ async def _run_view(session: AsyncSession, run: AgentRun) -> RunView:
         failure_reason=run.failure_reason,
         cost_estimate=run.cost_estimate,
         model_usage=dict(run.model_usage),
+        limitations=[str(note) for note in run.limitations],
     )
 
 
@@ -713,11 +722,22 @@ def _event_for(
     return (None, {})
 
 
-async def record_answer(*, org_id: uuid.UUID, run_id: uuid.UUID, content: str) -> MessageView:
-    """Write the assistant's reply for a run.
+async def record_answer(
+    *,
+    org_id: uuid.UUID,
+    run_id: uuid.UUID,
+    content: str,
+    limitations: Sequence[str] = (),
+) -> MessageView:
+    """Write the assistant's reply for a run, and what it does not establish.
 
     Separate from ``transition`` on purpose: composing an answer and declaring the
     run over are two different claims, and WP9's critic runs between them.
+
+    ``limitations`` land on the run rather than inside the message text, so the
+    answer card can render them as their own thing — beside the answer, never
+    instead of it — and so a reader can tell a hedged sentence the model chose to
+    write from a caveat the platform established (WP9.2).
     """
     async with org_session(org_id) as session:
         run = await _owned_run(session, run_id=run_id, user_id=None)
@@ -729,13 +749,18 @@ async def record_answer(*, org_id: uuid.UUID, run_id: uuid.UUID, content: str) -
             run_id=run_id,
         )
         session.add(message)
+        run.limitations = list(limitations)
         await session.flush()
         await write_event(
             session,
             org_id=org_id,
             run_id=run_id,
             event_type="answer_composed",
-            payload={"message_id": str(message.id), "length": len(content)},
+            payload={
+                "message_id": str(message.id),
+                "length": len(content),
+                "limitations": len(limitations),
+            },
         )
         return MessageView(
             id=message.id,
@@ -744,6 +769,37 @@ async def record_answer(*, org_id: uuid.UUID, run_id: uuid.UUID, content: str) -
             run_id=run_id,
             created_at=message.created_at,
         )
+
+
+async def mark_cited(
+    *, org_id: uuid.UUID, run_id: uuid.UUID, executions: Sequence[uuid.UUID | str]
+) -> int:
+    """Mark the findings this run's answer rests on, and return how many.
+
+    Matched by **shared execution**, not by statement text: the composer
+    rephrases what the loop concluded, and a match on wording would lose the link
+    exactly when the answer was written well. A finding that cites one of the
+    answer's executions is a claim about the same query, which is what makes it
+    evidence for the same answer.
+
+    Idempotent, so a re-composed answer after the critic's re-entry re-marks
+    rather than accumulating.
+    """
+    wanted = {str(execution) for execution in executions}
+    if not wanted:
+        return 0
+
+    async with org_session(org_id) as session:
+        rows = (
+            (await session.execute(select(Finding).where(Finding.run_id == run_id))).scalars().all()
+        )
+        marked = 0
+        for finding in rows:
+            cited = bool(wanted.intersection(str(item) for item in finding.support))
+            if finding.cited != cited:
+                finding.cited = cited
+            marked += int(cited)
+        return marked
 
 
 async def add_finding(
