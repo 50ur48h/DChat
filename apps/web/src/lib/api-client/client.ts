@@ -42,6 +42,7 @@ import {
   type ProfileResult,
   type RefreshResult,
   type Run,
+  type RunEvent,
   type RunEvents,
   type TestResult,
 } from "./types";
@@ -171,6 +172,15 @@ export interface Api {
   run(orgId: string, runId: string, signal?: AbortSignal): Promise<Run>;
   runEvents(orgId: string, runId: string, after?: number): Promise<RunEvents>;
   execution(orgId: string, runId: string, executionId: string): Promise<Execution>;
+  streamRunEvents(
+    orgId: string,
+    runId: string,
+    options: {
+      after?: number | undefined;
+      onEvent: (event: RunEvent) => void;
+      signal: AbortSignal;
+    },
+  ): Promise<void>;
 }
 
 /** Binds the API to a session's token getter. */
@@ -352,6 +362,79 @@ export function createApi(getToken: () => Promise<string | null>): Api {
         isExecution,
         "execution",
       );
+    },
+    /**
+     * Follow a run's trace as it happens (architecture 10.3).
+     *
+     * **`fetch` rather than `EventSource`, and that is a security decision.**
+     * `EventSource` cannot set headers, so the only way to authenticate it is a
+     * token in the query string — which this codebase has already refused once,
+     * for the data-source password, and for the same reasons: query strings land
+     * in browser history, in referrer headers and in every access log between
+     * here and the API. Streaming the response body costs a manual frame parser
+     * and a reconnect loop, and keeps **one** auth path rather than two.
+     *
+     * Reconnection is ours for the same reason. `Last-Event-ID` is sent on the
+     * way back, so the server resumes from the durable rows and nothing is
+     * missed — the property the whole design rests on.
+     */
+    async streamRunEvents(orgId, runId, { after = 0, onEvent, signal }) {
+      let lastSeq = after;
+      while (!signal.aborted) {
+        try {
+          const response = await fetch(
+            `${apiBaseUrl()}/v1/orgs/${orgId}/runs/${runId}/events?after=${lastSeq}`,
+            {
+              signal,
+              headers: {
+                Accept: "text/event-stream",
+                Authorization: `Bearer ${(await getToken()) ?? ""}`,
+                ...(lastSeq > 0 ? { "Last-Event-ID": String(lastSeq) } : {}),
+              },
+            },
+          );
+          if (!response.ok || !response.body) {
+            throw new ApiError(`The trace stream failed with ${response.status}`, response.status);
+          }
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffered = "";
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffered += decoder.decode(value, { stream: true });
+            // Frames are separated by a blank line; anything after the last one
+            // is a partial frame and waits for the next chunk.
+            const frames = buffered.split("\n\n");
+            buffered = frames.pop() ?? "";
+            for (const frame of frames) {
+              const data = frame
+                .split("\n")
+                .filter((row) => row.startsWith("data: "))
+                .map((row) => row.slice("data: ".length))
+                .join("");
+              if (!data) continue;
+              try {
+                const event = JSON.parse(data) as RunEvent;
+                if (typeof event.seq === "number" && event.seq > lastSeq) lastSeq = event.seq;
+                onEvent(event);
+              } catch {
+                // One unparseable frame is one missing step, not a reason to
+                // tear down a stream that is otherwise delivering.
+              }
+            }
+          }
+          // The server closes the stream when the run ends, so a clean end of
+          // body means there is nothing more coming.
+          return;
+        } catch (cause) {
+          if (signal.aborted) return;
+          if (cause instanceof ApiError && cause.status >= 400 && cause.status < 500) throw cause;
+          // A dropped connection: wait, then resume from `lastSeq`. The rows are
+          // durable, so nothing is lost by having been away.
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      }
     },
   };
 }

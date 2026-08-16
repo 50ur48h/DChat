@@ -106,3 +106,40 @@ test("polling stops once the run has finished", async ({ page }) => {
   // A page left open must not ask forever.
   expect(api.calls.filter((call) => call.includes("/runs/")).length).toBe(settled);
 });
+
+test("the trace shows how the answer was worked out", async ({ page }) => {
+  await openConversation(page);
+  await ask(page);
+  await expect(page.getByText(ANSWER)).toBeVisible({ timeout: 15_000 });
+
+  // Collapsed once the run is over — the answer is the point then — but still
+  // there, because "how did you get that" is the question this product exists
+  // to be able to answer.
+  const toggle = page.getByRole("button", { name: /how this was worked out/ });
+  await expect(toggle).toBeVisible();
+  await toggle.click();
+
+  await expect(page.getByText("Read the catalog")).toBeVisible();
+  await expect(page.getByText("Wrote a query")).toBeVisible();
+  await expect(page.getByText("Got results")).toBeVisible();
+  // The machine name never reaches a person.
+  await expect(page.getByText("query_executed")).toHaveCount(0);
+});
+
+test("a refresh mid-run replays the whole trace", async ({ page }) => {
+  /**
+   * The M8 gate's own criterion. The trace is not held in the page: every step
+   * is a durable row, and a reload asks for them again. Nothing a reader has
+   * seen can be lost by reloading, and nothing they missed stays missed.
+   */
+  await openConversation(page);
+  await ask(page);
+  await expect(page.getByText(ANSWER)).toBeVisible({ timeout: 15_000 });
+
+  await page.reload();
+
+  await expect(page.getByText(ANSWER)).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("button", { name: /how this was worked out/ }).click();
+  await expect(page.getByText("Read the catalog")).toBeVisible();
+  await expect(page.getByText("Finished")).toBeVisible();
+});
