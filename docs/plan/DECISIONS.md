@@ -4,6 +4,39 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-025 — A card's figures come from the engine, or they are absent
+Date: 2026-08-16 · Phase: 8 · PR: B-051 · Owner's direction
+Context: `profiler.py` computed `min_val`/`max_val` from the sampled values.
+`pg_sample` returns the **first** n rows by design — it must not sort a
+customer's production table — so the "range" was the range of the oldest rows.
+On the demo catalog `orders.order_date` was recorded as ending **2025-03-11**
+when the column runs to **2026-07-31**, and the M8 revenue-decline scenario then
+refused an answerable question, correctly reasoning from a card that lied. This
+is the second time this class has bitten: WP4.3 fixed the same thing for row
+counts ("about 5,000 rows" about a 71,798-row table).
+Options: (a) keep the sampled range and label it as sampled — cheap, and leaves
+a figure that is wrong for any table larger than the cap; (b) take min/max from
+the engine; (c) publish no range at all.
+Decision: **(b), falling back to (c)** — the owner's rule: *an absent figure is
+safe, a wrong one is not.* One `MIN/MAX` aggregate **per table**, not per column,
+so the cost is the same order as the sample beside it; bounded by the connector's
+own timeout, and **any failure means the range is omitted rather than falling
+back to the sample**. Only numeric and temporal columns are asked for one — an
+aggregate over free text costs a scan and buys nothing, and "email runs from
+a\*\*\* to z\*\*\*" was never information — so those columns now carry no range at
+all rather than a sampled one.
+Consequences: two new sanctioned queries (`pg_ranges`, `tsql_ranges`) in
+`connectors/introspection.py`, which holds the policy grant and is therefore
+review-sensitive. Profiling does one more query per table. **The general rule is
+now testable rather than remembered**: a figure a card states as a fact about the
+column must come from the engine, and a figure that can only come from the sample
+is allowed only where the card says so — `distinct in sample` and `examples:`
+both already did, which is why only the range was wrong. `profile_column` has no
+code path from sampled values to a range, so it *could not* publish one; a test
+reintroducing the old line fails on the exact wrong dates the demo catalog held.
+Existing catalogs keep their wrong ranges until re-profiled, so the demo catalog
+is re-profiled as part of this change.
+
 ## D-024 — Observe is deterministic, because 4.4's own caps did not fit its own loop
 Date: 2026-08-16 · Phase: 8 · PR: WP8.1b · Owner's direction: fix the document
 Context: Architecture 4.4 lists three model calls per iteration — Plan, Observe

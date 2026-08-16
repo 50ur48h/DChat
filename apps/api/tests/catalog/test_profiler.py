@@ -15,13 +15,14 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from datetime import date
 
 import pytest
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from customer_db import CustomerDatabase
-from dataagent.catalog import browse, discovery, policies, profiler
+from dataagent.catalog import browse, cards, discovery, policies, profiler
 from dataagent.datasources import service as datasources
 from dataagent.db import engine as engine_module
 from dataagent.secrets.local import LocalSecretsProvider
@@ -457,3 +458,134 @@ async def test_the_row_count_comes_from_the_engine_not_from_the_sample(
     catalog = await browse.active_catalog(org_id, source_id)
     people = next(table for table in catalog.tables if table.table_name == "people")
     assert people.row_estimate == 4, "four rows in the table, two in the sample"
+
+
+# ---------------------------------------------------------------------------
+# No figure in a card may come from a sample (B-051)
+# ---------------------------------------------------------------------------
+
+
+def test_the_code_that_sees_the_sample_cannot_produce_a_range() -> None:
+    """**The guard, stated structurally rather than as a convention.**
+
+    `profile_column` is handed the sampled values. It has no code path from them
+    to `min_val`/`max_val` — a range arrives from the engine or not at all — so
+    it *could not* publish a sampled range if someone wanted it to. That is a
+    stronger thing to be able to say than "we remember not to".
+    """
+    profile = profiler.profile_column(
+        name="order_date",
+        data_type="date",
+        is_pk=False,
+        values=[date(2025, 2, 1), date(2025, 3, 11)],
+        sampled=2,
+        budget=profiler.Budget(),
+    )
+
+    assert profile.min_val is None
+    assert profile.max_val is None, "the sample offered a range and it was not taken"
+
+
+def test_a_range_given_by_the_engine_is_the_one_recorded() -> None:
+    profile = profiler.profile_column(
+        name="order_date",
+        data_type="date",
+        is_pk=False,
+        values=[date(2025, 2, 1)],
+        sampled=1,
+        budget=profiler.Budget(),
+        value_range=(date(2025, 2, 1), date(2026, 7, 31)),
+    )
+
+    assert (profile.min_val, profile.max_val) == ("2025-02-01", "2026-07-31")
+
+
+def test_only_types_worth_a_range_are_asked_for_one() -> None:
+    """An aggregate over free text costs a scan and buys nothing: "email runs
+    from a*** to z***" was never information. Those columns get no range rather
+    than a sampled one."""
+    assert profiler.wants_range("date") is True
+    assert profiler.wants_range("timestamp with time zone") is True
+    assert profiler.wants_range("numeric(10,2)") is True
+    assert profiler.wants_range("integer") is True
+    assert profiler.wants_range("text") is False
+    assert profiler.wants_range("jsonb") is False
+    assert profiler.wants_range("boolean") is False
+
+
+async def test_a_card_shows_the_columns_true_range_not_the_samples(
+    platform: URL, migrated_database: URL, isolated_customer_database: CustomerDatabase
+) -> None:
+    """**B-051 in miniature, over the card a reader actually sees.**
+
+    `pg_sample` returns the *first* n rows — it must not sort a production
+    table — so with a cap of 2 the sample sees shops opened in 2020 and 2021 and
+    never the one opened in 2024. On the live demo catalog this exact shape
+    recorded `orders.order_date` as ending sixteen months early, and the agent
+    then refused an answerable question on the strength of it: a wrong refusal
+    wearing an honest one's clothes.
+
+    Asserted through `build_card` rather than through the profile row, because
+    the card is what a model and a person are given, and a figure that is wrong
+    only once it is rendered is still wrong.
+    """
+    org_id, user_id, source_id = await _discovered(migrated_database, isolated_customer_database)
+
+    await profiler.profile(
+        org_id=org_id,
+        actor_user_id=user_id,
+        data_source_id=source_id,
+        budget=profiler.Budget(max_rows=2),
+    )
+    await cards.refresh_cards(org_id, source_id)
+
+    opened = await _column(org_id, source_id, "shops", "opened_on")
+    assert opened.sample_rows == 2, "the sample really did see only the first two rows"
+    assert opened.max_val == "2024-05-05", "the engine's answer, not the sample's"
+
+    catalog = await browse.active_catalog(org_id, source_id)
+    shops = next(table for table in catalog.tables if table.table_name == "shops")
+    card = shops.card_text or ""
+    stated = next(line for line in card.splitlines() if line.strip().startswith("- opened_on"))
+
+    # The stated range is the engine's. `2021-02-02` may still appear on this
+    # line as a labelled example — that is the other test's business, and it is
+    # honest because a sampled example really is an example.
+    assert "range 2020-01-01 to 2024-05-05" in stated
+
+
+async def test_a_card_labels_every_figure_it_cannot_stand_behind(
+    platform: URL, migrated_database: URL, isolated_customer_database: CustomerDatabase
+) -> None:
+    """The other half of B-051's rule, and the half the card already got right.
+
+    A figure a card states **as a fact about the column** must come from the
+    engine. A figure that can only come from the sample is allowed only when the
+    card *says so* — `distinct in sample` and `examples:` both do, and both are
+    honest because a sampled example really is an example.
+
+    The failure this pins is the middle case: a sample-derived number presented
+    bare, as `range 2020-01-01 to 2021-02-02` was. Whoever adds the next figure
+    has to choose a side, and this test is where that choice is recorded.
+    """
+    org_id, user_id, source_id = await _discovered(migrated_database, isolated_customer_database)
+
+    await profiler.profile(
+        org_id=org_id,
+        actor_user_id=user_id,
+        data_source_id=source_id,
+        budget=profiler.Budget(max_rows=2),
+    )
+    await cards.refresh_cards(org_id, source_id)
+
+    catalog = await browse.active_catalog(org_id, source_id)
+    shops = next(table for table in catalog.tables if table.table_name == "shops")
+    card = shops.card_text or ""
+
+    for line in card.splitlines():
+        if "distinct" in line:
+            assert "in sample" in line, "a sampled count says it is a sampled count"
+        if "2021-02-02" in line:
+            assert "examples:" in line, (
+                "a value only the sample saw may appear as an example and as nothing else"
+            )

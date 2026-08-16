@@ -34,7 +34,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -120,18 +120,32 @@ def _render(value: object) -> str:
     return str(value)
 
 
-def _comparable(values: Sequence[object]) -> bool:
-    """Can these be ordered without lying about the answer?
+#: Types where a low/high is worth having, and cheap for an engine to compute.
+#: Everything else — free text, json, arrays, booleans — gets **no range at all**
+#: rather than one taken from a sample (B-051): an absent figure is safe and a
+#: wrong one is not, and "email runs from a*** to z***" was never information.
+_RANGED_TYPES = (
+    "int",
+    "serial",
+    "numeric",
+    "decimal",
+    "real",
+    "double",
+    "float",
+    "money",
+    "date",
+    "time",
+    "timestamp",
+    "datetime",
+    "smalldatetime",
+    "year",
+)
 
-    Mixed types compare by accident in Python or not at all, and min/max of a
-    column is only meaningful when every value is the same kind of thing.
-    """
-    if not values:
-        return False
-    first = type(values[0])
-    if isinstance(values[0], str | bytes | bytearray | memoryview):
-        return False  # pyright: ignore[reportUnknownArgumentType]
-    return all(isinstance(value, first) for value in values)
+
+def wants_range(data_type: str) -> bool:
+    """Whether a column's low/high is worth an aggregate."""
+    lowered = data_type.lower()
+    return any(kind in lowered for kind in _RANGED_TYPES)
 
 
 def profile_column(
@@ -142,8 +156,22 @@ def profile_column(
     values: Sequence[object],
     sampled: int,
     budget: Budget,
+    value_range: tuple[object, object] | None = None,
 ) -> ColumnProfile:
-    """Statistics for one column of the sample, masked as they are built."""
+    """Statistics for one column of the sample, masked as they are built.
+
+    **A range is never derived here** (B-051). The values this function sees are
+    a *sample* — the first n rows, because `pg_sample` must not sort somebody's
+    production table — so their extremes are the extremes of the oldest rows and
+    not of the column. The demo catalog recorded orders as ending sixteen months
+    before they did, and the agent then refused an answerable question on the
+    strength of it, which is a wrong refusal wearing an honest one's clothes.
+
+    So `value_range` arrives from the engine or not at all, and there is **no
+    code path from `values` to `min_val`/`max_val`**. That is the guard: this
+    function could not publish a sampled range if someone wanted it to, which is
+    a stronger statement than a convention that it should not.
+    """
     present = [value for value in values if value is not None]
     null_frac = 0.0 if sampled == 0 else (sampled - len(present)) / sampled
 
@@ -160,18 +188,13 @@ def profile_column(
     )
     sensitive = verdict.sensitivity != "none"
 
+    # Only ever what the engine said, and None when it said nothing.
     minimum: str | None = None
     maximum: str | None = None
-    if _comparable(present):
-        # Ordering values of one unknown-but-uniform type is exactly what the
-        # `_comparable` guard above established is safe; the type system cannot
-        # carry that fact, so it is asserted here and nowhere else.
-        ordered = sorted(cast("list[Any]", present))
-        minimum, maximum = _render(ordered[0]), _render(ordered[-1])
-    elif rendered:
-        # Strings still have a useful range, and it is not a lie as long as it
-        # is a string comparison.
-        minimum, maximum = min(rendered), max(rendered)
+    if value_range is not None:
+        low, high = value_range
+        minimum = None if low is None else _render(low)
+        maximum = None if high is None else _render(high)
 
     if sensitive:
         # The extremes of an email column are two email addresses. Masked with
@@ -199,6 +222,44 @@ def profile_column(
         verdict=verdict,
         sample_rows=sampled,
     )
+
+
+async def _engine_ranges(
+    connector: Connector, target: _Target, budget: Budget
+) -> dict[str, tuple[object, object]]:
+    """The true low and high of each ranged column, from the engine (B-051).
+
+    One aggregate per table, so the cost is the same order as the sample beside
+    it. **Failure means no range, never a fallback to the sample**: a timeout on
+    a huge table, a type the engine will not aggregate, a permission — every one
+    of them ends with the figure absent, because that is the safe direction and
+    a sampled range is the thing this exists to stop.
+    """
+    caps = connector.capabilities()
+    ranged = [name for _, name, data_type, _ in target.columns if wants_range(data_type)]
+    if not ranged:
+        return {}
+    query = (
+        introspection.tsql_ranges(target.schema_name, target.table_name, ranged)
+        if caps.dialect == introspection.TSQL
+        else introspection.pg_ranges(target.schema_name, target.table_name, ranged)
+    )
+    try:
+        frame = await connector.execute(
+            query, ExecLimits(max_rows=1, timeout_seconds=budget.per_query_timeout_seconds)
+        )
+    except ConnectorError:
+        return {}
+    if not frame.rows:
+        return {}
+    row = frame.rows[0]
+    found: dict[str, tuple[object, object]] = {}
+    for index, name in enumerate(ranged):
+        low, high = row[index * 2], row[index * 2 + 1]
+        if low is None and high is None:
+            continue
+        found[name] = (low, high)
+    return found
 
 
 def _sample_query(
@@ -401,11 +462,14 @@ async def _sample_everything(
             skipped += 1
             continue
 
+        ranges = await _engine_ranges(connector, target, budget)
+
         position = {name: index for index, name in enumerate(frame.columns)}
         for column_id, name, data_type, is_pk in target.columns:
             at = position.get(name)
             values = [] if at is None else [row[at] for row in frame.rows]
             profiles[column_id] = profile_column(
+                value_range=ranges.get(name),
                 name=name,
                 data_type=data_type,
                 is_pk=is_pk,
