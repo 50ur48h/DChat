@@ -7,9 +7,10 @@ Current position: **Phases 0–5 and 7 signed off. Phase 6 merged, its gate
                   opens into the SQL behind it, and a question the data cannot
                   answer is honestly refused. The product does the thing it is
                   for, in front of a person.
-Next step:        Phase 8 / **WP8.2** (`p8.2-capability-check`) — the join-graph
-                  reachability check and the honest refusal path. **WP8.1b is
-                  open for review.** Phase 8's
+Next step:        Phase 8 / **WP8.3** (`p8.3-sse-trace`) — SSE over the durable
+                  `agent_events` rows, replay from `?after=seq`, and the trace
+                  UI. **This is the Phase 8 gate PR**, so it ends with a manual
+                  test script. **WP8.2 is open for review.** Phase 8's
                   precondition (**B-039**) is closed, and its flagship refusal —
                   *"Which menu items sell best?"* — was already seen working live
                   during Phase 7's verification, so WP8.2 starts from a known-good
@@ -791,7 +792,43 @@ Prefer an edit that fails loudly over one that prints "done".
       than one row in it. The composer now gets a **bounded, already-masked
       snapshot** of the last few results — handed to one final call, never
       accumulated into the state, which is what 4.4 actually forbids
-- [ ] WP8.2 Capability check (join-graph) + honest refusal path
+- [x] WP8.2 Capability check (join-graph) + honest refusal path
+      — the check **a model cannot talk its way past** (arch 4.3). A question
+      needing two tables with no join path is unanswerable, and the honest thing
+      is to name the missing link. What makes it matter is that the alternative
+      does not look like a failure: **a join between unrelated tables does not
+      error, it returns a cartesian product**, and a confident, correctly-cited
+      answer computed from one is indistinguishable from a real one.
+      `agent/capability.py` builds the graph from `catalog_relationships` and
+      walks it breadth-first. **Edges are undirected** — a foreign key points one
+      way, a join works either way — so `payments → orders → customers` is a
+      two-hop path and a question over both is answerable. **Inferred edges must
+      clear `MIN_CONFIDENCE`**: a speculative edge would let the check say
+      "answerable" on the strength of a guess, turning an honest refusal into a
+      wrong answer, which is the one trade this module exists to refuse.
+      **The required tables come from the model's own proposed SQL**, not from
+      guessing the question's intent (owner's approval). Inferring intent means
+      sometimes refusing an answerable question, and a false refusal is worse
+      than no check — it teaches people the product is broken. So the model
+      proposes, the tables are read out of its SQL, and the deterministic check
+      disposes **before the statement is sent**.
+      Told twice, enforced once: the unreachable pairs go to the planner as fact
+      at **L0** — never truncated, because a schema limit the model did not see
+      is not a limit — and every proposed statement is checked regardless, since
+      being told is a courtesy and not a control.
+      **`dal/validator.tables_named` is a `dal/` change and needs human review.**
+      It went there rather than into `agent/` because sqlglot is confined to that
+      one file on purpose; it holds no `PolicyGrant`, produces no `Validated`,
+      grounds nothing and authorises nothing — the only thing a caller can do
+      with it is refuse. Testing it caught a real trap: **a CTE name parses as a
+      table**, so `WITH t AS (…)` would have invented a join gap against the
+      query's own scaffolding.
+      12 tests; `capability.py` at 92%, suite at **94%**. Verified live on the
+      demo database: *"Which menu items sell best?"* → **refused in one model
+      call with zero queries**, naming the gap exactly — *"There is no link
+      between menu_items and orders"* — and the control question still answers
+      **3718**. The model refused before even proposing SQL, because it had been
+      told; the check was there in case it had not been
 - [ ] WP8.3 SSE streaming + durable replay + trace UI               ← gate PR
 - [ ] GATE: pizza scenario ≤8 iters; menu-items → honest refusal; sign-off
 

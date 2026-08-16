@@ -47,6 +47,7 @@ from dataclasses import dataclass, field
 from pydantic import BaseModel, ConfigDict, Field
 
 from dataagent.agent.budget import BudgetState
+from dataagent.agent.capability import JoinGraph
 from dataagent.agent.context import ContextBundle
 from dataagent.agent.planner import Plan, plan_query
 from dataagent.agent.state import ExecutionRef, ResearchState, StateFinding, Step
@@ -54,6 +55,7 @@ from dataagent.agent.tools.base import ToolContext, ToolResult
 from dataagent.agent.tools.registry import ToolRegistry
 from dataagent.agent.tools.sql import RunSqlOut
 from dataagent.config import Settings
+from dataagent.dal.validator import tables_named
 from dataagent.llm import service as llm
 from dataagent.llm.base import Message
 from dataagent.runs.events import EventWriter
@@ -192,6 +194,8 @@ async def research(
     state: ResearchState,
     budget: BudgetState,
     bundle: ContextBundle,
+    graph: JoinGraph,
+    dialect: str,
     checkpoint: Callable[[], Awaitable[None]],
     record_finding: Callable[[StateFinding], Awaitable[None]],
     settings: Settings | None = None,
@@ -258,6 +262,24 @@ async def research(
             return LoopOutcome(
                 ending="refused",
                 refusal=plan.reason or "The available data cannot answer that.",
+                execution_ids=state.execution_ids(),
+                previews=tuple(previews),
+            )
+
+        # Can these tables be joined at all? Checked **before the statement is
+        # sent**, because a check that answered afterwards would have spent the
+        # query it exists to prevent — and because a join between unrelated
+        # tables does not error, it returns a cartesian product, and an answer
+        # computed from one looks exactly like a real answer (4.3).
+        verdict = graph.check(tables_named(plan.sql, dialect=dialect))
+        if not verdict.answerable:
+            state.capability = verdict.as_payload()
+            state.phase = "finished"
+            await save()
+            await events.emit("capability_checked", verdict.as_payload())
+            return LoopOutcome(
+                ending="refused",
+                refusal=verdict.reason(),
                 execution_ids=state.execution_ids(),
                 previews=tuple(previews),
             )

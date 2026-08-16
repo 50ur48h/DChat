@@ -66,7 +66,7 @@ from dataagent.connectors.base import PolicyGrant, ValidatedQuery
 from dataagent.dal.errors import PolicyViolation, ViolationCode
 from dataagent.dal.policy import SourcePolicy
 
-__all__ = ["ColumnRef", "Projection", "TableRef", "Validated", "validate"]
+__all__ = ["ColumnRef", "Projection", "TableRef", "Validated", "tables_named", "validate"]
 
 #: This module is on ``SANCTIONED_VALIDATORS`` (connectors/base.py). Holding the
 #: grant is what lets it declare SQL fit to run, and it is the only module in the
@@ -385,6 +385,48 @@ def _parse_one_read_only(sql: str, dialect: str) -> tuple[exp.Expression, bool]:
             f"This is {_operation_name(statement)}.",
         )
     return statement, False
+
+
+def tables_named(sql: str, *, dialect: str) -> tuple[str, ...]:
+    """The tables a statement mentions, without validating or running anything.
+
+    Added for the capability check (architecture 4.3), which has to answer "can
+    these tables be joined at all" **before** the statement is sent — a check
+    that answered afterwards would have already spent the query it was meant to
+    prevent.
+
+    **This is not a substitute for `validate`, and grants nothing.** It does not
+    ground names against the catalog, does not consult a policy, does not
+    authorise and does not rewrite; it holds no `PolicyGrant` and produces no
+    `Validated`. Nothing may run on the strength of what it returns, and the only
+    thing a caller can do with it is refuse.
+
+    It lives here rather than in `agent/` because sqlglot is confined to this
+    module on purpose (see the pyright note at the top of the file), and a second
+    importer would quietly make that untrue.
+
+    Unparseable input returns **nothing** rather than raising: this runs before
+    the real validator, whose refusal for bad SQL is the one worth showing. A
+    statement too long or too deep to inspect is likewise not this function's
+    error to report.
+    """
+    with suppress(PolicyViolation, RecursionError, SqlglotError):
+        _refuse_if_too_complex(sql, dialect)
+        parsed = sqlglot.parse_one(sql, read=dialect)
+        # A CTE name parses as a table and is not one. Left in, it would be a
+        # table the catalog has never heard of, and the capability check would
+        # report a join gap against a name the customer's schema does not
+        # contain — a refusal invented out of the query's own scaffolding.
+        defined = {
+            cte.alias_or_name.lower() for cte in parsed.find_all(exp.CTE) if cte.alias_or_name
+        }
+        found = {
+            table.name.lower()
+            for table in parsed.find_all(exp.Table)
+            if table.name and table.name.lower() not in defined
+        }
+        return tuple(sorted(found))
+    return ()
 
 
 def _refuse_if_too_complex(sql: str, dialect: str) -> None:

@@ -42,6 +42,7 @@ import uuid
 from dataclasses import dataclass
 
 from dataagent.agent.budget import Budget, BudgetState
+from dataagent.agent.capability import load_join_graph
 from dataagent.agent.context import build_context
 from dataagent.agent.loop import LoopOutcome, research
 from dataagent.agent.state import ResearchState, StateFinding
@@ -182,6 +183,37 @@ async def _investigate(
         {"tables": list(bundle.table_names), "restrictions": len(bundle.restrictions)},
     )
 
+    # The join graph, loaded once. The pairs that cannot be joined are told to
+    # the planner **as fact** (4.3), so a well-behaved model avoids the dead end
+    # rather than being caught in it — and the loop still checks every proposed
+    # statement, because being told is not the same as being bound.
+    from dataagent.dal.policy import source_policy
+
+    # `ToolContext` allows no data source because a tool may run without one;
+    # `execute_run` requires one, so this narrows rather than defends.
+    source_id = context.data_source_id
+    if source_id is None:  # pragma: no cover - execute_run takes it as required
+        raise ValueError("a run cannot be executed without a data source")
+
+    graph = await load_join_graph(context.org_id, source_id)
+    policy = await source_policy(context.org_id, source_id)
+    gaps = graph.unreachable_pairs()
+    state.capability = {
+        "unreachable": [{"left": gap.left, "right": gap.right} for gap in gaps],
+    }
+    await events.emit(
+        "capability_checked",
+        {"unreachable": [f"{gap.left} ↔ {gap.right}" for gap in gaps][:20]},
+    )
+    if gaps:
+        bundle = bundle.with_capability_note(
+            "These tables cannot be combined in one query — this database has no "
+            "link between them: "
+            + "; ".join(f"{gap.left} and {gap.right}" for gap in gaps[:20])
+            + ". Do not write a query joining any such pair; if the question needs "
+            "one, set answerable to false and say which link is missing."
+        )
+
     async def save() -> None:
         await _checkpoint(context, working)
 
@@ -207,6 +239,8 @@ async def _investigate(
         state=state,
         budget=budget,
         bundle=bundle,
+        graph=graph,
+        dialect=policy.dialect,
         checkpoint=save,
         record_finding=keep,
         settings=settings,
