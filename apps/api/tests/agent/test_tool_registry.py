@@ -82,12 +82,19 @@ async def test_a_tool_you_may_not_use_answers_exactly_like_one_that_does_not_exi
 
 
 def test_the_tool_list_is_in_registration_order() -> None:
-    """A weak nudge about what to reach for first, and one somebody chose."""
+    """A weak nudge about what to reach for first, and one somebody chose.
+
+    `search_knowledge` sits before `run_sql` deliberately (WP10.1b): 5.5's
+    division of labour is that a document says what a term *means* and the
+    database says what its *value* is, so a run reaching for SQL before checking
+    whether the business has written a definition down has skipped a step.
+    """
     registry = default_registry()
 
     assert [tool.name for tool in registry.available_to("reader")] == [
         "search_tables",
         "describe_table",
+        "search_knowledge",
         "run_sql",
     ]
 

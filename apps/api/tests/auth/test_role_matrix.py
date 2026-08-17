@@ -122,13 +122,39 @@ PROBES: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
     # run, for the same reason the conversations do.
     ("GET", "/v1/orgs/{org_id}/runs/{run_id}/executions/{execution_id}", None),
     ("DELETE", "/v1/orgs/{org_id}/data-sources/{data_source_id}", None),
+    # Documents (WP10.1b). Reading is member work like browsing a catalog;
+    # **uploading is Contributor-or-Admin**, and the reason is worth stating:
+    # a document is not data a reader supplies, it is guidance every future run
+    # in the organization will be told to follow.
+    ("POST", "/v1/orgs/{org_id}/documents", None),
+    ("GET", "/v1/orgs/{org_id}/documents", None),
+    ("GET", "/v1/orgs/{org_id}/documents/search", None),
+    ("GET", "/v1/orgs/{org_id}/documents/supported-types", None),
+    ("POST", "/v1/orgs/{org_id}/documents/{document_id}/reindex", None),
+    ("DELETE", "/v1/orgs/{org_id}/documents/{document_id}", None),
 )
 
 
 #: Query strings for routes that require one. Without it the probe earns a 422
 #: from validation, and the matrix would record a validation error as though it
 #: were an authorization decision — which is the one thing this file is for.
-QUERIES: dict[str, str] = {"/v1/orgs/{org_id}/catalog/search": "?q=orders"}
+QUERIES: dict[str, str] = {
+    "/v1/orgs/{org_id}/catalog/search": "?q=orders",
+    "/v1/orgs/{org_id}/documents/search": "?q=revenue",
+}
+
+#: Routes that take a file rather than a JSON body. Same reason ``QUERIES``
+#: exists: a multipart route probed with JSON earns a 422, and the matrix would
+#: record a validation error as though it were an authorization decision.
+UPLOADS: dict[str, dict[str, tuple[str, bytes, str]]] = {
+    "/v1/orgs/{org_id}/documents": {
+        "file": (
+            "probe.md",
+            b"# Probe\n\nA document long enough for the extractor to accept it.\n",
+            "text/markdown",
+        )
+    }
+}
 
 
 class _SubjectAsToken(TokenValidator):
@@ -162,6 +188,12 @@ class Matrix:
     #: evidence probe records a role decision rather than "that execution is not
     #: on this run", which is a 404 of an entirely different kind.
     executions: dict[str, uuid.UUID]
+    #: A document **per role**, and for a blunter reason than the conversations:
+    #: documents are org-scoped, so one would be visible to all three — but the
+    #: DELETE probe *removes* it, and roles are probed in order, so the second
+    #: role would record ``deny(404)`` for a document the first one deleted. One
+    #: each keeps every entry a role decision.
+    documents: dict[str, uuid.UUID]
 
 
 @pytest.fixture
@@ -186,6 +218,7 @@ async def matrix_app(
     column_id = uuid.uuid4()
     users: dict[str, uuid.UUID] = {}
     conversations: dict[str, uuid.UUID] = {}
+    documents: dict[str, uuid.UUID] = {}
     runs: dict[str, uuid.UUID] = {}
     executions: dict[str, uuid.UUID] = {}
     async with owner.begin() as connection:
@@ -218,6 +251,16 @@ async def matrix_app(
             if subject in ROLES:
                 conversation_id, run_id = uuid.uuid4(), uuid.uuid4()
                 conversations[subject], runs[subject] = conversation_id, run_id
+                document_id = uuid.uuid4()
+                documents[subject] = document_id
+                await connection.execute(
+                    text(
+                        "INSERT INTO knowledge_documents "
+                        "(id, org_id, title, blob_path, mime, status) "
+                        "VALUES (:i, :o, 'Probe', :p, 'text/markdown', 'indexed')"
+                    ),
+                    {"i": document_id, "o": org_id, "p": f"{org_id}/docs/{document_id}.md"},
+                )
                 await connection.execute(
                     text(
                         "INSERT INTO conversations (id, org_id, user_id, title) "
@@ -299,6 +342,7 @@ async def matrix_app(
             conversations=conversations,
             runs=runs,
             executions=executions,
+            documents=documents,
         )
     finally:
         await owner.dispose()
@@ -306,13 +350,24 @@ async def matrix_app(
 
 
 async def _probe(
-    app: FastAPI, method: str, path: str, who: str, body: dict[str, Any] | None
+    app: FastAPI,
+    method: str,
+    path: str,
+    who: str,
+    body: dict[str, Any] | None,
+    files: dict[str, tuple[str, bytes, str]] | None = None,
 ) -> int:
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://testserver"
     ) as client:
         response = await client.request(
-            method, path, headers={"Authorization": f"Bearer {who}"}, json=body
+            method,
+            path,
+            headers={"Authorization": f"Bearer {who}"},
+            # Never both: httpx refuses a request carrying a JSON body and a
+            # multipart one, and a route takes one or the other.
+            json=body if files is None else None,
+            files=files,
         )
     return response.status_code
 
@@ -335,8 +390,9 @@ async def test_the_role_matrix_matches_its_snapshot(matrix_app: Matrix) -> None:
                 conversation_id=matrix_app.conversations[role],
                 run_id=matrix_app.runs[role],
                 execution_id=matrix_app.executions[role],
+                document_id=matrix_app.documents[role],
             ) + QUERIES.get(template, "")
-            status = await _probe(matrix_app.app, method, path, role, body)
+            status = await _probe(matrix_app.app, method, path, role, body, UPLOADS.get(template))
             observed[key][role] = "allow" if status < 400 else f"deny({status})"
 
     rendered = json.dumps(observed, indent=2, sort_keys=True) + "\n"
@@ -383,6 +439,34 @@ async def test_the_snapshot_says_what_the_architecture_says(matrix_app: Matrix) 
             "contributor": "allow",
             "reader": "allow",
         }
+    # Reading the organization's documents is member work, like browsing a
+    # catalog: the text is guidance the agent already follows, and hiding it
+    # from a Reader would mean a Reader cannot check why an answer said what it
+    # said.
+    for readable_document_route in (
+        "GET /v1/orgs/{org_id}/documents",
+        "GET /v1/orgs/{org_id}/documents/search",
+        "GET /v1/orgs/{org_id}/documents/supported-types",
+    ):
+        assert recorded[readable_document_route] == {
+            "admin": "allow",
+            "contributor": "allow",
+            "reader": "allow",
+        }
+    # **Writing one is Contributor-or-Admin** (architecture 10.2 marks the route
+    # `[contributor+]`). A document is not data a Reader supplies — it is
+    # guidance every future run in the organization will be told to follow, so
+    # uploading one is closer to editing the agent than to asking it a question.
+    # The Reader's denial must be a **403**: a 404 would mean the route was
+    # reached and the object was missing, which is a different claim entirely.
+    for contributor_only in (
+        "POST /v1/orgs/{org_id}/documents",
+        "POST /v1/orgs/{org_id}/documents/{document_id}/reindex",
+        "DELETE /v1/orgs/{org_id}/documents/{document_id}",
+    ):
+        assert recorded[contributor_only]["admin"] == "allow"
+        assert recorded[contributor_only]["contributor"] == "allow"
+        assert recorded[contributor_only]["reader"] == "deny(403)"
     for admin_only in (
         "PATCH /v1/orgs/{org_id}/members/{user_id}",
         "DELETE /v1/orgs/{org_id}/members/{user_id}",

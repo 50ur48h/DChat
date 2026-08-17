@@ -34,6 +34,11 @@ dependencies = [
     # an AGPL dependency would quietly decide it. pypdf is BSD-3-Clause,
     # verified from the installed package metadata rather than from memory.
     "pypdf>=5.1",
+    # FastAPI needs it to parse a multipart upload, and the documents route is
+    # the first in this codebase to take a file (WP10.1b). Declared rather than
+    # relied on transitively: without it the route raises at import time with a
+    # message about "python-multipart" that says nothing about which route.
+    "python-multipart>=0.0.20",
 ]
 
 [dependency-groups]

@@ -73,11 +73,22 @@ interface RequestOptions {
   signal?: AbortSignal | null | undefined;
 }
 
+/**
+ * A multipart body is passed through untouched, and its Content-Type is left
+ * unset on purpose: the browser has to write the header itself because only it
+ * knows the boundary string it generated. Setting `multipart/form-data` by hand
+ * produces a request the server cannot parse, and the error it gives back is
+ * about a missing part rather than about a missing boundary.
+ */
+function isMultipart(body: unknown): body is FormData {
+  return typeof FormData !== "undefined" && body instanceof FormData;
+}
+
 async function request(path: string, options: RequestOptions = {}): Promise<unknown> {
   const { method = "GET", body, token, signal = null } = options;
 
   const headers: Record<string, string> = { Accept: "application/json" };
-  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (body !== undefined && !isMultipart(body)) headers["Content-Type"] = "application/json";
   if (token) headers.Authorization = `Bearer ${token}`;
 
   let response: Response;
@@ -86,7 +97,7 @@ async function request(path: string, options: RequestOptions = {}): Promise<unkn
       method,
       headers,
       signal,
-      body: body === undefined ? null : JSON.stringify(body),
+      body: body === undefined ? null : isMultipart(body) ? body : JSON.stringify(body),
     });
   } catch (cause) {
     throw new ApiError(`Could not reach the API at ${apiBaseUrl()}`, 0, { cause });

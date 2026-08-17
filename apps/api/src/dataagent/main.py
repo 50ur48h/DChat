@@ -19,6 +19,7 @@ from dataagent.catalog import routes as catalog_routes
 from dataagent.config import Settings, get_settings
 from dataagent.datasources import routes as datasource_routes
 from dataagent.invitations import routes as invitation_routes
+from dataagent.knowledge import routes as knowledge_routes
 from dataagent.orgs import routes as orgs_routes
 from dataagent.runs import routes as runs_routes
 
@@ -95,6 +96,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(invitation_routes.router)
     app.include_router(datasource_routes.router)
     app.include_router(catalog_routes.router)
+    app.include_router(knowledge_routes.router)
     app.include_router(runs_routes.router)
 
     if resolved.auth_mode == "dev":
