@@ -62,14 +62,14 @@ __all__ = [
 #: ``planner/sql_author/critic/composer/cheap``; the architecture is the binding
 #: document and its names survive into Phase 8, where each is literally a state
 #: of the loop (DECISIONS D-018).
-Role = Literal["intake", "observe", "plan", "sql", "critic", "compose"]
+Role = Literal["intake", "observe", "plan", "sql", "critic", "compose", "embed"]
 
 #: How much model a job is worth. Not model names: a tier outlives the model that
 #: currently fills it, and every provider spells its own catalogue differently.
-Tier = Literal["small", "mid", "strong"]
+Tier = Literal["small", "mid", "strong", "embed"]
 
-ROLES: tuple[Role, ...] = ("intake", "observe", "plan", "sql", "critic", "compose")
-TIERS: tuple[Tier, ...] = ("small", "mid", "strong")
+ROLES: tuple[Role, ...] = ("intake", "observe", "plan", "sql", "critic", "compose", "embed")
+TIERS: tuple[Tier, ...] = ("small", "mid", "strong", "embed")
 
 #: Architecture 4.9's table, verbatim. Configuration overrides it per deployment
 #: (``LLM_ROLE_MAP``) and eventually per organization; this is the default that
@@ -81,6 +81,15 @@ DEFAULT_ROLE_TIERS: dict[Role, Tier] = {
     "sql": "strong",
     "critic": "small",
     "compose": "mid",
+    # The one entry that is not on 4.9's ladder, and says so by mapping to a
+    # tier of its own (WP10.1a, revision 0017). Embeddings have no small/mid/
+    # strong choice to make — there is one model, named by `EMBEDDINGS_MODEL` —
+    # so filing them under `small` would put their tokens in the same bucket as
+    # intake calls and make any spend-by-tier query wrong. It is here rather
+    # than exempted from the mapping because
+    # `test_every_role_resolves_to_the_tier_the_architecture_assigns` is a real
+    # invariant: a role with no tier is a call nobody can price.
+    "embed": "embed",
 }
 
 
