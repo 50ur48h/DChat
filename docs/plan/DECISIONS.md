@@ -4,6 +4,38 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-030 — PDF text comes from pypdf, not pymupdf: the license decides it
+Date: 2026-08-17 · Phase: 10 · PR: WP10.1a
+Context: architecture 5.5 names the extraction stack as *"pymupdf, python-docx,
+plain md/txt"*, and WP10.1 ships md/txt/pdf-text for V1. PyMuPDF is dual-licensed
+**AGPL-3.0 or commercial**. This repository is **public** and its own license is
+still undecided (**B-001**, open since 2026-08-10, "all rights reserved by
+default until it is chosen"). Adding an AGPL dependency to a public repository
+with no license of its own does not merely add a dependency: it constrains what
+B-001 may later decide, and it does so silently, in a `pyproject.toml` line
+nobody would think to re-read when the license question is finally taken up.
+Options: (a) pymupdf as the architecture says, and note the licence implication;
+(b) pypdf, a pure-Python BSD-3-Clause reader; (c) no PDF in V1, deferring it.
+Decision: **(b) pypdf**, verified as `License-Expression = BSD-3-Clause` from the
+installed package's own metadata rather than from memory or a web page — the same
+habit B-027 applies to model ids, for the same reason: what a thing *is* has to
+be checked, not recalled. Architecture 5.5 is edited in this PR to name pypdf and
+to say why.
+Why not the others: **(a)** makes a licensing decision as a side effect of a
+feature, which is exactly the kind of choice B-001 exists to have made
+deliberately; the owner may still choose a licence that is AGPL-compatible, and
+this decision does not prevent that — it only refuses to prejudge it. **(c)**
+would narrow the WP's stated scope, and PDF is the format an operations policy
+actually arrives in.
+Consequences: pypdf is slower and extracts a plainer text layer than pymupdf —
+no layout reconstruction, no table structure. For **chunked retrieval** that
+costs little, because chunking discards layout anyway and what matters is
+sentences in reading order. What it does not do is OCR, so a **scanned** PDF
+yields nothing; `extract.py` treats a near-empty extraction as a **failure with a
+reason naming OCR** rather than as a successful upload of nothing, which is the
+failure mode that would otherwise look identical to success. If layout fidelity
+or OCR is ever needed, revisit this with the licence question settled first.
+
 ## D-029 — A conversation is a conversation: the thread renders at L5, as reference material
 Date: 2026-08-17 · Phase: 9→10 · PR: B-064 · Owner's direction on the first question
 Context: **B-064 (P1)**, found by the owner in the Phase 9 gate demo — a question

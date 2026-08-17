@@ -24,11 +24,13 @@ Current position: **Phases 0–5 and 7–9 signed off. Phase 6 merged, its gate
                   a green suite. See "Second data source" below. Two of them
                   are already closed: **WP8.4** (#55) fixed the capability check
                   the hub table defeated, and **B-056** with it.
-Next step:        **Finish WP10.1a** on `p10.1-knowledge` — its entry under
-                  Phase 10 lists exactly what is left: embeddings, ingest,
-                  retrieve, and the org-isolation retrieval test. Then
-                  **WP10.1b** — the retrieval tool with L4 framing, the routes
-                  and the documents page, carrying **B-018** — and after it
+Next step:        **WP10.1b** on a branch of its own — the `knowledge.search`
+                  tool with **L4 framing**, the documents routes and page, the
+                  injection-framing test, and **B-018** (embedding the table
+                  cards and reranking `search_cards`, which is what golden eval
+                  #14 is waiting for). WP10.1a is done and in review (#64):
+                  documents can be uploaded, chunked, embedded and retrieved,
+                  tenant-isolated, with the spend on the ledger. After it
                   **WP10.2**, which owes **B-059** *and* **B-070**: a semantic
                   layer must be able to *import* definitions a database already
                   carries, and must settle which of two defensible denominators a
@@ -1361,59 +1363,72 @@ unexplained.
       printed, which confirms the fallbacks are dead code in CI. Live on the
       affected cases: **#4, #8, #12, #16 pass**, #17 and #19 accepted as honest
       refusals, 6/7 — the seventh is B-070. 49,157 tokens. Raised **B-070**
-- [~] WP10.1a Knowledge schema + chunking — `p10.1-knowledge` **(in progress)**
-      — **WP10.1 split in two** (plan §1.1), by what could go wrong: this half is
-      the **store and the text**, WP10.1b is the **agent and the API**. The split
-      is not a schema with no consumer — WP7.1's objection — because the library
-      is the schema's consumer and its tests exercise it end to end.
-      **Done and verified.** The **USER INPUT is in hand and checked**: the
-      owner's existing OpenAI key does the embedding (D-017 — one key, one bill,
-      one place to rotate), and `text-embedding-3-small` was verified against the
-      **live account** before being written into configuration rather than read
-      off a documentation page (standing note 4, B-027's habit). Its width was
-      measured too — one 5-token call — and it is **1536**, which is what
-      revision 0016 fixes for `knowledge_chunks.embedding`. A model of a
-      different width would have had every insert refused by a constraint nobody
-      was thinking about; `EMBEDDINGS_DIMENSIONS` exists so that mismatch is a
-      startup error naming both numbers.
+- [x] WP10.1a Knowledge: schema, chunking, embeddings, ingest, retrieval
+      — **WP10.1 split in two** (plan §1.1) by what could go wrong: this half is
+      the **store and the text**, WP10.1b is the **agent and the API**. Not a
+      schema with no consumer — WP7.1's objection — because the library is the
+      schema's consumer and its tests take a document from bytes to a retrieved
+      passage.
+      **The USER INPUT was checked, not assumed.** The owner's existing OpenAI
+      key embeds (D-017 — one key, one bill, one place to rotate), and
+      `text-embedding-3-small` was verified against the **live account** before
+      being written into configuration rather than read off a page (standing note
+      4, B-027's habit). Its **width was measured** with one 5-token call:
+      **1536**, which is what revision 0016 fixes. A model of a different width
+      would have had every insert refused by a constraint nobody was thinking
+      about; `EMBEDDINGS_DIMENSIONS` makes that a startup error naming both
+      numbers.
       **Revision 0016** adds `knowledge_documents` and `knowledge_chunks` — the
       first new tenant tables in three phases, so the rule that has now bitten
-      six times applies: an RLS policy each, two lines in `TENANT_TABLES`, and
-      the rls_proof suite extended to seed **and forge** rows in both. Confirmed
-      live: RLS enabled *and* forced on both, one policy each, `vector(1536)`,
-      a **generated** `tsv` (revision 0009's reason: a column the database
-      derives cannot disagree with the text it indexes), and a **partial** index
-      over unembedded chunks so the backfill's work list is a query rather than a
-      scan. Migration round-trips to base and back. The proof suite was tampered
-      with — undeclaring one table — and
-      `test_no_tenant_table_can_be_added_without_protecting_it` failed, so the
-      guard is doing its job rather than passing quietly.
-      **`embedding` is nullable and that is a state, not an oversight.** A chunk
-      is lexically searchable the moment its text is written and semantically
-      searchable once a network round trip has succeeded; NOT NULL would force
-      ingest either to block on the provider or to lose the text.
-      **`knowledge/chunking.py`** is heading-aware and pure — the same document
-      chunks the same way on every machine, which is what lets its 15 goldens be
-      goldens. Four decisions each have a test: headings are the primary boundary
-      and length the secondary one; the heading **trail travels beside** the text
-      rather than inside it, so provenance is renderable and every embedding is
-      not inflated with the same words; overlap is a whole **paragraph**, never a
-      character window, because an embedding of half a number is worse than
-      useless; and a short section **stays short**, since merging across a
-      heading would make `headings` a lie. A `#` inside a code fence is not a
-      heading, which matters because a document full of SQL is exactly what an
-      analytics customer uploads. Tampered both ways — ignoring fences, dropping
-      the overlap — and the right two tests failed.
-      Raised **B-071** (no vector index yet, deliberately, and the decision owes
-      a measurement rather than an opinion).
-      **NEXT:** the rest of WP10.1a — `knowledge/embeddings.py` (batched, through
-      the Phase 6 provider config), `ingest.py` (extract, chunk, embed, store;
-      re-index as delete-and-rewrite) and `retrieve.py` (vector + lexical, RRF
-      merge, all under the org session so RLS isolates). Then the org-isolation
-      retrieval test in the rls_proof family — two orgs, one query, zero
-      cross-hits. **WP10.1b** is the `knowledge.search` tool with L4 framing, the
-      routes, the documents page, and the injection-framing test; **B-018**
-      (embedding the table cards and reranking `search_cards`) goes there too.
+      six times applies in full: a policy each, two `TENANT_TABLES` lines, and
+      the rls_proof suite extended to seed **and forge** rows in both. Verified
+      live: RLS enabled *and* forced, `vector(1536)`, a **generated** `tsv`, and
+      a **partial** index over unembedded chunks so the backfill's work list is a
+      query rather than a scan. **Revision 0017** widens two CHECK constraints so
+      `embed` is a legal role *and* a legal tier — its own tier, not `small`,
+      because D-018's ladder does not apply to a single embedding model and
+      filing its tokens beside intake calls would make any spend-by-tier query
+      wrong. `DEFAULT_ROLE_TIERS` gains the entry rather than being exempted from
+      the "every role resolves to a tier" guard, which is a real invariant.
+      **Embedding is metered like every other spend**, because WP6.1's rule is
+      that no path spends tokens without a `usage_ledger` row and a corpus costs
+      more than the chat calls that later answer questions about it. A failing
+      batch is metered *before* it raises, as `llm/service.py` does.
+      **`embedding` is nullable and that is a state, not an oversight**, and
+      ingest is built around it: chunks are written **before** vectors, so text
+      is lexically searchable the moment it lands and an embedding failure leaves
+      a half-searchable document that **says so** rather than one that lost its
+      text to a rate limit. Re-indexing is **delete-and-rewrite**, never append —
+      `seq` is unique per document, and stale chunks would keep answering
+      questions from text the source no longer contains.
+      **`retrieve.py` is hybrid in 5.5's poor-man's sense**, merged by
+      **Reciprocal Rank Fusion on rank rather than score**: a cosine distance and
+      a `ts_rank_cd` are numbers on unrelated scales, and normalising them
+      invents a comparison nobody can defend. `PER_DOCUMENT_CAP` stops one
+      verbose document filling the result. **B-041's lesson is applied here
+      too** — the strict `websearch_to_tsquery` runs first and only a total miss
+      falls back to OR'd words.
+      **DECISIONS D-030: pypdf, not pymupdf**, which architecture 5.5 named.
+      pymupdf is AGPL-or-commercial, this repository is public and its own
+      licence is undecided (**B-001**), so the dependency would have quietly
+      prejudged a decision B-001 exists to have taken deliberately. pypdf is
+      **BSD-3-Clause, read from the installed package's own metadata** rather
+      than recalled. Architecture 5.5 edited to match, including that pypdf does
+      no OCR — so a *scanned* PDF is a **failure naming OCR**, never a successful
+      upload of nothing.
+      **51 knowledge tests.** Tampered four ways, and the fourth is the one worth
+      recording: removing **both** `org_id` predicates from retrieval left every
+      isolation test **passing**, because row-level security held the line on its
+      own — 5.10's two independent layers, demonstrated rather than asserted.
+      Removing the *policy* instead failed 13 of them plus the rls_proof suite,
+      so the tests do catch a real leak. Also tampered: trusting the provider's
+      arrival order (caught), ignoring code fences and dropping chunk overlap
+      (both caught). One real bug found by a test being written: `utf-8` decodes
+      BOM-prefixed bytes happily, so `utf-8-sig` never ran and every such file
+      carried an invisible character into its first chunk and its embedding.
+      Raised **B-071** (no vector index yet, deliberately — the decision owes a
+      measurement) and **B-072** (two object stores that should converge in
+      WP12.2, and the duplicated half is the safety half).
 - [ ] WP10.1b Retrieval tool + routes + documents page (carries **B-018**)
 - [ ] WP10.2 Semantic definitions + verified queries + critic enforcement ← gate
 - [ ] GATE: uploaded policy changes generated SQL; isolation test; sign-off

@@ -42,6 +42,11 @@ under "Unreleased", only for changes a user would notice.
   description, so a real question matched nothing at all.
 
 ### Added
+- An organization's own documents can be uploaded and searched — markdown, plain
+  text, and PDFs that carry a text layer. Passages are found by meaning as well
+  as by wording, so a policy that says "revenue" answers a question that says
+  "takings", and every passage names the document and section it came from. A
+  scanned PDF is reported as needing OCR rather than accepted as an empty upload.
 - A conversation now behaves like one. A follow-up — "check again", "and in
   June?", "why?" — is answered knowing the questions and answers that came
   before it, instead of being read as though it were the first thing said.

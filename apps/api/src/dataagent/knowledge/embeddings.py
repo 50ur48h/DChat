@@ -42,7 +42,7 @@ import time
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 import httpx
 
@@ -93,23 +93,22 @@ class EmbeddingBatch:
     model: str
 
 
-class Embedder:
+class Embedder(Protocol):
     """What ingest needs from a provider. Deliberately one method.
 
-    A protocol rather than a base class, and narrow on purpose: the fake used in
-    tests has to be able to satisfy it completely, or the tests are exercising a
-    different shape from the product (**B-040**'s lesson — a suite that can reach
-    a real provider is a suite that can spend real money).
+    A **structural** protocol rather than a base class, and narrow on purpose:
+    the stub used in tests satisfies it by having the method, not by inheriting
+    from it, so nothing in the test suite can accidentally acquire real
+    behaviour from a shared parent. That is **B-040**'s lesson applied to the
+    one path in `knowledge/` that spends money — a suite that can reach a real
+    provider is a suite that can spend it.
     """
 
     async def embed(self, texts: Sequence[str]) -> EmbeddingBatch:  # pragma: no cover - protocol
-        raise NotImplementedError
-
-    async def aclose(self) -> None:  # pragma: no cover - protocol
-        return None
+        ...
 
 
-class OpenAIEmbedder(Embedder):
+class OpenAIEmbedder:
     """The OpenAI embeddings endpoint, and nothing more.
 
     Thin for the same reason `llm/openai.py` is thin: everything a second

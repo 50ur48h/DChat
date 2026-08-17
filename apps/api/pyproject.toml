@@ -28,6 +28,12 @@ dependencies = [
     # side has to keep in step by hand (WP10.1). The extension itself comes
     # from the `pgvector/pgvector` image the compose stack already runs.
     "pgvector>=0.3.6",
+    # A PDF's text layer (WP10.1a). **pypdf, not pymupdf**, which architecture
+    # 5.5 named — see DECISIONS D-030. pymupdf is AGPL-or-commercial, and this
+    # repository is public with its license still undecided (B-001), so taking
+    # an AGPL dependency would quietly decide it. pypdf is BSD-3-Clause,
+    # verified from the installed package metadata rather than from memory.
+    "pypdf>=5.1",
 ]
 
 [dependency-groups]
