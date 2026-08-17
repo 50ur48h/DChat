@@ -24,24 +24,27 @@ Current position: **Phases 0–5 and 7–9 signed off. Phase 6 merged, its gate
                   a green suite. See "Second data source" below. Two of them
                   are already closed: **WP8.4** (#55) fixed the capability check
                   the hub table defeated, and **B-056** with it.
-Next step:        **B-064 first — it is a P1 and it is not scheduled anywhere.**
-                  A conversation is not a conversation: every question is
-                  answered in isolation, and no message but the current one has
-                  ever reached a prompt. It needs a design decision before code
-                  (which layer, how many turns, whether an answer goes back in).
-                  Then Phase 10 / **WP10.1** (`p10.1-knowledge`) — document
-                  ingest, chunking, embedding, tenant-isolated retrieval —
-                  which also closes **B-018**, and after it **WP10.2**, which
-                  owes **B-059**: a semantic layer must be able to *import*
-                  definitions a database already carries.
+Next step:        **B-064 is done and in review** — a conversation is a
+                  conversation now (**D-029**). Verified live on 2026-08-17:
+                  *"How many orders were placed in July 2026?"* → **3718**, then
+                  *"check again"* → *"The recheck confirms that 3,718 orders were
+                  placed in July 2026"*, then *"and in June?"* → **3,742** — each
+                  running **its own** query and citing it, and the database says
+                  3718 and 3742. Then **B-066** (the harness reads a column name
+                  a real model is free to alias), and then Phase 10 /
+                  **WP10.1** (`p10.1-knowledge`) — document ingest, chunking,
+                  embedding, tenant-isolated retrieval — which also closes
+                  **B-018**, and after it **WP10.2**, which owes **B-059**: a
+                  semantic layer must be able to *import* definitions a database
+                  already carries.
 Merge policy: ASK
-Blocked on user: **A provider key as a GitHub secret**, without which
-                 `nightly-evals.yml` cannot run — the repository has zero secrets
-                 and the workflow's own guard refuses a keyless live run. Putting
-                 a key there is an owner decision. Separately, an Anthropic key
-                 would close **B-029 (P1)** and with it the Phase 6 gate. Neither
-                 blocks Phase 10.
-Last updated: 2026-08-16 by Claude Code (session end — Phase 9 signed off)
+Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
+                 (owner, 2026-08-17), so `nightly-evals.yml` can run — keep its
+                 token cap tight, because the local live run spent **223k
+                 tokens** for twenty questions. An Anthropic key would still
+                 close **B-029 (P1)** and with it the Phase 6 gate; it blocks
+                 nothing in Phase 10.
+Last updated: 2026-08-17 by Claude Code (B-064 — the thread reaches the prompt)
 
 ---
 
@@ -56,28 +59,29 @@ on `main`. Nothing is in flight: no branch, no open PR, no dirty tree.
 quiet. The GATE lines under each phase are the source of truth for where the
 build stands, and Phase 9's carries its live results as well as its CI ones.
 
-### 2. Do not start Phase 10 code until B-064 is decided
+### 2. B-064 is closed — a conversation is a conversation (D-029)
 
-**B-064 (P1)** is the largest thing this session found and it is **not scheduled
-anywhere**. A conversation is not a conversation: `_question_of` reads one string
-from `agent_runs.question`, `ContextBundle` has no field for prior turns, and L5
-renders that single question. **No message but the current one has ever reached
-any prompt.** The owner hit it in the gate demo — asked a question, typed *"check
-again"*, and was told no business question had been given.
+**Done, and its evidence is under Phase 10 below.** All four design questions the
+backlog entry left open are settled in **DECISIONS D-029**, and architecture 4.8
+and 10.1 are edited to match, because this was a specification gap as much as an
+implementation one: the six layers had no slot for a thread.
 
-It is a **specification** gap, not only an implementation one: architecture 4.8's
-six layers have no slot for the thread, and the only "conversation history" in
-the plan is WP11.2's *list* of past conversations, which is navigation. What was
-anticipated is the half D-022 built — 10.1 says a conversation carries its
-`data_source_id` *"because a follow-up must reach the same source as the question
-it follows"*, so follow-ups were foreseen and only their routing was built.
+The short form: the last **three** turns render at **L5**, inside the question
+turn and above the question, framed as records rather than instructions; they are
+a **truncation candidate dropped before any table card**; the earlier *answer*
+goes in and the frame says its numbers are not results this run obtained; and a
+follow-up **re-queries** rather than citing the previous run, which the live run
+shows it doing.
 
-Four questions to settle before writing code, all in the backlog entry: which
-layer it renders at (**L5**, with the question — it is user-supplied text and
-must not sit above the platform rules); how many turns, since 4.4 already refuses
-to let a prompt grow with an investigation; whether an *answer* goes back in or
-only the question; and whether a follow-up may cite the previous run's
-executions or must re-query.
+Two things worth carrying forward. **B-041 arrived again by a new road** —
+*"check again"* names no table, so the card search returned nothing and the
+planner was about to be handed an empty catalog; the fix keeps the strict search
+and falls back to the thread only when it matched nothing, and the trace says
+which happened. And **the thread now goes to every prompt that carries the
+question** — planner, reflection, critic, composer — through one function. The
+critic is in that list because a model asked whether a draft answers *"check
+again"*, with no idea what was being checked, will **falsely block a correct
+answer**, which is standing note 5's whole subject.
 
 ### 3. The live evals are 12/20 and that number is not a failure to hide
 
@@ -98,13 +102,18 @@ number:
 So the pipeline holds and the harness is not yet fit to judge a model. Fix B-066
 before reading any nightly result as a product signal.
 
-### 4. `nightly-evals.yml` has never run, and cannot yet
+### 4. `nightly-evals.yml` can now run — the key is a repository secret
 
-The repository has **zero secrets and zero variables**. The workflow's first step
-refuses a keyless live run on purpose — a live eval without a provider is a green
-tick that proves nothing. Putting a provider key into GitHub is an **owner
-decision** and was deliberately not taken on their behalf. Until then, the live
-evidence is the local run recorded against the Phase 9 GATE line.
+The owner added `OPENAI_API_KEY` to the repository on **2026-08-17**, so the
+workflow's first step no longer refuses. It has still **never executed**, and the
+first thing to do with it is not to trust the number: **fix B-066 first.** Five
+of the eight live failures are that one harness defect, so a nightly result read
+today would say more about the harness than about the model.
+
+Keep the token cap tight. The local run spent **223,685 tokens** for twenty
+questions and the two multi-step ones were half of it, so `EVALS_TOKEN_BUDGET` is
+the control that matters — it is checked **before** each question, which is what
+makes it a ceiling rather than a report.
 
 ### 5. A false block is the critic's characteristic failure
 
@@ -145,13 +154,17 @@ the rule.
 
 ### 8. What is open, and what it means
 
-**P1** — **B-064**: above, and it gates nothing formally but will embarrass any
-demo. **B-059**: the customer's own semantic layer is invisible; WP10.2 owes an
+**P1** — **B-059**: the customer's own semantic layer is invisible; WP10.2 owes an
 *import* path, not only an authoring UI. **B-060**: the same question twice chose
 two tables and answered RM 642,930 and RM 4,707. **B-029**: a second real
 provider, the only thing that closes the Phase 6 gate.
 
-**P2** — **B-066** (the live harness, above), **B-065** (a refusal should name
+**P2** — **B-066** (the live harness, above, and the thing to fix before any
+nightly result is read as a product signal), **B-069** (`make agent.smoke` on the
+host cannot resolve a compose service name, so the gate question fails as a
+`gaierror` dressed up as "the query failed" — found running B-064's own
+evidence), **B-067** (a follow-up sees the previous answer's prose, never the SQL
+behind it), **B-065** (a refusal should name
 the database it looked in — the owner asked the F&B source an orders question and
 the refusal read as a broken product), **B-057**'s siblings **B-058** (an
 undeclared but working join is refused) and **B-054** (the profiler samples the
@@ -1245,6 +1258,55 @@ unexplained.
       against numbers that live in exactly one place.
 
 ## Phase 10 — Knowledge + semantic layer (M10)
+- [x] **B-064 (P1)** A conversation is a conversation: the thread reaches the
+      prompt
+      — taken before any Phase 10 code, at the owner's direction, because it was
+      the largest thing the Phase 9 gate demo found and it was scheduled nowhere.
+      Nothing was broken: `_question_of` read one string off `agent_runs.question`,
+      `ContextBundle` had no field for a prior turn, and L5 rendered that one
+      question — so *"check again"* was answered with "no business question has
+      been given". **No message but the current one had ever reached any prompt.**
+      **DECISIONS D-029** settles the four questions the backlog entry left open,
+      and the architecture is edited in the same PR because 4.8's six layers had
+      no slot for a thread. **L5**, inside the question turn and above the
+      question, framed as records rather than instructions exactly as a retrieved
+      chunk is (owner's direction) — anywhere higher and 4.8's precedence, soft
+      everywhere else by design, would have one place where it was simply absent.
+      **Three turns**, clipped, and a *truncation candidate*: dropped oldest-first
+      **before any table card is dropped**, because a follow-up read without its
+      thread is a question misunderstood while a question with no cards cannot be
+      answered at all. The **answer goes back in**, since *"why?"* is meaningless
+      without it — and the frame saying "a number in an earlier answer is not a
+      result you obtained" is only the cheap half, the expensive half being
+      `_verified_citations`, which already drops any citation this run did not
+      produce. So a follow-up **re-queries**, which the live run shows it doing.
+      **One function renders the thread for all four prompts that carry the
+      question** — the layered one, the loop's reflection, the critic's rubric and
+      the composer — because a thread worded four ways is four chances for one of
+      them to read as an instruction. The critic is in that list for a specific
+      reason: asked whether a draft answers *"check again"* with no idea what was
+      being checked, a model says it does not, and a **false block on a correct
+      answer** is this component's characteristic failure (standing note 5).
+      **B-041 arrived again by a new road and was fixed in the same PR.**
+      *"check again"* names no table, so the card search returned **nothing** and
+      the planner was about to be handed an empty catalog — the exact defect that
+      cost the M7 gate. The fix takes B-041's own shape: the strict search on the
+      question keeps every promise it makes, and only when it matches nothing at
+      all is the thread searched instead. `context_selected` records which
+      happened (`tables_found_via`), because "which words chose these tables" is
+      precisely the silent choice **B-060** was filed for.
+      No migration — every row this needs has existed since revision 0012 — and
+      **a first question's prompt is byte-for-byte what it was**, which is what
+      made it safe to ship under twenty golden evals, none of which is a
+      follow-up. 26 new tests. Raised **B-067**, **B-068**, **B-069**.
+      **Verified live** against the pizza database on 2026-08-17, three turns in
+      one thread: *"How many orders were placed in July 2026?"* → **3718**
+      (`history_turns 0`, tables found via the question); *"check again"* → *"The
+      recheck confirms that 3,718 orders were placed in July 2026."*
+      (`history_turns 1`, tables via the **thread**, and **a new execution of its
+      own** rather than the previous run's); *"and in June?"* → **3,742**
+      (`history_turns 2`). `SELECT count(*)` against the seed database returns
+      **3718** and **3742**
 - [ ] WP10.1 Docs ingest/chunk/embed/retrieve under RLS + APIs
 - [ ] WP10.2 Semantic definitions + verified queries + critic enforcement ← gate
 - [ ] GATE: uploaded policy changes generated SQL; isolation test; sign-off

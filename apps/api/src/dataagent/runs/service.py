@@ -50,7 +50,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import cast
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -72,8 +72,10 @@ __all__ = [
     "InvalidTransitionError",
     "MessageView",
     "NotFoundError",
+    "PriorTurn",
     "RunView",
     "add_finding",
+    "conversation_history",
     "create_conversation",
     "get_conversation",
     "get_execution",
@@ -169,6 +171,26 @@ class MessageView:
     content: str
     run_id: uuid.UUID | None
     created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class PriorTurn:
+    """An earlier question in this thread, and what it was answered with.
+
+    Deliberately not ``agent.context.HistoryTurn``, which is the same two fields
+    wearing a different hat: that one carries the prompt's framing and its
+    clipping rules, and this one is a row read out of the database. Keeping them
+    apart is what stops a change to how a thread *reads* from becoming a change
+    to what a thread *is* — and it keeps the import direction one-way, since
+    `agent` imports `runs` and never the reverse.
+
+    ``answer`` is None for a run that has not produced one: still going, failed,
+    or interrupted by a restart.
+    """
+
+    run_id: uuid.UUID
+    question: str
+    answer: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -647,6 +669,87 @@ async def get_run(
 ) -> RunView:
     async with org_session(org_id) as session:
         return await _run_view(session, await _owned_run(session, run_id=run_id, user_id=user_id))
+
+
+async def conversation_history(
+    *, org_id: uuid.UUID, run_id: uuid.UUID, turns: int
+) -> list[PriorTurn]:
+    """The turns this run follows, oldest first, capped at ``turns``.
+
+    Written for the agent (**D-029**, B-064), which until this existed answered
+    every question as though it were the first one in the thread.
+
+    Four properties, each of which has a test:
+
+    **Only what came before.** A conversation can hold a run created *after* this
+    one — somebody asks a second question while the first is still running — and
+    that run is not history, it is the future. The comparison is on
+    ``(created_at, id)`` as a pair, so two runs created in the same microsecond
+    still have an order rather than a coin toss.
+
+    **Never this run's own question.** ``post_message`` writes the message and
+    the run together, so by the time the runner reads the thread the current
+    question is already in ``messages``. Rendering it as history would show the
+    model its own question twice, once framed as something already said.
+
+    **Newest first in the query, oldest first in the result.** The index on
+    ``(org_id, conversation_id, created_at DESC)`` makes "the last three" cheap;
+    the prompt wants them in the order they happened.
+
+    **Scoped by the run, not by a caller.** ``user_id=None`` for the same reason
+    ``transition`` uses it — the agent is not a member of anything, and RLS is
+    what scopes it to the organization. A thread is read only through a run that
+    is already being executed inside it.
+    """
+    if turns <= 0:
+        return []
+
+    async with org_session(org_id) as session:
+        run = await _owned_run(session, run_id=run_id, user_id=None)
+        earlier = (
+            (
+                await session.execute(
+                    select(AgentRun)
+                    .where(
+                        AgentRun.conversation_id == run.conversation_id,
+                        or_(
+                            AgentRun.created_at < run.created_at,
+                            and_(
+                                AgentRun.created_at == run.created_at,
+                                AgentRun.id < run.id,
+                            ),
+                        ),
+                    )
+                    .order_by(AgentRun.created_at.desc(), AgentRun.id.desc())
+                    .limit(turns)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not earlier:
+            return []
+
+        # Ascending, so a run that composed twice — the critic's one re-entry —
+        # leaves the answer a person was actually shown as the surviving value.
+        replies = (
+            await session.execute(
+                select(Message.run_id, Message.content)
+                .where(
+                    Message.run_id.in_([row.id for row in earlier]),
+                    Message.role == ROLE_ASSISTANT,
+                )
+                .order_by(Message.created_at, Message.id)
+            )
+        ).all()
+        answers: dict[uuid.UUID, str] = {}
+        for reply_run_id, content in replies:
+            if reply_run_id is not None:
+                answers[reply_run_id] = content
+        return [
+            PriorTurn(run_id=row.id, question=row.question, answer=answers.get(row.id))
+            for row in reversed(earlier)
+        ]
 
 
 async def transition(

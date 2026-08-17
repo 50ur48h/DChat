@@ -42,6 +42,12 @@ under "Unreleased", only for changes a user would notice.
   description, so a real question matched nothing at all.
 
 ### Added
+- A conversation now behaves like one. A follow-up — "check again", "and in
+  June?", "why?" — is answered knowing the questions and answers that came
+  before it, instead of being read as though it were the first thing said.
+  Recent turns are shown to the agent as a record of what was said, never as
+  instructions, and a follow-up runs its own query rather than repeating a
+  number it has only been told.
 - Every answer can show its working: a live timeline of what the agent did —
   which tables it read, what it asked the database, what it concluded, and where
   it stopped — appearing as it happens and still there afterwards. Refreshing the

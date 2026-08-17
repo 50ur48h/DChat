@@ -7,6 +7,14 @@ claim this script exists for, and only a real call can make it.
 
     make agent.smoke ARGS="--source 'Pizza demo'"
     make agent.smoke ARGS="--source 'Pizza demo' --question 'How many stores?'"
+    make agent.smoke ARGS="--source 'Pizza demo' --then 'check again' --then 'and in June?'"
+
+``--then`` asks a follow-up **in the same conversation**, which is the only way
+to exercise D-029 against a real model: *"check again"* is meaningless unless the
+run is given the turn it follows, and until B-064 was fixed it was answered with
+"no business question has been given". The trace line for `context_selected`
+prints `history_turns`, so a follow-up that answered blind is visible rather than
+inferred from the prose.
 
 It asks the M7 gate question by default — *"How many orders were placed in July
 2026?"* — because that is the one the phase is judged on, and because `orders` is
@@ -74,31 +82,25 @@ async def _first_user(org_id: uuid.UUID) -> uuid.UUID:
     return uuid.UUID(str(found))
 
 
-async def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--org", required=True, help="Organization id to ask within")
-    parser.add_argument("--source", default=None, help="Data source name (required if >1)")
-    parser.add_argument("--question", default=DEFAULT_QUESTION)
-    args = parser.parse_args()
-
-    org_id = uuid.UUID(args.org)
-    data_source_id = await _resolve_source(org_id, args.source)
-    user_id = await _first_user(org_id)
-
-    conversation = await runs.create_conversation(
-        org_id=org_id, user_id=user_id, title="Agent smoke"
-    )
+async def _ask(
+    *,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    data_source_id: uuid.UUID,
+    question: str,
+) -> int:
+    """One question in an existing thread, run to its ending and printed."""
     asked = await runs.post_message(
         org_id=org_id,
         user_id=user_id,
-        conversation_id=conversation.id,
-        content=args.question,
+        conversation_id=conversation_id,
+        content=question,
         idempotency_key=uuid.uuid4().hex,
     )
 
-    print(f"  org       {org_id}")
     print(f"  run       {asked.run_id}")
-    print(f"  question  {args.question}\n")
+    print(f"  question  {question}\n")
 
     outcome = await execute_run(
         org_id=org_id,
@@ -118,10 +120,19 @@ async def main() -> int:
     print(f"\n  {outcome.answer}\n")
 
     # The trace, because "it answered" and "it can show its working" are
-    # different claims and the gate wants both.
+    # different claims and the gate wants both. `context_selected` carries how
+    # much of the thread this run was given (D-029), which is the whole point of
+    # a `--then`: a follow-up showing `history_turns 0` answered blind.
     print("  trace:")
     for event in await read_events(org_id=org_id, run_id=asked.run_id):
-        print(f"    {event.seq:>2}  {event.type}")
+        extra = ""
+        if event.type == "context_selected":
+            extra = (
+                f"  history_turns {event.payload.get('history_turns')}"
+                f"  tables via {event.payload.get('tables_found_via')}"
+                f"  {event.payload.get('tables')}"
+            )
+        print(f"    {event.seq:>2}  {event.type}{extra}")
 
     view = await runs.get_run(org_id=org_id, run_id=asked.run_id)
     for finding in view.findings:
@@ -145,6 +156,55 @@ async def main() -> int:
             print(f"    sql     {row.sql}")
 
     return 0 if outcome.status == "completed" else 1
+
+
+async def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--org", required=True, help="Organization id to ask within")
+    parser.add_argument("--source", default=None, help="Data source name (required if >1)")
+    parser.add_argument("--question", default=DEFAULT_QUESTION)
+    parser.add_argument(
+        "--then",
+        action="append",
+        default=[],
+        metavar="QUESTION",
+        help=(
+            "A follow-up asked in the same conversation, repeatable. This is what "
+            "proves D-029: 'check again' is meaningless unless the run is given "
+            "the turn it follows."
+        ),
+    )
+    args = parser.parse_args()
+
+    org_id = uuid.UUID(args.org)
+    data_source_id = await _resolve_source(org_id, args.source)
+    user_id = await _first_user(org_id)
+
+    conversation = await runs.create_conversation(
+        org_id=org_id, user_id=user_id, title="Agent smoke"
+    )
+    print(f"  org       {org_id}")
+    print(f"  thread    {conversation.id}\n")
+
+    # Sequential and never concurrent: a follow-up whose predecessor has not
+    # finished has nothing to follow, which is a different test.
+    code = await _ask(
+        org_id=org_id,
+        user_id=user_id,
+        conversation_id=conversation.id,
+        data_source_id=data_source_id,
+        question=args.question,
+    )
+    for follow_up in args.then:
+        print("\n  ---\n")
+        code |= await _ask(
+            org_id=org_id,
+            user_id=user_id,
+            conversation_id=conversation.id,
+            data_source_id=data_source_id,
+            question=follow_up,
+        )
+    return code
 
 
 if __name__ == "__main__":
