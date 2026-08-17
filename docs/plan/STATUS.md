@@ -24,19 +24,21 @@ Current position: **Phases 0–5 and 7–9 signed off. Phase 6 merged, its gate
                   a green suite. See "Second data source" below. Two of them
                   are already closed: **WP8.4** (#55) fixed the capability check
                   the hub table defeated, and **B-056** with it.
-Next step:        **B-064 is done and in review** — a conversation is a
-                  conversation now (**D-029**). Verified live on 2026-08-17:
+Next step:        **B-064 and B-066 are both done.** A conversation is a
+                  conversation now (**D-029**), verified live on 2026-08-17:
                   *"How many orders were placed in July 2026?"* → **3718**, then
                   *"check again"* → *"The recheck confirms that 3,718 orders were
                   placed in July 2026"*, then *"and in June?"* → **3,742** — each
                   running **its own** query and citing it, and the database says
-                  3718 and 3742. Then **B-066** (the harness reads a column name
-                  a real model is free to alias), and then Phase 10 /
-                  **WP10.1** (`p10.1-knowledge`) — document ingest, chunking,
-                  embedding, tenant-isolated retrieval — which also closes
-                  **B-018**, and after it **WP10.2**, which owes **B-059**: a
+                  3718 and 3742. And the **eval harness can judge a model** now
+                  rather than only a script, so a nightly result may be read as a
+                  product signal. Then Phase 10 / **WP10.1**
+                  (`p10.1-knowledge`) — document ingest, chunking, embedding,
+                  tenant-isolated retrieval — which also closes **B-018**, and
+                  after it **WP10.2**, which owes **B-059** *and* **B-070**: a
                   semantic layer must be able to *import* definitions a database
-                  already carries.
+                  already carries, and must settle which of two defensible
+                  denominators a metric means.
 Merge policy: ASK
 Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  (owner, 2026-08-17), so `nightly-evals.yml` can run — keep its
@@ -44,7 +46,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-17 by Claude Code (B-064 — the thread reaches the prompt)
+Last updated: 2026-08-17 by Claude Code (B-066 — the harness can judge a model)
 
 ---
 
@@ -83,32 +85,51 @@ critic is in that list because a model asked whether a draft answers *"check
 again"*, with no idea what was being checked, will **falsely block a correct
 answer**, which is standing note 5's whole subject.
 
-### 3. The live evals are 12/20 and that number is not a failure to hide
+### 3. The live evals were 12/20; B-066 is fixed and the taxonomy was wrong
 
-`make evals` is 20/20 in CI and on any developer machine. The **live** run —
-real models, 223,685 tokens — is 12/20, and the taxonomy matters more than the
-number:
+`make evals` is 20/20 in CI and on any developer machine, and stays 20/20. The
+**live** run — real models, 223,685 tokens — was 12/20, and the taxonomy always
+mattered more than the number. **B-066 is now closed**, and re-running the
+affected cases live corrected two lines of that taxonomy:
 
-* **Five** are one harness defect (**B-066**): `expect.value_of` names the column
-  the *scripted* SQL used, and a real model aliases its output as it likes. The
-  check is sound in FakeLLM mode and wrong in the only mode that spends money.
-* **Two** are the harness expecting the wrong thing. **#19** refused because the
-  data ends 2026-07-31 — that is D-027's last clause working exactly as written —
-  and **#17** refused *"how are we doing?"* as too vague, which is defensible.
-* **One** is real and already has an id: **#14** was never shown the `orders`
-  card, because search is lexical and nothing embeds (**B-018**, which WP10.1
-  closes).
+* **Five were one harness defect** (**B-066**): `expect.value_of` named the
+  column the *scripted* SQL used, and a real model aliases its output as it
+  likes. Fixed: `match_value` tries the named column, then a 1x1 result, then a
+  cell of a single row — and a fallback runs **only when the named column is
+  absent**, so nothing can rescue a wrong number sitting in the right column.
+* **#4 was never an aliasing failure.** The model answered *"Northgate"* rather
+  than `3`, which is the **better** answer — an internal key reaching a reader is
+  itself a defect (B-061, B-020). `truth_any` now lets one fact have two right
+  spellings.
+* **#10 is not a harness problem at all** — it is **B-070**. *"What proportion of
+  customers ordered more than once?"* has two defensible denominators (7861/7985
+  or 7861/8000), the model picked the other one, and nothing in the system says
+  which is authoritative. That is the semantic layer's job and it gives **WP10.2
+  a before-and-after on the pizza fixture**, not only on the customer's (B-059).
+* **Two were the harness expecting the wrong thing**, and now say so with
+  `may_refuse`: **#19** refused because the data ends 2026-07-31 — D-027's last
+  clause working exactly as written — and **#17** refused *"how are we doing?"*
+  as too vague. A refusal must still say **why**; silence is not honesty.
+* **#14 is real and already has an id**: it was never shown the `orders` card,
+  because search is lexical and nothing embeds (**B-018**, which WP10.1 closes).
 
-So the pipeline holds and the harness is not yet fit to judge a model. Fix B-066
-before reading any nightly result as a product signal.
+**The harness now has its own tests** — 21 of them, no database, no model, no
+dollar. Its absence is why B-066 existed: the harness had only ever been
+exercised by running it, in the one mode where the defect could not appear.
 
 ### 4. `nightly-evals.yml` can now run — the key is a repository secret
 
 The owner added `OPENAI_API_KEY` to the repository on **2026-08-17**, so the
 workflow's first step no longer refuses. It has still **never executed**, and the
-first thing to do with it is not to trust the number: **fix B-066 first.** Five
-of the eight live failures are that one harness defect, so a nightly result read
-today would say more about the harness than about the model.
+prerequisite for reading its number is now met: **B-066 is fixed**, so a nightly
+result is about the model rather than about the harness. Before that it would
+have said more about the harness than the product — five of the eight live
+failures were that one defect.
+
+Two of the twenty are still expected to fail live, and both are known and filed:
+**#10** is **B-070** (a metric with two defensible denominators) and **#14** is
+**B-018** (card search is lexical, so the `orders` card is never shown). A first
+nightly that reports 18/20 is the suite working, not a regression.
 
 Keep the token cap tight. The local run spent **223,685 tokens** for twenty
 questions and the two multi-step ones were half of it, so `EVALS_TOKEN_BUDGET` is
@@ -159,12 +180,12 @@ the rule.
 two tables and answered RM 642,930 and RM 4,707. **B-029**: a second real
 provider, the only thing that closes the Phase 6 gate.
 
-**P2** — **B-066** (the live harness, above, and the thing to fix before any
-nightly result is read as a product signal), **B-069** (`make agent.smoke` on the
-host cannot resolve a compose service name, so the gate question fails as a
-`gaierror` dressed up as "the query failed" — found running B-064's own
-evidence), **B-067** (a follow-up sees the previous answer's prose, never the SQL
-behind it), **B-065** (a refusal should name
+**P2** — **B-070** (a metric with two defensible denominators, and nothing
+saying which is authoritative — WP10.2's before-and-after on the pizza fixture),
+**B-069** (`make agent.smoke` on the host cannot resolve a compose service name,
+so the gate question fails as a `gaierror` dressed up as "the query failed" —
+found running B-064's own evidence), **B-067** (a follow-up sees the previous
+answer's prose, never the SQL behind it), **B-065** (a refusal should name
 the database it looked in — the owner asked the F&B source an orders question and
 the refusal read as a broken product), **B-057**'s siblings **B-058** (an
 undeclared but working join is refused) and **B-054** (the profiler samples the
@@ -1307,6 +1328,39 @@ unexplained.
       own** rather than the previous run's); *"and in June?"* → **3,742**
       (`history_turns 2`). `SELECT count(*)` against the seed database returns
       **3718** and **3742**
+- [x] **B-066 (P2)** The eval harness can judge a model, not only a script
+      — taken before Phase 10 code because a nightly job now has a key and would
+      otherwise report a number that says more about the harness than about the
+      product. The defect: `expect.value_of` named a result column, which is
+      exactly what the *scripted* SQL emits and not what a real model emits, so
+      `SELECT ... AS cancellation_rate` was read as a missing `cancelled_rate`.
+      **Sound in FakeLLM mode and wrong in the only mode that spends money.**
+      `match_value` now tries three rules — the named column
+      (case-insensitively), the value of a **1x1** result, then any cell of a
+      **single row** of at most four columns — and **the order is the safety
+      property**: a fallback runs only when the named column is *absent*, so a
+      result carrying that column with the wrong number in it still fails and
+      nothing rescues it. That is the way a fix like this quietly turns a
+      required check into decoration, and
+      `test_a_named_column_with_the_wrong_value_is_never_rescued` holds it.
+      `may_refuse` is new, for **#17** and **#19** — two questions with two right
+      answers each, where the live run was punishing the product for behaving
+      well. It is not a free pass: a refusal must still **say why**.
+      **The harness got its own unit tests**, 21 of them, without a database, a
+      model or a dollar. Their absence is the whole reason B-066 existed — the
+      harness had only ever been exercised by running it, in the one mode where
+      its defect could not appear.
+      **Re-running live corrected the taxonomy this entry was written from.**
+      **#4** was never an aliasing failure: the model answered *"Northgate"*, not
+      `3`, which is the **better** answer since an internal key reaching a reader
+      is itself a defect (B-061, B-020) — so `truth_any` now lets one fact have
+      two right spellings, and `top_store_by_name` joins `decline.store_name`,
+      which the generator had carried all along. And **#10** is not a harness
+      problem at all but **B-070**.
+      `make evals` stays **20/20** in FakeLLM mode with no weaker-rule lines
+      printed, which confirms the fallbacks are dead code in CI. Live on the
+      affected cases: **#4, #8, #12, #16 pass**, #17 and #19 accepted as honest
+      refusals, 6/7 — the seventh is B-070. 49,157 tokens. Raised **B-070**
 - [ ] WP10.1 Docs ingest/chunk/embed/retrieve under RLS + APIs
 - [ ] WP10.2 Semantic definitions + verified queries + critic enforcement ← gate
 - [ ] GATE: uploaded policy changes generated SQL; isolation test; sign-off

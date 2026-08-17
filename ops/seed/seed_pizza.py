@@ -529,6 +529,14 @@ def build_truths(
             ],
             "by_month": [by_month[key].render("month", key) for key in sorted(by_month)],
             "top_store_by_revenue": max(by_store, key=lambda key: by_store[key].revenue),
+            # The same store said the other way (**B-066**). Asked *"which store
+            # brought in the most revenue?"*, a real model answers "Northgate",
+            # not "3" — and it is right to: an internal key reaching a reader is
+            # itself a defect (B-061, B-020). An eval that accepted only the id
+            # was asserting the worse of two correct answers. `decline` has
+            # carried both spellings from the start; this is that, for the top
+            # store.
+            "top_store_by_name": store_names[max(by_store, key=lambda key: by_store[key].revenue)],
             "slowest_week_starting": min(
                 by_week, key=lambda week: by_week[week].revenue
             ).isoformat(),

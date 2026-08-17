@@ -21,6 +21,30 @@ it — which is the failure this arrangement exists to prevent.
 last row. That is the entire mechanism by which *"revenue last full month"*
 resolves to July 2026 today and still resolves to July 2026 next year, and it is
 why the seed's `END_DATE` could stay frozen.
+
+**A value is found by name, then by being the only value there is** (**B-066**).
+The first live run scored 12/20, and five of the eight failures were one defect
+in *this file*: the value check looked for a result column called
+`cancelled_rate`, which is precisely what the scripted SQL emits and not what a
+real model emits — `SELECT ... AS cancellation_rate` is a correct answer that the
+harness read as a missing column. A check that is sound only in the mode where it
+is not needed is not a check. `match_value` now falls back, and the order of its
+rules is what keeps CI honest: a fallback runs only when the named column is
+**absent**, so a result carrying that column with the wrong number in it still
+fails and nothing can rescue it.
+
+**Two of the twenty questions have two right answers, and the harness now says
+so.** #19 asks about a month past the end of the data, where *"zero"* is right
+and *"the orders data ends on 2026-07-31"* is better; #17 is *"how are we
+doing?"*, which a run may decline as too vague. Both were scored as failures in
+the live run — the harness punishing the product for behaving well. `may_refuse`
+is the expectation for that, and it is not a free pass: a refusal must still say
+why.
+
+The checking half of this file has its own unit tests, in
+`apps/api/tests/evals/test_value_checks.py`. That is not ceremony. B-066 existed
+because the harness was only ever exercised by running it in the one mode where
+its defect could not show.
 """
 
 from __future__ import annotations
@@ -81,6 +105,21 @@ class Result:
     #: because it is almost always the *reason*: an eval that reports "did not
     #: answer" and stops has hidden the one line that explains why.
     critic: list[str] = field(default_factory=list["str"])
+    #: Which rule matched the expected value (**B-066**). Empty when the case
+    #: checked no value. Reported when it is anything but ``column``, because a
+    #: pass earned by a weaker rule is a weaker claim and a tick that hid the
+    #: difference would overstate the run.
+    matched_by: str = ""
+    #: True when the case allowed a refusal and got one. Not a failure and not
+    #: quite a pass either — the question was answerable-ish and the run
+    #: declined, which is worth seeing in the report rather than reading as a
+    #: clean answer.
+    refused: bool = False
+    #: The run's ending status. Recorded so `may_refuse` can insist on the
+    #: distinction the runner itself makes (WP7.2b): **a refusal is an ending,
+    #: not a failure.** Without it a run that crashed would read as an honest
+    #: decline, which is exactly the conflation `failed` exists to prevent.
+    status: str = ""
 
     def fail(self, why: str) -> None:
         self.passed = False
@@ -309,6 +348,7 @@ async def run_case(
 
     result.answered = outcome.answered
     result.answer = outcome.answer
+    result.status = outcome.status
     result.citations = len(outcome.execution_ids)
     result.iterations = outcome.iterations
     result.limitations = len(outcome.limitations)
@@ -328,11 +368,11 @@ async def run_case(
     result.queries = len(rows)
 
     artifacts = await artifacts_for(org_id, [row.id for row in rows])
-    _check(case, truths, result, rows, artifacts, live=live)
+    check_case(case, truths, result, rows, artifacts, live=live)
     return result
 
 
-def _check(
+def check_case(
     case: dict[str, Any],
     truths: dict[str, Any],
     result: Result,
@@ -344,9 +384,29 @@ def _check(
     """Every check the case declares, against what the run actually did."""
     expect = case.get("expect", {})
 
+    # `may_refuse` is for a question with **two** right answers (**B-066**).
+    # #19 asks about a month past the end of the data: "zero" is right and "the
+    # orders data ends on 2026-07-31, so it does not cover that month" is better,
+    # and the second is D-027's last clause doing precisely what it was written
+    # to do. #17 is *"how are we doing?"*, which a run may reasonably decline as
+    # too vague. Demanding an answer would fail the product for behaving well,
+    # and the old cases did exactly that in live mode.
+    # `failed` is deliberately excluded: the runner reserves it for the platform
+    # breaking (WP7.2b), and a run that crashed must not read as an honest
+    # decline. Without this, `may_refuse` would turn an outage into a pass.
+    result.refused = (
+        bool(expect.get("may_refuse")) and not result.answered and result.status != "failed"
+    )
+
     if expect.get("must_refuse"):
         if result.answered:
             result.fail("answered a question the schema cannot answer")
+    elif result.refused:
+        # A refusal that says nothing is not honesty, it is silence. This is the
+        # positive assertion that keeps `may_refuse` from meaning "anything
+        # goes": the run has to have said why.
+        if len(result.answer.strip()) < 20:
+            result.fail("refused without saying why")
     elif not result.answered:
         # The critic's own words first: they say *why*, where "did not answer"
         # only says that it did not.
@@ -358,7 +418,9 @@ def _check(
     if "queries_run" in expect and result.queries != expect["queries_run"]:
         result.fail(f"ran {result.queries} queries, expected {expect['queries_run']}")
 
-    if result.citations < expect.get("must_cite", 0):
+    # A refusal cites nothing by construction, so the evidence floor is about
+    # the answering path only.
+    if not result.refused and result.citations < expect.get("must_cite", 0):
         result.fail(f"cited {result.citations}, expected at least {expect.get('must_cite')}")
 
     if "min_iterations" in expect and result.iterations < expect["min_iterations"]:
@@ -379,18 +441,25 @@ def _check(
     if live and phrase and phrase.lower() not in result.answer.lower():
         result.fail(f"the answer never said {phrase!r}")
 
-    if "truth" in case and (column := expect.get("value_of")):
-        want = truth_at(truths, case["truth"])
-        got = _single_value(artifacts, column)
-        if got is None:
-            result.fail(f"no result had a column called {column!r}")
-        elif not close_enough(got, want, float(case.get("tolerance", 0))):
-            result.fail(f"{column} was {got!r}, expected {want!r}")
-
-    if "value_is" in expect and (column := expect.get("value_of")):
-        got = _single_value(artifacts, column)
-        if got is None or not close_enough(got, expect["value_is"], 0):
-            result.fail(f"{column} was {got!r}, expected {expect['value_is']!r}")
+    # The value checks are skipped for an allowed refusal: a run that declined
+    # to answer produced no number, and demanding one would fail it twice for
+    # the same permitted decision.
+    if not result.refused:
+        # `truth_any` is a list of paths, any of which is a right answer — for a
+        # thing with two correct spellings, such as a store named by its id or by
+        # its name (**B-066**). `truth` is the single-path case and is by far the
+        # common one.
+        paths = case.get("truth_any") or ([case["truth"]] if "truth" in case else [])
+        if paths and (column := expect.get("value_of")):
+            _check_value(
+                result,
+                artifacts,
+                column,
+                [truth_at(truths, path) for path in paths],
+                float(case.get("tolerance", 0)),
+            )
+        if "value_is" in expect and (column := expect.get("value_of")):
+            _check_value(result, artifacts, column, expect["value_is"], 0)
 
     if "rows" in expect:
         counts = [row.row_count for row in rows if row.status == "ok"]
@@ -398,20 +467,129 @@ def _check(
             result.fail(f"no query returned {expect['rows']} rows; got {counts}")
 
 
-def _single_value(artifacts: dict[str, dict[str, Any]], column: str) -> Any:
-    """The named column's first value, from the stored result artifact.
+def _check_value(
+    result: Result,
+    artifacts: dict[str, dict[str, Any]],
+    column: str,
+    want: Any,
+    tolerance: float,
+) -> None:
+    """Compare one expected value, and say how it was found (**B-066**).
+
+    The failure message names the columns that *were* returned, because
+    "no result had a column called 'cancelled_rate'" is a sentence nobody can
+    act on — it does not say whether the model aliased the column, answered a
+    different question, or ran nothing at all.
+    """
+    match = match_value(artifacts, column, want, tolerance)
+    result.matched_by = match.how
+    wanted = " or ".join(
+        repr(candidate) for candidate in (want if isinstance(want, list) else [want])
+    )
+    if match.how == "absent":
+        shapes = ", ".join(match.shapes) or "(no result returned any rows)"
+        result.fail(f"{wanted} was in no result; the results returned {shapes}")
+    elif not match.ok:
+        result.fail(f"{column} was {match.seen!r}, expected {wanted}")
+
+
+#: How many columns a single-row result may have before the harness stops
+#: scanning its cells (**B-066**, rule 3 below). A ranking answer is two or three
+#: columns wide; beyond that the chance of a coincidental match starts to matter
+#: more than the chance of finding the value honestly.
+MAX_SCAN_COLUMNS = 4
+
+
+@dataclass(frozen=True)
+class ValueMatch:
+    """Whether the expected value is in the results, and how it was found."""
+
+    ok: bool
+    #: column | only-value | row-cell | absent
+    how: str
+    seen: Any = None
+    #: Every result's column names, for a failure message that can be acted on.
+    shapes: tuple[str, ...] = ()
+
+    @property
+    def weaker(self) -> bool:
+        """True when the exact column was not there and a fallback found it."""
+        return self.ok and self.how != "column"
+
+
+def match_value(
+    artifacts: dict[str, dict[str, Any]],
+    column: str,
+    want: Any,
+    tolerance: float,
+) -> ValueMatch:
+    """Is ``want`` among the results, under the name the case expects or not?
+
+    ``want`` may be a **list**, meaning any one of these is right. That is for a
+    thing with two correct spellings — *"which store brought in the most
+    revenue?"* is answered by `3` and by `"Northgate"`, and the second is the
+    better answer, since an internal key reaching a reader is itself a defect
+    (B-061, B-020). See `truth_any` in `golden.yaml`.
+
+    **This is B-066.** The check used to be "find a result column called
+    `cancelled_rate`", which is exactly right in FakeLLM mode — the SQL comes
+    from `golden.yaml`, so the alias always matches — and wrong in the only mode
+    that spends money, because a real model aliases its output however it likes.
+    `SELECT ... AS cancellation_rate` is a correct answer that the old check read
+    as a missing column, and five of the eight failures in the first live run
+    were that one defect. A harness that is sound only where it is not needed is
+    not a harness.
+
+    Three rules, tried in order, each weaker than the last:
+
+    1. **By name.** A result has a column called ``column``, compared
+       case-insensitively. Exact, and the only rule that ever fires in FakeLLM
+       mode, because the scripted SQL always names it.
+    2. **The only value there is.** No result names it, but one returned exactly
+       one row and one column — an aggregate. Whatever it is called, that value
+       is the answer and there is nothing else it could be.
+    3. **A cell of a single row.** A result returned one row of at most
+       ``MAX_SCAN_COLUMNS`` columns — `... ORDER BY x LIMIT 1`, which is the
+       shape of every ranking question here. Each cell is tried.
+
+    **The order is what keeps CI honest.** A fallback runs only when the named
+    column is *absent*; a result that has the column and the wrong value in it
+    fails, and no later rule can rescue it. So this cannot turn a red FakeLLM run
+    green — which is the way a fix like this would quietly weaken the suite, and
+    `test_a_named_column_with_the_wrong_value_is_never_rescued` is the test that
+    holds it.
 
     Read from what the DAL persisted — already masked — rather than by running
     the query again. Two reasons: a second run could return something different,
     and the artifact is what a citation opens, so this checks the number a person
     would actually see rather than one only the harness can reach.
     """
-    for frame in artifacts.values():
-        names = frame.get("columns") or []
-        rows = frame.get("rows") or []
-        if column in names and rows:
-            return rows[0][names.index(column)]
-    return None
+    frames = [(frame.get("columns") or [], frame.get("rows") or []) for frame in artifacts.values()]
+    shapes = tuple(f"[{', '.join(str(name) for name in names)}]" for names, _ in frames)
+    wants = want if isinstance(want, list) else [want]
+
+    def any_of(seen: Any) -> bool:
+        return any(close_enough(seen, candidate, tolerance) for candidate in wants)
+
+    wanted = column.strip().lower()
+    for names, rows in frames:
+        lowered = [str(name).strip().lower() for name in names]
+        if wanted in lowered and rows:
+            seen = rows[0][lowered.index(wanted)]
+            return ValueMatch(any_of(seen), "column", seen, shapes)
+
+    for names, rows in frames:
+        if len(names) == 1 and len(rows) == 1 and any_of(rows[0][0]):
+            return ValueMatch(True, "only-value", rows[0][0], shapes)
+
+    for names, rows in frames:
+        if len(rows) != 1 or not 1 < len(names) <= MAX_SCAN_COLUMNS:
+            continue
+        for seen in rows[0]:
+            if any_of(seen):
+                return ValueMatch(True, "row-cell", seen, shapes)
+
+    return ValueMatch(False, "absent", None, shapes)
 
 
 async def critic_reasons(org_id: uuid.UUID, run_id: uuid.UUID) -> list[str]:
@@ -534,6 +712,13 @@ async def main(argv: list[str] | None = None) -> int:
         mark = "PASS" if outcome.passed else "FAIL"
         cost = f"  {outcome.tokens:>7,} tok" if live else ""
         print(f"  [{mark}] {outcome.id:>2}. {outcome.question[:56]}{cost}")
+        # A pass earned by a weaker rule is a weaker claim, and a tick that hid
+        # the difference would overstate the run (B-066). Never printed in
+        # FakeLLM mode, where the scripted SQL always names its columns.
+        if outcome.matched_by in {"only-value", "row-cell"}:
+            print(f"          (value matched by {outcome.matched_by}, not by column name)")
+        if outcome.refused:
+            print("          (refused, which this question allows)")
         for why in outcome.failures:
             print(f"          {why}")
 
