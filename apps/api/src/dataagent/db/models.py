@@ -679,8 +679,13 @@ class ResultArtifact(Base):
 #: module deliberately does not import them, because the database schema must not
 #: depend on the agent package, and ``test_usage_ledger_matches_the_llm_package``
 #: asserts the two lists agree.
-LLM_ROLES: tuple[str, ...] = ("intake", "observe", "plan", "sql", "critic", "compose")
-LLM_TIERS: tuple[str, ...] = ("small", "mid", "strong")
+LLM_ROLES: tuple[str, ...] = ("intake", "observe", "plan", "sql", "critic", "compose", "embed")
+#: `embed` is its own tier rather than `small` (revision 0017). D-018 says a
+#: tier is "how much model this job is worth" on a ladder, and embeddings have
+#: no ladder — one model, chosen by EMBEDDINGS_MODEL, that is not a cheaper
+#: version of anything. Filing it under `small` would put embedding tokens in
+#: the same bucket as intake calls and make any spend-by-tier query wrong.
+LLM_TIERS: tuple[str, ...] = ("small", "mid", "strong", "embed")
 
 #: A provider call either answered or it did not. There is no third outcome: a
 #: model that answers badly has still answered, and what it said is judged by the
