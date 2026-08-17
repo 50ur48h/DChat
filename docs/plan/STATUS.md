@@ -71,10 +71,10 @@ that are already there. Worth remembering the next time a branch is stacked.
 ### 2. WP10.1b — what is built, what is left, and where to pick up
 
 Branch `p10.1b-knowledge-tool`, PR **#65** (draft). Everything below is
-committed. `ruff`, `ruff format`, `pyright`, `check_status.sh`, the web lint
-and typecheck, the 81 web tests, and the knowledge / role-matrix /
-tool-registry suites were all green when it was pushed; see **2b** for what the
-full-suite runs did.
+committed and green: the **full API suite at 1297 passed / 20 skipped**, plus
+`ruff`, `ruff format`, `pyright`, `check_status.sh`, the web lint and typecheck
+and the 81 web tests. See **2b** for the two concurrency flakes it took to get a
+trustworthy number.
 
 **Done:**
 
@@ -120,14 +120,17 @@ full-suite runs did.
    B-018 is therefore blocked behind B-073 and both should be taken together,
    after which golden eval **#14** should start passing live.
 
-### 2b. Two flakes seen, both from running suites concurrently
+### 2b. The suite is green; two flakes were concurrency, and here is the proof
 
-Two full-suite runs each showed a single `ERROR`, in a **different** test each
-time — `tests/llm/test_front_door.py` once, `tests/agent/test_context_selection.py`
-the next. Neither is a real failure: each file passes on its own, and both runs
-overlapped a second pytest process competing for the same temp-database
-machinery. **The lesson is to run one suite at a time on this machine**; the
-per-test databases are created and dropped by name, and two runs racing over
+**Settled: `1297 passed, 20 skipped` with a real exit code of 0**, from a run
+with nothing else touching the database.
+
+Getting there took three attempts and the two failed ones are worth recording.
+Each showed a single `ERROR` in a **different** test — `tests/llm/test_front_door.py`
+once, `tests/agent/test_context_selection.py` the next — and each of those files
+passes on its own. Both runs overlapped a second pytest process competing for
+the same temp-database machinery. **Run one suite at a time on this machine**:
+the per-test databases are created and dropped by name, and two runs racing over
 them is enough to break one.
 
 Two traps worth carrying forward:
