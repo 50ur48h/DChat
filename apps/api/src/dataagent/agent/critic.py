@@ -46,6 +46,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from dataagent.agent.context import HistoryTurn, history_block
 from dataagent.agent.state import ResearchState
 from dataagent.agent.tools.finalize import FinalizeIn
 
@@ -308,6 +309,14 @@ class Evidence:
     statements: dict[str, str] = field(default_factory=dict[str, str])
     previews: tuple[tuple[str, str], ...] = ()
     dialect: str = "postgres"
+    #: The thread the question sits in (**D-029**). The stage-2 critic needs it
+    #: for the same reason the planner does, and needs it *more*: asked to judge
+    #: whether a draft answers *"check again"*, a model with no thread will say
+    #: it does not — a **false block** on a correct answer, which the standing
+    #: note calls the critic's characteristic failure. The deterministic rules
+    #: deliberately ignore it and still read the current question alone, because
+    #: every one of them is an arithmetic check on words the user just typed.
+    history: tuple[HistoryTurn, ...] = ()
 
 
 def check(draft: FinalizeIn, evidence: Evidence) -> tuple[CriticFinding, ...]:
@@ -543,7 +552,8 @@ def rubric(draft: FinalizeIn, evidence: Evidence, deterministic: tuple[CriticFin
         "\n".join(f"- {finding.detail}" for finding in deterministic)
         or "- (the deterministic checks found nothing)"
     )
-    return (
+    thread = history_block(evidence.history)
+    return (f"{thread}\n\n" if thread else "") + (
         f"The question was: {evidence.question}\n"
         f"Today's date for this question: {evidence.as_of.isoformat()}\n\n"
         f"Queries run:\n{evidence_lines}\n\n"

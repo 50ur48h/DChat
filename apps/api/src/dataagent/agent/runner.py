@@ -31,6 +31,13 @@ crash anywhere above still moves the run out of `running` and writes its
 `run_finished`. A dangling run is the one outcome with no user-visible symptom
 until somebody wonders why a page has been spinning for an hour.
 
+**Every prompt that carries the question carries the thread with it** (**D-029**,
+B-064). Four do — the layered prompt the planner renders, the loop's reflection,
+the critic's rubric and the composer — and all four render it through
+`context.history_block`, so a fifth added later has one obvious thing to call. A
+prompt that got the question without the thread would be judging *"check again"*
+on its own, and for the critic that means blocking a correct answer.
+
 The runner takes a run id and never touches a request, a response or a session
 from the web layer. That is what makes architecture 0.2.4's promotion path free:
 the same code moves behind a worker in V1.5 without a rewrite.
@@ -46,7 +53,13 @@ from datetime import UTC, date, datetime
 from dataagent.agent import composer, critic
 from dataagent.agent.budget import Budget, BudgetState
 from dataagent.agent.capability import CapabilityChasm, CapabilityGap, JoinGraph, load_join_graph
-from dataagent.agent.context import ContextBundle, build_context
+from dataagent.agent.context import (
+    HISTORY_TURNS,
+    ContextBundle,
+    HistoryTurn,
+    build_context,
+    history_block,
+)
 from dataagent.agent.critic import CriticVerdict
 from dataagent.agent.loop import LoopOutcome, research
 from dataagent.agent.state import ResearchState, StateFinding
@@ -230,12 +243,14 @@ async def _investigate(
     """
     state, budget = working.state, working.budget
     state.question = await _question_of(context.org_id, context.run_id)
+    history = await _history_of(context.org_id, context.run_id)
 
     bundle = await build_context(
         org_id=context.org_id,
         question=state.question,
         data_source_id=context.data_source_id,
         as_of=context.as_of,
+        history=history,
     )
     state.phase = "context"
     state.table_names = list(bundle.table_names)
@@ -246,6 +261,12 @@ async def _investigate(
         {
             "tables": list(bundle.table_names),
             "restrictions": len(bundle.restrictions),
+            # How much of the thread this run was given, and whether the thread
+            # is what found the tables (D-029). Both belong in the trace: a
+            # follow-up answered from three turns of context is a different act
+            # from one answered cold, and nothing else would say which happened.
+            "history_turns": len(bundle.history),
+            "tables_found_via": "thread" if bundle.cards_from_thread else "question",
             # In the trace because a person reading an answer about "last month"
             # is owed the date that phrase was resolved against (D-027). It is
             # also the only way to tell a stale answer from a wrong one.
@@ -347,8 +368,8 @@ async def _investigate(
         return await _finalize_refusal(context, events, working, outcome.refusal)
 
     # Compose, criticise, and — at most once — go round again (arch M9).
-    draft = await _compose(context, events, working, outcome, settings)
-    verdict = await _validate(context, events, working, outcome, draft, settings)
+    draft = await _compose(context, events, working, outcome, bundle, settings)
+    verdict = await _validate(context, events, working, outcome, draft, bundle, settings)
 
     if verdict.blocked and _may_re_enter(working):
         outcome, draft, verdict = await _second_pass(
@@ -392,6 +413,7 @@ async def _validate(
     working: _Working,
     outcome: LoopOutcome,
     draft: FinalizeIn,
+    bundle: ContextBundle,
     settings: Settings | None,
 ) -> CriticVerdict:
     """Both critic stages, and the verdict in the trace.
@@ -411,6 +433,11 @@ async def _validate(
 
     evidence = critic.Evidence(
         question=state.question,
+        # The thread, for the model half only (D-029). A critic asked whether a
+        # draft answers "check again", with no idea what was being checked, will
+        # say it does not — and a false block on a correct answer is the failure
+        # this critic is most prone to.
+        history=bundle.history,
         as_of=date.fromisoformat(state.as_of) if state.as_of else datetime.now(UTC).date(),
         state=state,
         statements=await critic.statements_for(context.org_id, state.execution_ids()),
@@ -492,9 +519,9 @@ async def _second_pass(
         settings=settings,
     )
     draft = await _compose(
-        context, events, working, outcome, settings, correction=verdict.reasons()
+        context, events, working, outcome, bundle, settings, correction=verdict.reasons()
     )
-    second = await _validate(context, events, working, outcome, draft, settings)
+    second = await _validate(context, events, working, outcome, draft, bundle, settings)
     return outcome, draft, second
 
 
@@ -512,6 +539,7 @@ async def _compose(
     events: EventWriter,
     working: _Working,
     outcome: LoopOutcome,
+    bundle: ContextBundle,
     settings: Settings | None,
     correction: str = "",
 ) -> FinalizeIn:
@@ -570,8 +598,12 @@ async def _compose(
             "and answer with what the evidence below does support."
         )
 
+    # The thread, framed (**D-029**). This is the call that writes the words a
+    # person reads, so a follow-up composed without it answers *"check again"*
+    # instead of the thing being checked again.
+    thread = history_block(bundle.history)
     prompt = (
-        f"The question was: {state.question}\n\n"
+        (f"{thread}\n\n" if thread else "") + f"The question was: {state.question}\n\n"
         f"Queries run, with what each returned:\n{evidence}\n\n"
         f"What you concluded along the way:\n{concluded}\n\n"
         f"{results}{caveat}{revise}\n\n"
@@ -700,6 +732,18 @@ async def _verified_citations(
 async def _question_of(org_id: uuid.UUID, run_id: uuid.UUID) -> str:
     view = await runs.get_run(org_id=org_id, run_id=run_id)
     return view.question
+
+
+async def _history_of(org_id: uuid.UUID, run_id: uuid.UUID) -> tuple[HistoryTurn, ...]:
+    """The thread this question follows (**D-029**, B-064).
+
+    The translation from a database row to a prompt fragment happens here, in one
+    line, and that is the whole of what the two dataclasses cost. What it buys is
+    that `runs/service.py` never has to know how a thread is worded and
+    `agent/context.py` never has to open a session.
+    """
+    prior = await runs.conversation_history(org_id=org_id, run_id=run_id, turns=HISTORY_TURNS)
+    return tuple(HistoryTurn(question=turn.question, answer=turn.answer) for turn in prior)
 
 
 async def _checkpoint(context: ToolContext, working: _Working) -> None:

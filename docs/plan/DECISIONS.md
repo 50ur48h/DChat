@@ -4,6 +4,76 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-029 — A conversation is a conversation: the thread renders at L5, as reference material
+Date: 2026-08-17 · Phase: 9→10 · PR: B-064 · Owner's direction on the first question
+Context: **B-064 (P1)**, found by the owner in the Phase 9 gate demo — a question
+asked, then *"check again"*, answered with "no business question has been given".
+Traced end to end, nothing was broken: `_question_of` read one string off
+`agent_runs.question`, `ContextBundle` had no field for a prior turn, and L5
+rendered that one question. **No message but the current one had ever reached any
+prompt.** It is a **specification** gap as much as an implementation one —
+architecture 4.8's six layers have no slot for a thread, and the only
+"conversation history" in the plan is WP11.2's *list* of past conversations,
+which is navigation. What was anticipated is the half **D-022** built: 10.1 says
+a conversation carries its `data_source_id` *"because a follow-up must reach the
+same source as the question it follows"*, so follow-ups were foreseen as a
+concept and only their routing was built.
+Four questions had to be settled before any code, and they are settled here.
+Decision, in order:
+**(1) Which layer — L5, inside the question turn, above the question itself.**
+The owner's direction: it is user-supplied text and gets the same treatment as a
+retrieved RAG chunk, so it is framed as records rather than directions and
+nothing in it may outrank the platform rules. Any higher and 4.8's precedence —
+soft everywhere else by design — would have one place where it was simply absent.
+The question is rendered **last**, so a crafted earlier turn is never the final
+word. The alternative considered and rejected was replaying prior turns as real
+`user`/`assistant` messages, which reads more naturally to a chat model and is
+worse here for exactly that reason: an `assistant` turn is the model's own voice
+and carries more authority than any framing we could wrap it in.
+**(2) How many — three turns, clipped to 400 characters each.** A ceiling rather
+than a guess, and the same argument 4.4 makes about an investigation: a prompt
+must not grow with the length of a thread, because the cost is paid on every
+iteration of every run from here on. Three carries the follow-ups people actually
+write — *"and by store?"*, *"why?"*, *"same for June"* — and stops short of a
+transcript. It is also a **truncation candidate**, dropped oldest-first *before*
+any table card is dropped: a follow-up read without its thread is a question
+misunderstood, while a question with no cards is one that cannot be answered at
+all.
+**(3) The answer goes back in, not only the question.** *"Why?"* means nothing
+without it. The hazard the backlog names is real — restating numbers invites the
+model to re-cite what it did not run — and it is answered twice: the frame says
+in words that a number in an earlier answer is not a result you obtained, and
+`runner._verified_citations` already drops any citation this run did not produce.
+The prompt half discourages; the structural half is what actually holds.
+**(4) A follow-up may not cite the previous run's executions. It re-queries.**
+Unchanged from WP7.2b, and now deliberate rather than incidental. A citation
+resolves through `GET …/runs/{r}/executions/{q}`, which reads the execution
+**through** its run — so a cross-run citation would open onto nothing. Evidence
+that 404s is worse than no evidence, because it looked like proof.
+One thing was found while building it and fixed in the same PR: *"check again"*
+names no table, so the card search returned **nothing** and the planner was to be
+handed an empty catalog — which is **B-041**, the defect that cost the M7 gate,
+arriving by a new road. The fix takes B-041's own shape: the strict search on the
+question keeps every promise it makes, and only when it matches nothing at all is
+the thread searched instead. The trace records which happened
+(`tables_found_via`), because "which words chose these tables" is precisely the
+silent choice **B-060** was filed for.
+Consequences: `ContextBundle` gains `history` and `cards_from_thread`;
+`runs.service.conversation_history` reads the turns under RLS through the run
+being executed; three prompts render the thread through **one** function
+(`context.history_block`) — the layered prompt, the loop's reflection and the
+critic's rubric — because a thread worded three ways is three chances for one of
+them to read as an instruction. The critic gets it for a specific reason: asked
+whether a draft answers *"check again"* with no idea what was being checked, a
+model says it does not, and a **false block on a correct answer** is this
+component's characteristic failure (standing note 5). No migration: every row
+this needs has existed since revision 0012. **A first question's prompt is
+byte-for-byte what it was**, which is what makes this safe to ship under twenty
+golden evals, none of which is a follow-up. Architecture 4.8 and 10.1 are edited
+in this PR to say the thread is part of L5. What is *not* done: no query
+rewriting, no summarised "conversation memory", no cross-conversation recall —
+each is a design of its own and none is needed for a thread to hold together.
+
 ## D-028 — The call ceiling moves to 24, because the critic is the stage D-024 predicted
 Date: 2026-08-16 · Phase: 9 · PR: WP9.1
 Context: **D-024** fixed architecture 4.4's arithmetic — an iteration costs two

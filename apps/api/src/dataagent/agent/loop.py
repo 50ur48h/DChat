@@ -48,7 +48,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dataagent.agent.budget import BudgetState
 from dataagent.agent.capability import JoinGraph
-from dataagent.agent.context import ContextBundle
+from dataagent.agent.context import ContextBundle, history_block
 from dataagent.agent.planner import Plan, plan_query
 from dataagent.agent.state import ExecutionRef, ResearchState, StateFinding, Step
 from dataagent.agent.tools.base import ToolContext, ToolResult
@@ -386,7 +386,7 @@ async def research(
         state.phase = "observing"
         await save()
 
-        reflection, tokens = await _reflect(context, state, plan, result, settings)
+        reflection, tokens = await _reflect(context, bundle, state, plan, result, settings)
         budget.spend_llm(tokens)
         state.phase = "reflecting"
 
@@ -505,6 +505,7 @@ def _progress_so_far(state: ResearchState) -> str:
 
 async def _reflect(
     context: ToolContext,
+    bundle: ContextBundle,
     state: ResearchState,
     plan: Plan,
     result: ToolResult,
@@ -517,8 +518,12 @@ async def _reflect(
     it is what turns a refusal into a different approach instead of the same one
     again.
     """
+    # The thread first and framed (**D-029**), for the reason the planner needs
+    # it too: "is the question now answered" cannot be judged when the question
+    # is *"check again"* and nothing says what was being checked.
+    thread = history_block(bundle.history)
     prompt = (
-        f"The question is: {state.question}\n\n"
+        (f"{thread}\n\n" if thread else "") + f"The question is: {state.question}\n\n"
         f"You have completed {state.iteration} research step(s).\n"
         f"{_progress_so_far(state) or 'Nothing established yet.'}\n\n"
         f"The step you just ran was for: {plan.purpose}\n"
