@@ -85,6 +85,28 @@ export interface TestResult {
   evidence: string[];
 }
 
+/**
+ * One uploaded document, and how far indexing got (WP10.1b).
+ *
+ * `embedded_count` is reported separately from `chunk_count` on purpose: below
+ * it, the text is searchable by wording but not yet by meaning. That is a real
+ * and temporary state rather than an error, and rounding it up to "indexed"
+ * would hide the one thing a person waiting for a large upload wants to know.
+ */
+export interface KnowledgeDocument {
+  id: string;
+  title: string;
+  mime: string;
+  /** pending | indexed | failed */
+  status: string;
+  chunk_count: number;
+  embedded_count: number;
+  /** Why indexing stopped, written for whoever uploaded it. Null when it did not. */
+  failure_reason: string | null;
+  created_at: string;
+  indexed_at: string | null;
+}
+
 /** What registering a data source needs. The password goes nowhere else. */
 export interface NewDataSource {
   name: string;
@@ -376,6 +398,21 @@ export function isDataSource(value: unknown): value is DataSource {
     typeof value.tls_mode === "string" &&
     typeof value.readonly_verified === "boolean" &&
     isNullableString(value.last_verified_at)
+  );
+}
+
+export function isKnowledgeDocument(value: unknown): value is KnowledgeDocument {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.title === "string" &&
+    typeof value.mime === "string" &&
+    typeof value.status === "string" &&
+    typeof value.chunk_count === "number" &&
+    typeof value.embedded_count === "number" &&
+    isNullableString(value.failure_reason) &&
+    typeof value.created_at === "string" &&
+    isNullableString(value.indexed_at)
   );
 }
 

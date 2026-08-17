@@ -4,6 +4,11 @@
     "contributor": "deny(403)",
     "reader": "deny(403)"
   },
+  "DELETE /v1/orgs/{org_id}/documents/{document_id}": {
+    "admin": "allow",
+    "contributor": "allow",
+    "reader": "deny(403)"
+  },
   "DELETE /v1/orgs/{org_id}/members/{user_id}": {
     "admin": "allow",
     "contributor": "deny(403)",
@@ -40,6 +45,21 @@
     "reader": "allow"
   },
   "GET /v1/orgs/{org_id}/data-sources/{data_source_id}/catalog": {
+    "admin": "allow",
+    "contributor": "allow",
+    "reader": "allow"
+  },
+  "GET /v1/orgs/{org_id}/documents": {
+    "admin": "allow",
+    "contributor": "allow",
+    "reader": "allow"
+  },
+  "GET /v1/orgs/{org_id}/documents/search": {
+    "admin": "allow",
+    "contributor": "allow",
+    "reader": "allow"
+  },
+  "GET /v1/orgs/{org_id}/documents/supported-types": {
     "admin": "allow",
     "contributor": "allow",
     "reader": "allow"
@@ -107,6 +127,16 @@
   "POST /v1/orgs/{org_id}/data-sources/{data_source_id}/test": {
     "admin": "allow",
     "contributor": "deny(403)",
+    "reader": "deny(403)"
+  },
+  "POST /v1/orgs/{org_id}/documents": {
+    "admin": "allow",
+    "contributor": "allow",
+    "reader": "deny(403)"
+  },
+  "POST /v1/orgs/{org_id}/documents/{document_id}/reindex": {
+    "admin": "allow",
+    "contributor": "allow",
     "reader": "deny(403)"
   },
   "POST /v1/orgs/{org_id}/invitations": {

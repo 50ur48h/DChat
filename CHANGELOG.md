@@ -42,6 +42,16 @@ under "Unreleased", only for changes a user would notice.
   description, so a real question matched nothing at all.
 
 ### Added
+- A documents screen: upload a policy or a definition, see how much of it is
+  searchable, re-index it, or remove it. A document that could not be read says
+  why in words you can act on — a scanned PDF says it needs OCR — and one whose
+  text has landed but whose meaning-search is still catching up says that too
+  rather than claiming to be finished.
+- The agent can consult the organization's own documents when a question turns on
+  how the business defines something — what counts as net revenue, what an active
+  customer is — and then queries the database for the values rather than reporting
+  a number it read in a document. Retrieved text is presented to it as a record,
+  never as an instruction.
 - An organization's own documents can be uploaded and searched — markdown, plain
   text, and PDFs that carry a text layer. Passages are found by meaning as well
   as by wording, so a policy that says "revenue" answers a question that says
