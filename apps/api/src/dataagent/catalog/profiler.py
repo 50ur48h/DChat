@@ -52,6 +52,7 @@ from dataagent.connectors.base import (
 )
 from dataagent.datasources import service as datasources
 from dataagent.db.models import CatalogColumn, CatalogSnapshot, CatalogTable, ColumnPolicy
+from dataagent.knowledge.embeddings import Embedder
 from dataagent.orgs.service import audit
 from dataagent.tenancy.session import org_session
 
@@ -276,6 +277,7 @@ async def profile(
     actor_user_id: uuid.UUID | None,
     data_source_id: uuid.UUID,
     budget: Budget | None = None,
+    embedder: Embedder | None = None,
 ) -> ProfileOutcome:
     """Profile the active snapshot of one data source.
 
@@ -328,8 +330,12 @@ async def profile(
         errors=errors,
     )
     # A profile changes what a card can say about values, so the cards are
-    # rewritten with it rather than describing a database nobody profiled.
+    # rewritten with it rather than describing a database nobody profiled — and
+    # a rewritten card needs a new vector, since the old one describes words the
+    # card no longer contains (**B-018**). `refresh_cards` clears the embedding
+    # of every card whose text actually changed; this fills them back in.
     await cards.refresh_cards(org_id, data_source_id)
+    await cards.embed_cards(org_id, data_source_id, embedder=embedder)
     return outcome
 
 

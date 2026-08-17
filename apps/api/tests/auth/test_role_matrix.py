@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from dataagent.auth.jwt_validator import TokenValidator
 from dataagent.auth.principal import Principal, TokenError
+from dataagent.catalog import routes as catalog_routes
 from dataagent.config import Settings
 from dataagent.db import engine as engine_module
 from dataagent.knowledge import routes as knowledge_routes
@@ -221,6 +222,8 @@ async def matrix_app(
     # B-040 guard would refuse and the probe would record `deny(500)`, turning
     # an authorization matrix into a report about configuration.
     monkeypatch.setattr(knowledge_routes, "document_embedder", lambda: None)
+    # And the same for cards: refreshing a catalog embeds them since B-018.
+    monkeypatch.setattr(catalog_routes, "card_embedder", lambda: None)
 
     org_id = uuid.uuid4()
     data_source_id = uuid.uuid4()

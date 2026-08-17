@@ -27,6 +27,7 @@ column's values still needs to know the column is there.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -34,6 +35,7 @@ from dataclasses import dataclass
 from sqlalchemy import select
 
 from dataagent.catalog.policies import effective_policy
+from dataagent.config import Settings
 from dataagent.db.models import (
     CatalogColumn,
     CatalogRelationship,
@@ -41,9 +43,13 @@ from dataagent.db.models import (
     CatalogTable,
     ColumnPolicy,
 )
+from dataagent.knowledge.embeddings import Embedder, embed_texts
+from dataagent.llm.base import LLMError
 from dataagent.tenancy.session import org_session
 
-__all__ = ["CardColumn", "CardInput", "build_card", "refresh_cards"]
+__all__ = ["CardColumn", "CardInput", "build_card", "embed_cards", "refresh_cards"]
+
+logger = logging.getLogger(__name__)
 
 SNAPSHOT_ACTIVE = "active"
 
@@ -351,10 +357,92 @@ async def refresh_cards(org_id: uuid.UUID, data_source_id: uuid.UUID) -> int:
                     if edge.to_schema == table.schema_name and edge.to_table == table.table_name
                 ],
             )
-            table.card_text = build_card(card)
-            # Nothing writes embeddings yet (B-018), so every card says it is
-            # waiting for one rather than leaving a later backfill to guess.
-            table.flags = {**table.flags, "embedding": "queued"}
+            text = build_card(card)
+            if text != table.card_text:
+                # Re-queued only when the words actually changed. A refresh that
+                # finds nothing different must not invalidate a vector it would
+                # then pay to compute again — D-012's "a refresh that finds no
+                # change writes nothing" applied to the half that costs money.
+                table.card_text = text
+                table.embedding = None
+                table.flags = {**table.flags, "embedding": "queued"}
             written += 1
 
         return written
+
+
+async def embed_cards(
+    org_id: uuid.UUID,
+    data_source_id: uuid.UUID,
+    *,
+    embedder: Embedder | None,
+    settings: Settings | None = None,
+) -> int:
+    """Give every card in the active snapshot a vector. Returns how many it wrote.
+
+    **Idempotent, and that is what makes it a backfill** (**B-018**). It visits
+    exactly the cards with text and no vector — revision 0018's partial index is
+    that query — so running it twice costs one provider call the first time and
+    none the second. A catalog refresh calls it; so can anything else, which is
+    how a deployment that configured a key after its first crawl catches up.
+
+    **No embedder is not a failure.** The cards keep their text, stay lexically
+    searchable, and stay `queued`; the deployment simply has no way to embed them
+    yet. Raising here would make an optional capability a hard dependency of
+    catalog refresh, which is the one thing a new organization cannot skip.
+
+    **A provider failure is not a failure either**, for the same reason ingest
+    treats one that way: the cards were already written by `refresh_cards`, and
+    losing them to a rate limit would trade working search for tidy bookkeeping.
+    The rows stay `queued` and the next call finishes the job.
+    """
+    if embedder is None:
+        return 0
+
+    async with org_session(org_id) as session:
+        pending = (
+            (
+                await session.execute(
+                    select(CatalogTable)
+                    .join(CatalogSnapshot, CatalogSnapshot.id == CatalogTable.snapshot_id)
+                    .where(
+                        CatalogSnapshot.data_source_id == data_source_id,
+                        CatalogSnapshot.status == SNAPSHOT_ACTIVE,
+                        CatalogTable.card_text.is_not(None),
+                        CatalogTable.embedding.is_(None),
+                    )
+                    .order_by(CatalogTable.schema_name, CatalogTable.table_name)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not pending:
+            return 0
+
+        try:
+            vectors = await embed_texts(
+                org_id=org_id,
+                texts=[table.card_text or "" for table in pending],
+                embedder=embedder,
+                settings=settings,
+            )
+        except LLMError:
+            # Logged rather than raised: the caller is a catalog refresh, and a
+            # refresh that fails because a provider was busy would leave an
+            # organization with no catalog at all rather than one whose search
+            # is temporarily lexical.
+            logger.warning(
+                "could not embed %d card(s) for data source %s; they stay lexically "
+                "searchable and queued",
+                len(pending),
+                data_source_id,
+            )
+            return 0
+
+        # Paired by position, which is safe only because `embed_texts` guarantees
+        # one vector per input in input order — asserted there, not assumed here.
+        for table, vector in zip(pending, vectors, strict=True):
+            table.embedding = list(vector)
+            table.flags = {**table.flags, "embedding": "done"}
+        return len(pending)
