@@ -32,8 +32,14 @@ filing its tokens beside intake calls would make any spend-by-tier query wrong.
 This module deliberately does **not** go through `llm/service.py`. That front
 door resolves a role to a tier to a chat model, repairs structured output and
 runs the fallback chain — none of which an embedding call has or wants. What it
-shares is the part that matters: the same key, the same settings, and the same
-ledger.
+shares is the part that matters: the same key, the same settings, the same
+ledger, and — since **B-073** — the same per-run ceiling.
+
+**`get_embedder` is the only way to build one, for B-040's reason.** An embedder
+is a spending credential, and the test guard that stops a suite reaching a real
+provider works by wrapping the one function that hands one out. A caller that
+constructed `OpenAIEmbedder` directly would be a caller no guard could see, so
+everything in the application asks here.
 """
 
 from __future__ import annotations
@@ -48,10 +54,17 @@ import httpx
 
 from dataagent.config import Settings, get_settings
 from dataagent.db.models import EMBEDDING_DIMENSIONS
-from dataagent.llm import meter
+from dataagent.llm import budget, meter
 from dataagent.llm.base import LLMError, Usage
 
-__all__ = ["Embedder", "EmbeddingError", "OpenAIEmbedder", "embed_texts"]
+__all__ = [
+    "Embedder",
+    "EmbeddingError",
+    "OpenAIEmbedder",
+    "embed_texts",
+    "get_embedder",
+    "reset_embedder",
+]
 
 #: What `response.json()` actually hands back. Named rather than spelled out at
 #: each use, so the casts below read as "this is provider JSON, and nothing here
@@ -94,15 +107,26 @@ class EmbeddingBatch:
 
 
 class Embedder(Protocol):
-    """What ingest needs from a provider. Deliberately one method.
+    """What ingest and retrieval need from a provider. Deliberately narrow.
 
     A **structural** protocol rather than a base class, and narrow on purpose:
-    the stub used in tests satisfies it by having the method, not by inheriting
+    the stub used in tests satisfies it by having the members, not by inheriting
     from it, so nothing in the test suite can accidentally acquire real
     behaviour from a shared parent. That is **B-040**'s lesson applied to the
     one path in `knowledge/` that spends money — a suite that can reach a real
     provider is a suite that can spend it.
+
+    ``is_stub`` is the same bit ``ProviderCaps.is_stub`` carries on the chat
+    side, and it exists for the same one reason: it is what the test guard reads
+    to decide whether letting this object out would spend real money. A stub
+    that did not declare itself would be indistinguishable from a real client,
+    and the guard would have to fall back to type checks that a new
+    implementation would silently defeat.
     """
+
+    @property
+    def is_stub(self) -> bool:  # pragma: no cover - protocol
+        ...
 
     async def embed(self, texts: Sequence[str]) -> EmbeddingBatch:  # pragma: no cover - protocol
         ...
@@ -143,6 +167,11 @@ class OpenAIEmbedder:
     @property
     def model(self) -> str:
         return self._model
+
+    @property
+    def is_stub(self) -> bool:
+        """Never. This one bills the account named by the key it holds."""
+        return False
 
     async def embed(self, texts: Sequence[str]) -> EmbeddingBatch:
         if not texts:
@@ -217,11 +246,56 @@ class OpenAIEmbedder:
         await self._client.aclose()
 
 
+#: The embedder this process built, keyed by the model id it was built for. One
+#: instance rather than one per call, for the reason the provider registry gives:
+#: it holds an HTTP connection pool, and rebuilding it per call is a TLS
+#: handshake per search. Keyed by model so a caller that passes different
+#: settings gets an embedder for *its* model rather than the first one asked for.
+_INSTANCES: dict[str, Embedder] = {}
+
+
+def get_embedder(settings: Settings | None = None) -> Embedder | None:
+    """The embedder this deployment is configured for, or None if it has none.
+
+    **None is a supported answer, not a failure.** A deployment with no
+    embedding key still ingests documents and still searches them lexically —
+    that is what `embedding` being nullable buys — so the absence of
+    configuration degrades retrieval rather than breaking it. Raising here would
+    make an optional capability a boot requirement.
+
+    **This is the one place an embedder is built**, which is what makes B-040's
+    guard possible: the test suite wraps this function, and a caller that
+    constructed `OpenAIEmbedder` for itself would be invisible to it.
+    """
+    resolved = settings if settings is not None else get_settings()
+    model = resolved.embeddings_model
+    if not model or resolved.openai_api_key is None:
+        return None
+
+    cached = _INSTANCES.get(model)
+    if cached is not None:
+        return cached
+
+    # Before the first vector is written rather than at the insert that would
+    # reject it: a mismatch here names both numbers and the migration that fixed
+    # one of them.
+    check_dimensions(resolved)
+    built = OpenAIEmbedder(settings=resolved)
+    _INSTANCES[model] = built
+    return built
+
+
+def reset_embedder() -> None:
+    """Forget the built instance. For tests, and for a settings change in one."""
+    _INSTANCES.clear()
+
+
 async def embed_texts(
     *,
     org_id: uuid.UUID,
     texts: Sequence[str],
     embedder: Embedder,
+    run_id: uuid.UUID | None = None,
     actor_user_id: uuid.UUID | None = None,
     settings: Settings | None = None,
 ) -> list[tuple[float, ...]]:
@@ -234,6 +308,15 @@ async def embed_texts(
     `llm/service.py` follows: a provider that died mid-generation has still
     consumed tokens, and a ledger that only records successes understates the
     bill exactly when someone is trying to find out why it is high.
+
+    **``run_id`` is what makes an embedding call part of a run's bill**
+    (**B-073**). D-019's ceiling is checked before each batch against that run's
+    own ledger rows, exactly as `llm/service.complete` checks it before each
+    chat call — so an agent that searches its documents on every iteration
+    cannot spend past the cap by spending somewhere the cap was not looking.
+    A call with no run is not capped, which is the same hole `llm/budget.py`
+    states plainly: there is nothing to accumulate against. Ingest is that case,
+    and it is bounded by the size of the upload rather than by a loop.
     """
     resolved = settings if settings is not None else get_settings()
     size = max(1, resolved.embeddings_batch)
@@ -242,6 +325,12 @@ async def embed_texts(
     out: list[tuple[float, ...]] = []
     for start in range(0, len(texts), size):
         window = list(texts[start : start + size])
+        # Before the call, never after: a ceiling enforced afterwards is a
+        # report. `RunCostExceededError` is an `LLMError`, so a caller that
+        # already handles a provider failure handles exhaustion too.
+        await budget.assert_within_limit(
+            org_id=org_id, run_id=run_id, model=str(model), settings=resolved
+        )
         began = time.perf_counter()
         try:
             batch = await embedder.embed(window)
@@ -254,6 +343,7 @@ async def embed_texts(
                 model=str(model),
                 usage=Usage(),
                 latency_ms=_elapsed(began),
+                run_id=run_id,
                 actor_user_id=actor_user_id,
                 error=str(error)[:ERROR_TEXT_LIMIT],
                 settings=resolved,
@@ -267,6 +357,7 @@ async def embed_texts(
             model=batch.model,
             usage=batch.usage,
             latency_ms=_elapsed(began),
+            run_id=run_id,
             actor_user_id=actor_user_id,
             settings=resolved,
         )

@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
-from collections.abc import AsyncIterator, Generator, Iterator
+from collections.abc import AsyncIterator, Callable, Generator, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -28,6 +28,7 @@ import customer_db
 from customer_db import CustomerDatabase
 from dataagent.config import Settings
 from dataagent.datasources import service as datasource_service
+from dataagent.knowledge import embeddings
 from dataagent.llm import registry as llm_registry
 from dataagent.llm.fake import FakeLLM
 from dataagent.main import create_app
@@ -63,36 +64,78 @@ MAINTENANCE_DATABASE = "postgres"
 # them into a failed run — so a guard that only raised would be swallowed by the
 # very code most likely to trip it, and the suite would go green having spent
 # nothing but also having proved nothing.
+#
+# **Two doors, not one** (B-073). Chat models come through
+# ``registry.get_provider``; embeddings come through
+# ``knowledge.embeddings.get_embedder``, which bills the same account through a
+# different endpoint. A guard that watched only the first would have let an
+# embedding call — one per document chunk, on every upload — straight out to the
+# provider, which is a larger bill than the one that prompted B-040. Both wrap
+# the same recording list, so the per-test check below covers either.
 
-#: Provider names a test used that were not stubs. Cleared per test.
+#: The real factory, captured before the session fixture replaces it. Handed to
+#: the few tests that are about ``get_embedder`` itself: *building* an embedder
+#: reaches no network and spends nothing, but the guard cannot tell that from a
+#: caller about to use one, so those tests ask for the unguarded function by
+#: name rather than switching the guard off.
+_real_get_embedder = embeddings.get_embedder
+
+#: Provider or embedder names a test used that were not stubs. Cleared per test.
 _live_provider_uses: list[str] = []
 
 #: Non-empty while the current test carries ``@pytest.mark.live_provider``.
 _live_allowed: list[bool] = []
 
+#: How the refusal tells whoever hit it what to do instead. One string, because
+#: two doors refusing in two different dialects is two things to learn.
+_ADVICE = (
+    "Tests must not reach a real provider: pass `settings=build_settings()` so "
+    "configuration comes from the fixture rather than from .env, or mark the "
+    "test `@pytest.mark.live_provider` if it genuinely must spend money."
+)
+
 
 @pytest.fixture(scope="session", autouse=True)
 def forbid_live_providers() -> Iterator[None]:
-    """Wrap the registry for the whole session so no test can escape by ordering."""
-    real = llm_registry.get_provider
+    """Wrap both spending doors for the whole session, so no test escapes by ordering."""
+    real_provider = llm_registry.get_provider
+    real_embedder = embeddings.get_embedder
 
     def guarded(name: str, settings: Settings | None = None) -> object:
-        provider = real(name, settings)
+        provider = real_provider(name, settings)
         if provider.capabilities().is_stub or _live_allowed:
             return provider
         _live_provider_uses.append(name)
-        raise RuntimeError(
-            f"a test asked for the live provider {name!r}. Tests must use the "
-            "FakeLLM: pass `settings=build_settings()` so configuration comes "
-            "from the fixture rather than from .env, or mark the test "
-            "`@pytest.mark.live_provider` if it genuinely must spend money."
-        )
+        raise RuntimeError(f"a test asked for the live provider {name!r}. {_ADVICE}")
+
+    def guarded_embedder(settings: Settings | None = None) -> object:
+        embedder = real_embedder(settings)
+        # None is the ordinary answer for a deployment with no embedding model,
+        # and it spends nothing — so it passes through untouched.
+        if embedder is None or embedder.is_stub or _live_allowed:
+            return embedder
+        _live_provider_uses.append("embeddings")
+        raise RuntimeError(f"a test asked for a live embedder. {_ADVICE}")
 
     llm_registry.get_provider = guarded  # pyright: ignore[reportAttributeAccessIssue]
+    embeddings.get_embedder = guarded_embedder  # pyright: ignore[reportAttributeAccessIssue]
     try:
         yield
     finally:
-        llm_registry.get_provider = real  # pyright: ignore[reportAttributeAccessIssue]
+        llm_registry.get_provider = real_provider  # pyright: ignore[reportAttributeAccessIssue]
+        embeddings.get_embedder = real_embedder  # pyright: ignore[reportAttributeAccessIssue]
+
+
+@pytest.fixture
+def embedder_factory() -> Callable[..., object]:
+    """``knowledge.embeddings.get_embedder`` as the product sees it, unguarded.
+
+    For tests about the factory's own answers — no model configured, no key, a
+    width that disagrees with the column. They build an object and never call
+    it, which costs nothing; everything that would *use* an embedder still goes
+    through the guard.
+    """
+    return _real_get_embedder
 
 
 @pytest.fixture
@@ -125,9 +168,8 @@ def no_live_provider_used(request: pytest.FixtureRequest) -> Iterator[None]:
     _live_allowed.clear()
     if used and not allowed:
         pytest.fail(
-            f"this test reached for live provider(s) {sorted(set(used))}, which would "
-            "spend real money. See B-040: pass `settings=build_settings()` so the "
-            "FakeLLM is used, or mark the test `@pytest.mark.live_provider`."
+            f"this test reached for {sorted(set(used))}, which would spend real "
+            f"money. See B-040. {_ADVICE}"
         )
 
 

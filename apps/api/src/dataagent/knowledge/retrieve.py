@@ -32,10 +32,20 @@ one source that happens to be verbose.
 **Unembedded chunks are still findable.** They are excluded from the vector arm
 by construction — no vector, no distance — and included in the lexical arm.
 That is the ingest ordering paying off: text is searchable the moment it lands.
+
+**A search says which arms it actually ran** (**B-073**). Embedding the query
+costs money and can therefore be refused — by a run at its ceiling, by a
+provider having a bad afternoon, or by a deployment that never configured a key
+— and in every one of those cases the lexical arm still answers. The difference
+between *"the vector arm found nothing"* and *"the vector arm never ran"* is
+invisible in the passages themselves and is the whole difference between a
+corpus that does not cover a question and a retrieval that quietly halved
+itself, so `Retrieval` reports it rather than leaving the caller to infer it.
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -44,11 +54,16 @@ from sqlalchemy import Float, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from dataagent.config import Settings
 from dataagent.db.models import KnowledgeChunk, KnowledgeDocument
-from dataagent.knowledge.embeddings import Embedder
+from dataagent.knowledge.embeddings import Embedder, embed_texts
+from dataagent.llm.base import LLMError
+from dataagent.llm.budget import RunCostExceededError
 from dataagent.tenancy.session import org_session
 
-__all__ = ["Passage", "search_knowledge"]
+__all__ = ["Passage", "Retrieval", "search_knowledge"]
+
+logger = logging.getLogger(__name__)
 
 #: How many results a caller gets by default. Small: these go into a prompt, and
 #: 4.4's budget is spent on every iteration of every run.
@@ -99,6 +114,39 @@ class Passage:
         return f"{self.document_title}{f' — {trail}' if trail else ''} (chunk {self.seq})"
 
 
+#: Why the vector arm did not run, in words a person and a model can both read.
+#: Not an exception and not a silent absence: each of these is a normal state of
+#: the system, and the caller's job is to say so rather than to fail.
+NO_EMBEDDER = (
+    "Only the wording of the documents was searched: this deployment has no "
+    "embedding model configured, so a passage that means the same thing in "
+    "different words was not found."
+)
+EMBEDDING_REFUSED = (
+    "Only the wording of the documents was searched: the search by meaning was "
+    "not run because this run has reached its spending ceiling."
+)
+EMBEDDING_FAILED = (
+    "Only the wording of the documents was searched: the search by meaning "
+    "could not be run just now."
+)
+
+
+@dataclass(frozen=True, slots=True)
+class Retrieval:
+    """What one search found, and how much of the search actually happened.
+
+    ``arms`` is what ran, not what returned something — an empty vector arm and
+    an absent one are different facts and only one of them is about the corpus.
+    """
+
+    passages: tuple[Passage, ...] = ()
+    arms: tuple[str, ...] = ()
+    #: Set when the vector arm was skipped, naming which of the ordinary reasons
+    #: it was. None when both arms ran.
+    degraded: str | None = None
+
+
 @dataclass
 class _Hit:
     """One chunk's standing across both arms, before the merge."""
@@ -126,21 +174,35 @@ async def search_knowledge(
     embedder: Embedder | None = None,
     limit: int = DEFAULT_LIMIT,
     document_id: uuid.UUID | None = None,
-) -> list[Passage]:
+    run_id: uuid.UUID | None = None,
+    actor_user_id: uuid.UUID | None = None,
+    settings: Settings | None = None,
+) -> Retrieval:
     """The passages most likely to explain a term, best first.
 
     ``embedder`` is optional and its absence is a *degradation*, not an error:
-    with no embedder this is lexical search, which is what the product had
-    before this WP and is still better than nothing. Saying so here rather than
-    raising is what lets a deployment without an embedding key keep working.
+    with no embedder this is lexical search, which is what a deployment with no
+    embedding key gets and is still better than nothing. Saying so here rather
+    than raising is what lets such a deployment keep working — and `degraded` is
+    what stops it looking like a corpus that has nothing to say.
+
+    ``run_id`` charges the query embedding to a run, which is what puts it under
+    D-019's ceiling (**B-073**). Passing none is right for a person searching
+    from the documents page — there is no run to charge and no loop to bound —
+    and wrong for anything inside the agent, which is why every caller in
+    `agent/` passes one.
     """
     if not query.strip():
-        return []
+        return Retrieval()
 
-    vector: list[float] | None = None
-    if embedder is not None:
-        batch = await embedder.embed([query])
-        vector = list(batch.vectors[0]) if batch.vectors else None
+    vector, degraded = await _query_vector(
+        org_id=org_id,
+        query=query,
+        embedder=embedder,
+        run_id=run_id,
+        actor_user_id=actor_user_id,
+        settings=settings,
+    )
 
     async with org_session(org_id) as session:
         hits: dict[uuid.UUID, _Hit] = {}
@@ -154,7 +216,54 @@ async def search_knowledge(
     # would start raising on attribute access at the point of use rather than
     # here, which is a long way from the cause.
     ordered = sorted(hits.values(), key=lambda hit: hit.score, reverse=True)
-    return _capped(ordered, limit)
+    arms = ("vector", "lexical") if vector is not None else ("lexical",)
+    return Retrieval(passages=tuple(_capped(ordered, limit)), arms=arms, degraded=degraded)
+
+
+async def _query_vector(
+    *,
+    org_id: uuid.UUID,
+    query: str,
+    embedder: Embedder | None,
+    run_id: uuid.UUID | None,
+    actor_user_id: uuid.UUID | None,
+    settings: Settings | None,
+) -> tuple[list[float] | None, str | None]:
+    """The query as a vector, or the reason there is not one.
+
+    **Through `embed_texts`, never `embedder.embed` directly.** That function is
+    where the ledger row and the run's ceiling are, and calling the client
+    underneath it would be a spend nothing counted — which is precisely the hole
+    B-073 was filed about, one layer down from where it was noticed.
+
+    **A failure here is caught, not propagated.** The lexical arm has already
+    been paid for and still answers; turning a spending ceiling or a provider
+    hiccup into a failed search would take a working half of the feature away
+    for the sake of consistency. What must not happen is that it goes unsaid,
+    and the second half of the return value is that.
+    """
+    if embedder is None:
+        return None, NO_EMBEDDER
+
+    try:
+        vectors = await embed_texts(
+            org_id=org_id,
+            texts=[query],
+            embedder=embedder,
+            run_id=run_id,
+            actor_user_id=actor_user_id,
+            settings=settings,
+        )
+    except LLMError as error:
+        # Logged, because a deployment whose vector arm has quietly stopped
+        # working should be discoverable from something other than answer
+        # quality. The message is already sanitized by the embedder.
+        logger.warning("the query could not be embedded, searching lexically only: %s", error)
+        if isinstance(error, RunCostExceededError):
+            return None, EMBEDDING_REFUSED
+        return None, EMBEDDING_FAILED
+
+    return (list(vectors[0]), None) if vectors else (None, EMBEDDING_FAILED)
 
 
 async def _by_vector(

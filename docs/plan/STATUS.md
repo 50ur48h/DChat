@@ -3,12 +3,18 @@
 Current position: **Phases 0–5 and 7–9 signed off. Phase 6 merged, its gate
                   partially met and deliberately unticked. Phase 10 is half
                   built: WP10.1 is complete and on `main` (#64 and #65, merged
-                  2026-08-17), and WP10.2 — the gate — has not started.** An
-                  organization's own documents can now be uploaded, chunked,
-                  embedded, retrieved and consulted by the agent, tenant-isolated
-                  by RLS like every other tenant table; what is missing is the
-                  half of Phase 10 that says what a *word* means, which is where
-                  both of the phase's P1s live. The **Phase 9 gate
+                  2026-08-17), **B-073 is open for review**, and WP10.2 — the
+                  gate — has not started.** An organization's own documents can
+                  now be uploaded, chunked, embedded, retrieved and consulted,
+                  tenant-isolated by RLS like every other tenant table — and
+                  since B-073 they are **actually embedded**, which nothing in
+                  the application had ever done: no code path built an embedder,
+                  so every upload stored text alone and the vector arm was dead
+                  in production. It is now a metered, run-charged, ceiling-checked
+                  spend like every other. What is missing is the half of Phase 10
+                  that says what a *word* means, which is where both of the
+                  phase's P1s live — plus **B-075**, which says the agent cannot
+                  currently call the retrieval tool at all. The **Phase 9 gate
                   was signed off on 2026-08-16** (#60): 20/20 golden evals, a
                   seeded wrong-date draft caught deterministically with no model
                   call, and an answer card showing its citation and its
@@ -31,7 +37,14 @@ Current position: **Phases 0–5 and 7–9 signed off. Phase 6 merged, its gate
                   a green suite. See "Second data source" below. Two of them
                   are already closed: **WP8.4** (#55) fixed the capability check
                   the hub table defeated, and **B-056** with it.
-Next step:        **WP10.2** (`p10.2-semantic`), the Phase 10 **gate** PR —
+Next step:        **B-018** (`b018-card-embeddings`), which **B-073 has just
+                  unblocked** — a vector column on `catalog_tables`, an
+                  idempotent backfill over cards, and a rerank in `search_cards`
+                  fed by a **query** embedding computed inside `build_context`.
+                  That is the agent's own path, so it is where the spending
+                  machinery B-073 built is actually exercised on every run, and
+                  golden eval **#14** going green live is its evidence. Then
+                  **WP10.2** (`p10.2-semantic`), the Phase 10 **gate** PR —
                   semantic definitions and verified queries, which owe
                   **B-059** *and* **B-070**: the layer must be able to *import*
                   definitions a database already carries, admin-reviewed with
@@ -40,14 +53,14 @@ Next step:        **WP10.2** (`p10.2-semantic`), the Phase 10 **gate** PR —
                   source as well as the pizza one, and the phase has done its job
                   when the question that answered **0 units** answers something
                   else.
-                  Worth taking first or alongside: **B-073 with B-018**. The
-                  `search_knowledge` tool runs on the **lexical arm alone**
-                  because an embedder on `ToolContext` is a spending capability
-                  reaching the agent loop, and D-019's ceiling and B-040's guard
-                  do not see it yet. B-018 is blocked behind the same question,
-                  and golden eval **#14** stays red live until both are done.
-                  **Nothing is in flight**: no open PR, no unmerged branch, and
-                  `main` at **29b028e** carries every commit this session made.
+                  WP10.2 also owes **B-075 (P1)**, raised by B-073 and larger
+                  than either: the research loop dispatches `run_sql` and nothing
+                  else, so `search_knowledge` is registered, described in every
+                  prompt, and **unreachable**. Whatever puts definitions in front
+                  of the planner is the same mechanism that puts a retrieved
+                  passage there, so the two are one piece of work.
+                  **In flight**: `b073-embedder-in-the-loop`, B-073's PR, open for
+                  review.
 Merge policy: ASK
 Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  (owner, 2026-08-17), so `nightly-evals.yml` can run — keep its
@@ -55,7 +68,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-17 by Claude Code (session end — WP10.1 merged; next session starts WP10.2)
+Last updated: 2026-08-17 by Claude Code (B-073 open for review; B-018 next, then WP10.2)
 
 ---
 
@@ -1548,6 +1561,60 @@ unexplained.
       reranking card search needs a *query* embedding inside `build_context` —
       the agent's own path — which is the spending-capability question filed as
       **B-073**. The two go together. Raised **B-073** and **B-074**
+- [x] **B-073 (P2)** An embedding is a spend, so it goes through the same door,
+      the same meter and the same ceiling as every other one
+      — taken before WP10.2 at the owner's direction, because a gate that
+      demonstrates retrieval must demonstrate the half that reads *meaning*.
+      **DECISIONS D-031** settles the question the entry left open — what happens
+      when the ceiling refuses an embedding mid-run — and the answer is that the
+      **lexical arm still answers and the result says the other one did not**.
+      8.5 calls budget exhaustion not a failure; the lexical arm has already been
+      paid for; and the alternative is worse than either, because a search that
+      quietly halved itself reports *"nothing is written down about that"*, which
+      reads as a fact about the customer's documents and invites a model to stop
+      looking. `Retrieval.degraded` is that distinction, and the tool prints it
+      **before** the "nothing found" sentence.
+      **`get_embedder` is now the one door an embedder comes out of**, which is
+      what makes B-040's guard possible at all: the session fixture wraps it
+      exactly as it wraps `registry.get_provider`, refuses anything whose
+      `is_stub` is false, in the same words, recording into the same list so one
+      per-test check covers both. `embed_texts` takes a **`run_id`**, writes it on
+      the ledger row and calls `budget.assert_within_limit` **before each batch**.
+      **Two things this found on the way, and both were larger than the entry.**
+      Nothing in the application had ever *built* an embedder — `OpenAIEmbedder`
+      was constructed nowhere, so the upload route ingested every document with
+      `embedder=None` and the vector arm was dead in production, not only in the
+      tool. And the query embedding **bypassed the meter entirely**, because
+      `retrieve.py` called `embedder.embed` rather than `embed_texts`: the same
+      defect one layer below where it had been noticed.
+      **Raised B-075 (P1)**, the largest thing here and not fixable in this PR:
+      the research loop dispatches `run_sql` and nothing else, so
+      `search_knowledge` is registered, described in every prompt, and
+      **unreachable**. WP10.2 owns it, because putting definitions in front of the
+      planner is the same mechanism.
+      15 new tests. Tampered four ways, all caught: dropping the ceiling check,
+      dropping `run_id` from the ledger row, disabling the guard's `is_stub` test
+      (`DID NOT RAISE`, twice), and removing the role matrix's embedder seam —
+      which failed **both** ways B-040 designed for, raising *"a test asked for a
+      live embedder"* and then failing the test with *"this test reached for
+      ['embeddings']"*.
+      **Verified live** on 2026-08-17, for about a ten-thousandth of a cent.
+      `text-embedding-3-small` re-checked against the account with
+      `GET /v1/models` and its width **measured** at 1536 before anything was
+      written to `.env` (standing note 4). A two-chunk policy document uploaded
+      to the demo org came back `indexed, chunks=2, embedded=2`; the question
+      *"what do we count as takings"* — which shares **no word** with the
+      document — returned both passages, each marked `[vector]`. The ledger shows
+      `embed/embed text-embedding-3-small`, 7 tokens **charged to the run** and 48
+      tokens charged to no run (the ingest). Re-asked with the ceiling already
+      spent, the same search came back `arms=('lexical',)` and said *"the search
+      by meaning was not run because this run has reached its spending
+      ceiling"* — and returned **zero** passages, which is the whole argument in
+      one line: without the vector arm that question finds nothing, and the
+      difference between saying so and saying *"nothing is written down"* is what
+      D-031 is about. Raised **B-076**: at $0.02 per million tokens a 7-token
+      embedding costs $0.00000014 and `cost_usd` rounds it to **zero**, so a
+      thousand searches are invisible to the ceiling that sums that column
 - [ ] WP10.2 Semantic definitions + verified queries + critic enforcement ← gate
 - [ ] GATE: uploaded policy changes generated SQL; isolation test; sign-off
 
