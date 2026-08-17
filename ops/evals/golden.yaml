@@ -26,11 +26,22 @@
 #
 # CHECKS
 #   truth:              dotted path into truths.json; the expected value
+#   truth_any:          a list of paths, any of which is a right answer — for
+#                       a thing with two correct spellings, such as a store
+#                       named by its id or by its name (B-066)
 #   tolerance:          relative tolerance for a numeric compare (default 0)
-#   expect.value_of:    result column whose single value is compared to `truth`
+#   expect.value_of:    result column whose single value is compared to `truth`.
+#                       A *hint*, not a requirement, since B-066: a real model
+#                       aliases its output however it likes, so the harness
+#                       looks for the column by name first and then for the
+#                       value itself — see `match_value` in runner.py for the
+#                       three rules and why their order keeps CI honest.
 #   expect.rows:        exact row count the query must return
 #   expect.must_cite:   minimum number of executions the answer must cite
 #   expect.must_refuse: the run must end answered=false
+#   expect.may_refuse:  an honest refusal is *also* a right answer here. For a
+#                       question with two defensible outcomes — see #17 and #19.
+#                       A refusal must still say why; silence is not honesty.
 #   expect.sql_contains / sql_excludes: substrings of the executed SQL
 #   expect.answer_contains:  live mode only — prose is scripted in CI
 #   expect.limitations_min:  the answer must carry at least this many caveats
@@ -81,7 +92,11 @@
 - id: 4
   question: Which store brought in the most revenue?
   classes: [single-shot, ranking]
-  truth: revenue.top_store_by_revenue
+  # Two right answers, and the second is the better one (B-066). A real model
+  # answers "Northgate", not "3", and it should: an internal key reaching a
+  # reader is itself a defect (B-061, B-020). The old case accepted only the id
+  # and scored the good answer as a failure.
+  truth_any: [revenue.top_store_by_revenue, revenue.top_store_by_name]
   script:
     sql: >-
       SELECT store_id, ROUND(SUM(total_amount)::numeric, 2) AS revenue FROM orders
@@ -208,7 +223,8 @@
 - id: 12
   question: Which store drove the recent revenue decline?
   classes: [multi-step, relative-date]
-  truth: decline.store_id
+  # Same two spellings as #4; `decline` has carried both from the start.
+  truth_any: [decline.store_id, decline.store_name]
   script:
     sql: >-
       SELECT store_id,
@@ -280,13 +296,16 @@
   question: How are we doing?
   classes: [ambiguous]
   # No single right answer. What is checked is that it does not pretend there is
-  # one: a bounded diagnostic that states what it looked at.
+  # one: a bounded diagnostic that states what it looked at — *or* an honest
+  # "that is too vague to answer, tell me what you want to know", which the live
+  # run gave and which this case used to score as a failure (B-066).
   script:
     sql: >-
       SELECT COUNT(*) AS orders, ROUND(SUM(total_amount)::numeric, 2) AS revenue
       FROM orders WHERE status = 'completed'
         AND order_date >= DATE '2026-07-01' AND order_date < DATE '2026-08-01'
   expect:
+    may_refuse: true
     must_cite: 1
 
 - id: 18
@@ -310,11 +329,19 @@
   classes: [empty-result, honesty]
   # After `as_of`, so the seed has nothing there. "Future" is only expressible
   # because the anchor is fixed (D-027); against a wall clock no date stays future.
+  #
+  # Two right answers, which is why `may_refuse` is here (B-066). Counting the
+  # rows and reporting **zero** is right. Saying *"the orders data ends on
+  # 2026-07-31, so it does not cover November"* is better, and it is D-027's last
+  # clause — "if the range runs past the end of the data, say so" — working
+  # exactly as written. The live run gave the second and this case scored it as a
+  # failure, which is the harness punishing the product for behaving well.
   script:
     sql: >-
       SELECT COUNT(*) AS order_count FROM orders
       WHERE order_date >= DATE '2026-11-01' AND order_date < DATE '2026-12-01'
   expect:
+    may_refuse: true
     value_is: 0
     value_of: order_count
     must_cite: 1

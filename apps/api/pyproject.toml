@@ -90,6 +90,13 @@ known-first-party = ["dataagent"]
 # ---------------------------------------------------------------------------
 [tool.pyright]
 include = ["src", "tests"]
+# `ops/evals` is where the eval harness lives, and `tests/evals` imports its
+# checking half directly (**B-066**). A resolution path only: `ops/` stays out of
+# `include`, so the harness is still ruff-checked rather than pyright-checked —
+# it is a standalone `uv` script with its own dependencies. Without this the test
+# file's every reference to `Result` and `match_value` is `Unknown` under strict
+# mode, which is 66 errors that say nothing.
+extraPaths = ["../../ops/evals"]
 pythonVersion = "3.12"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false
