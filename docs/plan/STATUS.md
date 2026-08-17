@@ -1,7 +1,14 @@
 # STATUS — data-agent build
 
 Current position: **Phases 0–5 and 7–9 signed off. Phase 6 merged, its gate
-                  partially met and deliberately unticked.** The **Phase 9 gate
+                  partially met and deliberately unticked. Phase 10 is half
+                  built: WP10.1 is complete and on `main` (#64 and #65, merged
+                  2026-08-17), and WP10.2 — the gate — has not started.** An
+                  organization's own documents can now be uploaded, chunked,
+                  embedded, retrieved and consulted by the agent, tenant-isolated
+                  by RLS like every other tenant table; what is missing is the
+                  half of Phase 10 that says what a *word* means, which is where
+                  both of the phase's P1s live. The **Phase 9 gate
                   was signed off on 2026-08-16** (#60): 20/20 golden evals, a
                   seeded wrong-date draft caught deterministically with no model
                   call, and an answer card showing its citation and its
@@ -39,8 +46,8 @@ Next step:        **WP10.2** (`p10.2-semantic`), the Phase 10 **gate** PR —
                   reaching the agent loop, and D-019's ceiling and B-040's guard
                   do not see it yet. B-018 is blocked behind the same question,
                   and golden eval **#14** stays red live until both are done.
-                  **WP10.1 is complete** — #64 merged WP10.1a, and WP10.1b is on
-                  `p10.1b-knowledge-tool` (#65).
+                  **Nothing is in flight**: no open PR, no unmerged branch, and
+                  `main` at **29b028e** carries every commit this session made.
 Merge policy: ASK
 Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  (owner, 2026-08-17), so `nightly-evals.yml` can run — keep its
@@ -48,34 +55,72 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-17 by Claude Code (WP10.1 complete — knowledge ingest, retrieval, tool and documents page)
+Last updated: 2026-08-17 by Claude Code (session end — WP10.1 merged; next session starts WP10.2)
 
 ---
 
 ## ⚠ Session-end handoff — read this before starting anything
 
-**Three PRs merged this session: #62 (B-064), #63 (B-066) and #64 (WP10.1a).**
-One is part-built and pushed: **#65, WP10.1b**. Nothing is only local.
+**Four PRs merged this session: #62 (B-064), #63 (B-066), #64 (WP10.1a) and
+#65 (WP10.1b).** **Nothing is in flight** — no open PR, no unmerged branch,
+nothing local. `main` is at **29b028e** and every branch this session used has
+been deleted on the remote.
+
+### 0. Where to pick up: WP10.2, the Phase 10 gate
+
+**Start here.** Branch `p10.2-semantic`. It is the **gate PR** for Phase 10, so
+it ends with a manual test script (CLAUDE.md: numbered steps, what the user
+should see at each, including the failure case) and a sign-off — do not tick the
+GATE box yourself.
+
+Read, in this order: plan §6 WP10.2, architecture Part 5.5 and 4.8, then the
+four things below that already know what this WP is for. Two backlog items are
+**not optional extras — they are what the WP is for**:
+
+* **B-059 (P1)** — the layer must be able to **import** definitions a database
+  already carries, admin-reviewed and with provenance kept, not only host ones
+  somebody retypes. The F&B operator arrived with 18 metrics, 8 open
+  data-quality questions and an assumptions table already written down, and
+  every one of them sits in the catalog as ordinary data. A product that only
+  accepts definitions retyped will mostly be given none.
+* **B-070 (P2)** — a metric must settle **which of two defensible denominators**
+  it means. `repeat_rate` is 7861/7985 (customers who ordered) in `truths.json`
+  and a live model computed 7861/8000 (all customers); both read the English
+  correctly. This one is on the **pizza fixture**, which is the more damning
+  place for it, and it gives WP10.2 a before-and-after that needs no customer
+  data.
+
+The gate walks against the **F&B** source as well as the pizza one, and the
+phase has done its job when the question that answered **0 units** (B-059)
+answers something else. `make seed.fnb SQLITE=.SampleData/<file>.sqlite` rebuilds
+that source; see "Second data source" below and standing note 6.
+
+Also on Phase 10's account, and worth taking first or in the same WP:
+**B-073 with B-018** — see section 3.
+
+Everything else Phase 10 could reach is filed and none of it blocks: **B-054**
+(the profiler samples the first rows on disk), **B-055**, **B-058** (an
+undeclared but working join is refused), **B-067**.
 
 ### 1. Session ritual
 
-`git fetch --all && git checkout main && git pull`, then `gh pr list`.
-
-`main` now carries the whole of WP10.1a: `knowledge_documents` and
+`git fetch --all && git checkout main && git pull`, then `gh pr list` — which
+should be empty. `main` carries the whole of WP10.1: `knowledge_documents` and
 `knowledge_chunks` under RLS, chunking, embeddings metered into `usage_ledger`,
-ingest, and hybrid retrieval. **#65 is already rebased onto it** — it was
-stacked on #64 while that was open, and `git rebase --onto origin/main <old-base>`
-was needed rather than a plain rebase, because a squash merge gives `main` a
-different hash for the same content and a plain rebase tries to replay commits
-that are already there. Worth remembering the next time a branch is stacked.
+ingest, hybrid retrieval, the `search_knowledge` tool, six documents routes and
+the documents page.
 
-### 2. WP10.1b is finished
+One git lesson worth keeping, because it will recur the next time a branch is
+stacked: **after a squash merge, a plain `git rebase` tries to replay commits
+that are already in `main`**, since the squash gave `main` a different hash for
+the same content. #65 was stacked on #64 and needed
+`git rebase --onto origin/main <old-base> <branch>`.
 
-Branch `p10.1b-knowledge-tool`, PR **#65**. The tool, its framing, the six
-routes, the role matrix and the documents page are all built and tested.
+### 2. What WP10.1 left behind, and the one thing it could not close
 
-The one thing that did **not** land, and the reason is worth reading rather
-than the entry: **B-018 was listed for this WP and is not closable in it.**
+The tool, its framing, the six routes, the role matrix and the documents page
+are all built and tested. What did **not** land, and the reason matters more
+than the entry: **B-018 was listed for WP10.1b and is not closable in it.**
 Reranking card search needs a *query* embedding computed inside `build_context`
 — the agent's own path — which is the same spending-capability question as
 **B-073**. Both `STATUS` and B-018's own backlog row now say so rather than
@@ -99,9 +144,12 @@ refuses a non-stub provider, and the trace saying which arm answered.
 
 ### 4. Suite numbers, and two traps that cost time getting them
 
-**`1297 passed, 20 skipped`, exit code 0** — measured twice, once for WP10.1a
-and again after WP10.1b registered a new tool (which changes the prompt every
-agent test sees). Both from runs with nothing else touching the database.
+**API: `1297 passed, 20 skipped`, exit code 0. Web: 92 tests.** This is the
+number for `main` at **29b028e** — measured twice on the API side, once for
+WP10.1a and again after WP10.1b registered a new tool (which changes the prompt
+every agent test sees), both from runs with nothing else touching the database.
+A new session that gets a different number should suspect the machine before the
+code, for the reason in the next paragraph.
 
 Getting there took three attempts and the two failed ones are worth recording.
 Each showed a single `ERROR` in a **different** test — `tests/llm/test_front_door.py`
