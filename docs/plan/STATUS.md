@@ -24,22 +24,23 @@ Current position: **Phases 0–5 and 7–9 signed off. Phase 6 merged, its gate
                   a green suite. See "Second data source" below. Two of them
                   are already closed: **WP8.4** (#55) fixed the capability check
                   the hub table defeated, and **B-056** with it.
-Next step:        **Finish WP10.1b** on `p10.1b-knowledge-tool` (#65, draft) —
-                  the documents page is all that is left of it. Handoff section
-                  2 below lists exactly what to write and in what order. Then
-                  **WP10.2**, which owes **B-059** *and* **B-070**: a semantic
-                  layer must be able to *import* definitions a database already
-                  carries, and must settle which of two defensible denominators
-                  a metric means.
-                  **WP10.1a merged as #64** on 2026-08-17, so documents can be
-                  uploaded, chunked, embedded and retrieved under RLS, and the
-                  agent has a `search_knowledge` tool. Also merged this session:
-                  **B-064** (#62), so a conversation is a conversation —
-                  *"check again"* → *"The recheck confirms that 3,718 orders were
-                  placed in July 2026"*, running its own query and citing it —
-                  and **B-066** (#63), so the eval harness judges a model rather
-                  than only a script and a nightly result may be read as a
-                  product signal.
+Next step:        **WP10.2** (`p10.2-semantic`), the Phase 10 **gate** PR —
+                  semantic definitions and verified queries, which owe
+                  **B-059** *and* **B-070**: the layer must be able to *import*
+                  definitions a database already carries, admin-reviewed with
+                  provenance, and must settle which of two defensible
+                  denominators a metric means. Its gate walks against the **F&B**
+                  source as well as the pizza one, and the phase has done its job
+                  when the question that answered **0 units** answers something
+                  else.
+                  Worth taking first or alongside: **B-073 with B-018**. The
+                  `search_knowledge` tool runs on the **lexical arm alone**
+                  because an embedder on `ToolContext` is a spending capability
+                  reaching the agent loop, and D-019's ceiling and B-040's guard
+                  do not see it yet. B-018 is blocked behind the same question,
+                  and golden eval **#14** stays red live until both are done.
+                  **WP10.1 is complete** — #64 merged WP10.1a, and WP10.1b is on
+                  `p10.1b-knowledge-tool` (#65).
 Merge policy: ASK
 Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  (owner, 2026-08-17), so `nightly-evals.yml` can run — keep its
@@ -47,7 +48,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-17 by Claude Code (session end — WP10.1a done and awaiting merge, WP10.1b part-built)
+Last updated: 2026-08-17 by Claude Code (WP10.1 complete — knowledge ingest, retrieval, tool and documents page)
 
 ---
 
@@ -68,62 +69,39 @@ was needed rather than a plain rebase, because a squash merge gives `main` a
 different hash for the same content and a plain rebase tries to replay commits
 that are already there. Worth remembering the next time a branch is stacked.
 
-### 2. WP10.1b — what is built, what is left, and where to pick up
+### 2. WP10.1b is finished
 
-Branch `p10.1b-knowledge-tool`, PR **#65** (draft). Everything below is
-committed and green: the **full API suite at 1297 passed / 20 skipped**, plus
-`ruff`, `ruff format`, `pyright`, `check_status.sh`, the web lint and typecheck
-and the 81 web tests. See **2b** for the two concurrency flakes it took to get a
-trustworthy number.
+Branch `p10.1b-knowledge-tool`, PR **#65**. The tool, its framing, the six
+routes, the role matrix and the documents page are all built and tested.
 
-**Done:**
+The one thing that did **not** land, and the reason is worth reading rather
+than the entry: **B-018 was listed for this WP and is not closable in it.**
+Reranking card search needs a *query* embedding computed inside `build_context`
+— the agent's own path — which is the same spending-capability question as
+**B-073**. Both `STATUS` and B-018's own backlog row now say so rather than
+carrying the old promise. Take B-073 and B-018 together; golden eval **#14**
+stays red live until they are done.
 
-* **`agent/tools/knowledge.py`** — the `search_knowledge` tool, registered in
-  `default_registry()` **before** `run_sql`, which is not cosmetic: 5.5's
-  division of labour is that a document says what a term *means* and the
-  database says what its *value* is, so a run reaching for SQL first has skipped
-  the step the tool exists for.
-* **Architecture 7.4's framing is in the result envelope**, as plan WP10.1 asks
-  — and `framing` is the **first field** of the output model, because a frame
-  rendered after the passage is a caveat about text the model has already read.
-  10 tests, including the one the plan names: a document saying *"ignore your
-  instructions"* is returned **unaltered** and wrapped.
-* **`knowledge/routes.py`** — upload, list, search, reindex, delete,
-  supported-types. Uploading is **Contributor-or-Admin** (architecture 10.2's
-  `[contributor+]`): a document is not data a Reader supplies, it is guidance
-  every future run will be told to follow.
-* **The role matrix carries all six routes** and is asserted, not only
-  snapshotted. Each role probes **its own** document, because DELETE removes it
-  and the next role would otherwise record `deny(404)` where the matrix means a
-  role decision. The Reader's denials are **403, not 404** — the guard fired.
-* **`api-client/client.ts` accepts a multipart body** (FormData passes through
-  untouched and its Content-Type is left unset, because only the browser knows
-  the boundary it generated). This is the **one piece with no consumer yet** —
-  see below.
+### 3. What B-073 actually needs, since it now gates two things
 
-**Left to do, in this order:**
+`search_knowledge` runs on the **lexical arm alone** today: `retrieve.py` is
+hybrid and its vector arm is tested and works, but the *tool* calls it without an
+embedder. That was deliberate. An embedder on `ToolContext` is a **spending
+capability reaching the agent loop**, and every guard around spending is built
+for the chat path — **D-019**'s per-run cost ceiling reads `usage_ledger` rows
+for the run, and **B-040**'s test guard wraps `registry.get_provider`. Neither
+sees an embedding call made from inside a tool. Wiring it as a side effect of a
+retrieval feature would put unmetered-against-the-run spend into the loop.
 
-1. **The documents page.** The client change above is the groundwork and stops
-   there. Still needed: `KnowledgeDocument` in `api-client/types.ts` with its
-   type guard, the four client methods (`documents`, `uploadDocument`,
-   `reindexDocument`, `removeDocument`), a `components/screens/documents.tsx`,
-   and `app/orgs/[orgId]/documents/page.tsx`. Follow `data-sources.tsx` for the
-   shape and **B-008's rule**: a Reader must not be offered an upload control
-   the API will refuse — `useOrgRole` is how the other screens do it.
-   The screen should show `embedded_count` against `chunk_count` in words
-   rather than rounding it up to "indexed": *searchable by wording, not yet by
-   meaning* is a real and temporary state and the API reports it deliberately.
-2. **Do NOT try to close B-018 in this WP.** It was listed for WP10.1b and that
-   was wrong, discovered while building: reranking card search needs a **query**
-   embedding at search time, which happens inside `build_context` in the agent's
-   own path — the same spending-capability-in-the-loop question as **B-073**.
-   B-018 is therefore blocked behind B-073 and both should be taken together,
-   after which golden eval **#14** should start passing live.
+So B-073 wants: an embedder on `ToolContext`, the run's cost ceiling counting
+embedding tokens, the B-040 guard refusing a non-stub embedder exactly as it
+refuses a non-stub provider, and the trace saying which arm answered.
 
-### 2b. The suite is green; two flakes were concurrency, and here is the proof
+### 4. Suite numbers, and two traps that cost time getting them
 
-**Settled: `1297 passed, 20 skipped` with a real exit code of 0**, from a run
-with nothing else touching the database.
+**`1297 passed, 20 skipped`, exit code 0** — measured twice, once for WP10.1a
+and again after WP10.1b registered a new tool (which changes the prompt every
+agent test sees). Both from runs with nothing else touching the database.
 
 Getting there took three attempts and the two failed ones are worth recording.
 Each showed a single `ERROR` in a **different** test — `tests/llm/test_front_door.py`
@@ -141,22 +119,7 @@ Two traps worth carrying forward:
 * **`tail -4` can cut the summary line itself**, leaving only the `ERROR` row
   visible and no count. That is how the first one looked worse than it was.
 
-### 2a. What B-073 actually needs, since it now gates two things
-
-`search_knowledge` runs on the **lexical arm alone** today: `retrieve.py` is
-hybrid and its vector arm is tested and works, but the *tool* calls it without an
-embedder. That was deliberate. An embedder on `ToolContext` is a **spending
-capability reaching the agent loop**, and every guard around spending is built
-for the chat path — **D-019**'s per-run cost ceiling reads `usage_ledger` rows
-for the run, and **B-040**'s test guard wraps `registry.get_provider`. Neither
-sees an embedding call made from inside a tool. Wiring it as a side effect of a
-retrieval feature would put unmetered-against-the-run spend into the loop.
-
-So B-073 wants: an embedder on `ToolContext`, the run's cost ceiling counting
-embedding tokens, the B-040 guard refusing a non-stub embedder exactly as it
-refuses a non-stub provider, and the trace saying which arm answered.
-
-### 3. The live evals were 12/20; B-066 is fixed and the taxonomy was wrong
+### 5. The live evals were 12/20; B-066 is fixed and the taxonomy was wrong
 
 `make evals` is 20/20 in CI and on any developer machine, and stays 20/20. The
 **live** run — real models, 223,685 tokens — was 12/20, and the taxonomy always
@@ -191,7 +154,7 @@ affected cases live corrected two lines of that taxonomy:
 dollar. Its absence is why B-066 existed: the harness had only ever been
 exercised by running it, in the one mode where the defect could not appear.
 
-### 4. `nightly-evals.yml` can now run — the key is a repository secret
+### 6. `nightly-evals.yml` can now run — the key is a repository secret
 
 The owner added `OPENAI_API_KEY` to the repository on **2026-08-17**, so the
 workflow's first step no longer refuses. It has still **never executed**, and the
@@ -210,7 +173,7 @@ questions and the two multi-step ones were half of it, so `EVALS_TOKEN_BUDGET` i
 the control that matters — it is checked **before** each question, which is what
 makes it a ceiling rather than a report.
 
-### 5. A false block is the critic's characteristic failure
+### 7. A false block is the critic's characteristic failure
 
 Standing note 5 above says it and this is the second place it is written, because
 it cost three defects in one session. The rule: **every new critic rule ships
@@ -218,7 +181,7 @@ with two tests — one proving it fires, one proving it does not fire on a
 legitimate question near it.** Golden eval #18 is the first test that caught a
 false block before a human did, which is the whole argument for the eval suite.
 
-### 6. Run the thing you just changed
+### 8. Run the thing you just changed
 
 Four times this session a `\n` inside a shell heredoc became a real newline and
 broke what it was writing — a string literal, twice; a `make` recipe once, which
@@ -232,7 +195,7 @@ shipping a page and never loading it.**
 recipe passes `--no-cache`, because a warm ruff cache twice reported a clean tree
 that CI then failed on.
 
-### 7. Two databases, and only one is a fixture
+### 9. Two databases, and only one is a fixture
 
 `Demo` is the pizza generator, whose numbers `truths.json` and every eval depend
 on — do not touch it. `F&B demo` is a real operator's warehouse loaded from a
@@ -247,7 +210,7 @@ customer's views were `UNION ALL` blocks reproducing their own data-quality
 findings verbatim, and a scan of row values did not catch it. CLAUDE.md carries
 the rule.
 
-### 8. What is open, and what it means
+### 10. What is open, and what it means
 
 **P1** — **B-059**: the customer's own semantic layer is invisible; WP10.2 owes an
 *import* path, not only an authoring UI. **B-060**: the same question twice chose
@@ -275,7 +238,7 @@ collect, CI is unaffected). **B-061** with **B-020**: internal keys and the wron
 currency symbol reach the reader. **B-062**: no way to ask a question as of a
 past date. **B-049**, **B-050**, **B-046/047**.
 
-### 9. Habits this session earned
+### 11. Habits this session earned
 
 - **Run the phase's own deliverable before asking anyone to walk a gate.** It
   found B-041/042/043, B-051, B-052, and this session `make evals.setup` failing
@@ -1507,30 +1470,36 @@ unexplained.
       Raised **B-071** (no vector index yet, deliberately — the decision owes a
       measurement) and **B-072** (two object stores that should converge in
       WP12.2, and the duplicated half is the safety half).
-- [~] WP10.1b Retrieval tool + routes + documents page — `p10.1b-knowledge-tool`
-      **(part-built, #65 draft, stacked on #64)**
-      — **Done:** the `search_knowledge` tool with architecture 7.4's framing in
-      the **result envelope** (`framing` is the output model's *first* field — a
-      frame rendered after the passage is a caveat about text already read), the
-      plan's named injection test (a document saying *"ignore your
-      instructions"* comes back **unaltered** and wrapped), registration
-      **before** `run_sql` because 5.5's division of labour puts "what does this
-      mean" ahead of "what is the value", the six documents routes with
-      uploading at **Contributor-or-Admin** (10.2's `[contributor+]`: a document
-      is guidance every future run follows, not data a Reader supplies), and the
-      role matrix extended to cover them — asserted rather than only
-      snapshotted, with a document **per role** so DELETE cannot make the next
-      role's probe a `deny(404)`, and the Reader's denials confirmed as **403**.
-      The API client learned to send a multipart body.
-      — **Left:** the documents page itself (types, four client methods, screen,
-      route), following B-008's rule that a Reader is never offered a control
-      the API will refuse. **B-018 is NOT closable here** and that was found by
-      building it: reranking card search needs a *query* embedding inside
-      `build_context`, which is the agent's own path — the same
-      spending-capability question as **B-073**, so the two go together.
-      Raised **B-073** (the tool is lexical-only until an embedder can reach the
-      loop safely) and **B-074** (a pre-existing conftest name collision, proved
-      pre-existing by stashing this branch)
+- [x] WP10.1b Retrieval tool + routes + documents page — `p10.1b-knowledge-tool`
+      — the `search_knowledge` tool with architecture 7.4's framing in the
+      **result envelope** (`framing` is the output model's *first* field, because
+      a frame rendered after the passage is a caveat about text already read),
+      the plan's named injection test (a document saying *"ignore your
+      instructions"* comes back **unaltered** and wrapped — suppressing it would
+      be worse, since then nobody could see what a customer's document says),
+      and registration **before** `run_sql` because 5.5 puts "what does this
+      term mean" ahead of "what is its value".
+      **Six documents routes**, with uploading at **Contributor-or-Admin**
+      (10.2's `[contributor+]`: a document is guidance every future run follows,
+      not data a Reader supplies). The role matrix covers all six and **asserts**
+      them rather than only snapshotting, with a document **per role** so DELETE
+      cannot turn the next role's probe into a `deny(404)`, and the Reader's
+      denials asserted as **403** specifically — a 404 would mean the route was
+      reached and the object was missing, a different claim.
+      **The documents page**, following B-008: a Reader sees the list and no
+      controls, and an unknown role **fails closed**. A part-embedded document
+      says *"4 passages, 1 searchable by meaning so far"* rather than rounding up
+      to "indexed" — that is the state a large upload spends longest in. A
+      failure renders as the thing to act on, carrying the API's own words, so a
+      scanned PDF says it needs OCR.
+      **92 web tests** (up from 81) and 11 knowledge-tool tests. Tampered three
+      ways, all caught: making the role gate fail open failed 3 tests, setting
+      `Content-Type` on a multipart body failed the upload test, and the API-side
+      tampers are recorded under WP10.1a.
+      **B-018 was listed here and is not closable here**, found by building it:
+      reranking card search needs a *query* embedding inside `build_context` —
+      the agent's own path — which is the spending-capability question filed as
+      **B-073**. The two go together. Raised **B-073** and **B-074**
 - [ ] WP10.2 Semantic definitions + verified queries + critic enforcement ← gate
 - [ ] GATE: uploaded policy changes generated SQL; isolation test; sign-off
 

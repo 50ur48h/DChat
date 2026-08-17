@@ -30,6 +30,9 @@ export default function OrgPage({ params }: { params: Promise<{ orgId: string }>
             <Link href={`/orgs/${orgId}/data-sources`}>
               <Button>Data sources</Button>
             </Link>
+            <Link href={`/orgs/${orgId}/documents`}>
+              <Button>Documents</Button>
+            </Link>
             <Link href="/">
               <Button>Back</Button>
             </Link>

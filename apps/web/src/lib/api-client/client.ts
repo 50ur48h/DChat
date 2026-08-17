@@ -19,6 +19,7 @@ import {
   isExecution,
   isHealth,
   isInvitation,
+  isKnowledgeDocument,
   isMe,
   isMember,
   isProfileResult,
@@ -36,6 +37,7 @@ import {
   type Execution,
   type Health,
   type Invitation,
+  type KnowledgeDocument,
   type Me,
   type Member,
   type NewDataSource,
@@ -167,6 +169,14 @@ export interface Api {
     columnId: string,
     decision: { policy: string; reason?: string | undefined },
   ): Promise<void>;
+  documents(orgId: string): Promise<KnowledgeDocument[]>;
+  /**
+   * Uploads a file and indexes it. Takes a `File` rather than bytes so the
+   * browser writes its own multipart boundary — see `isMultipart` in this file.
+   */
+  uploadDocument(orgId: string, file: File, title?: string): Promise<KnowledgeDocument>;
+  reindexDocument(orgId: string, documentId: string): Promise<KnowledgeDocument>;
+  removeDocument(orgId: string, documentId: string): Promise<void>;
   conversations(orgId: string): Promise<Conversation[]>;
   createConversation(
     orgId: string,
@@ -269,6 +279,35 @@ export function createApi(getToken: () => Promise<string | null>): Api {
     },
     async removeDataSource(orgId, dataSourceId) {
       await call(`/v1/orgs/${orgId}/data-sources/${dataSourceId}`, { method: "DELETE" });
+    },
+    async documents(orgId) {
+      const payload = await call(`/v1/orgs/${orgId}/documents`);
+      if (!Array.isArray(payload) || !payload.every(isKnowledgeDocument)) {
+        throw new ApiError("The API's documents response did not match the expected shape", 200);
+      }
+      return payload;
+    },
+    async uploadDocument(orgId, file, title) {
+      const form = new FormData();
+      form.append("file", file);
+      // Only when given: an empty `title` part would beat the API's own default
+      // of the filename, and land a document called "" in the list.
+      if (title !== undefined && title.trim().length > 0) form.append("title", title.trim());
+      return narrow(
+        await call(`/v1/orgs/${orgId}/documents`, { method: "POST", body: form }),
+        isKnowledgeDocument,
+        "document",
+      );
+    },
+    async reindexDocument(orgId, documentId) {
+      return narrow(
+        await call(`/v1/orgs/${orgId}/documents/${documentId}/reindex`, { method: "POST" }),
+        isKnowledgeDocument,
+        "document",
+      );
+    },
+    async removeDocument(orgId, documentId) {
+      await call(`/v1/orgs/${orgId}/documents/${documentId}`, { method: "DELETE" });
     },
     async refreshCatalog(orgId, dataSourceId) {
       return narrow(
