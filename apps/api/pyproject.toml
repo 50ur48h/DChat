@@ -23,6 +23,11 @@ dependencies = [
     # transitively via pyjwt[crypto]; declared directly because we import it.
     "cryptography>=44.0",
     "sqlglot>=30.17.0",
+    # pgvector's SQLAlchemy type, so `knowledge_chunks.embedding` is a column
+    # the ORM and the migrations both understand rather than raw DDL either
+    # side has to keep in step by hand (WP10.1). The extension itself comes
+    # from the `pgvector/pgvector` image the compose stack already runs.
+    "pgvector>=0.3.6",
 ]
 
 [dependency-groups]

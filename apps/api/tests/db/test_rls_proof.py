@@ -70,6 +70,7 @@ class SeededOrgs:
     b_execution: uuid.UUID
     b_conversation: uuid.UUID
     b_run: uuid.UUID
+    b_document: uuid.UUID
 
 
 async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
@@ -284,6 +285,38 @@ async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
                     ),
                     {"org": org_id, "run": run_id, "statement": f"{name} took 41 orders"},
                 )
+                # WP10.1's two tables. The chunk is written with **no embedding**,
+                # which is its ordinary first state (revision 0016) and the one a
+                # backfill later fills in — so this proves isolation over the row
+                # shape that actually exists between ingest and embedding, rather
+                # than over an idealised finished one.
+                document_id = (
+                    await connection.execute(
+                        text(
+                            "INSERT INTO knowledge_documents "
+                            "(org_id, title, blob_path, mime, created_by) VALUES "
+                            "(:org, :title, :path, 'text/markdown', :user) RETURNING id"
+                        ),
+                        {
+                            "org": org_id,
+                            "title": f"{name} revenue policy",
+                            "path": f"{org_id}/docs/policy.md",
+                            "user": user_id,
+                        },
+                    )
+                ).scalar_one()
+                await connection.execute(
+                    text(
+                        "INSERT INTO knowledge_chunks "
+                        "(org_id, document_id, seq, text, headings) VALUES "
+                        "(:org, :document, 0, :text, '[\"Revenue\"]'::jsonb)"
+                    ),
+                    {
+                        "org": org_id,
+                        "document": document_id,
+                        "text": f"{name} counts revenue net of cancelled orders.",
+                    },
+                )
                 if org_id == org_b:
                     catalog.update(
                         data_source=data_source_id,
@@ -292,6 +325,7 @@ async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
                         execution=execution_id,
                         conversation=conversation_id,
                         run=run_id,
+                        document=document_id,
                     )
     finally:
         await engine.dispose()
@@ -305,6 +339,7 @@ async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
         b_execution=catalog["execution"],
         b_conversation=catalog["conversation"],
         b_run=catalog["run"],
+        b_document=catalog["document"],
     )
 
 
@@ -400,6 +435,17 @@ def _forged_insert(table: str, seeded: SeededOrgs) -> str:
         "findings": (
             "INSERT INTO findings (org_id, run_id, statement) VALUES "
             f"('{other_org}', '{seeded.b_run}', 'forged')"
+        ),
+        "knowledge_documents": (
+            "INSERT INTO knowledge_documents (org_id, title, blob_path, mime) VALUES "
+            f"('{other_org}', 'forged', '{other_org}/docs/forged.md', 'text/markdown')"
+        ),
+        # seq 1, because the seed already wrote seq 0 for this document: a forged
+        # row colliding on the unique constraint would be refused before the
+        # policy was ever consulted, and the test would pass proving nothing.
+        "knowledge_chunks": (
+            "INSERT INTO knowledge_chunks (org_id, document_id, seq, text) VALUES "
+            f"('{other_org}', '{seeded.b_document}', 1, 'forged')"
         ),
     }
     return statements[table]

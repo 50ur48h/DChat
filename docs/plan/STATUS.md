@@ -24,21 +24,21 @@ Current position: **Phases 0–5 and 7–9 signed off. Phase 6 merged, its gate
                   a green suite. See "Second data source" below. Two of them
                   are already closed: **WP8.4** (#55) fixed the capability check
                   the hub table defeated, and **B-056** with it.
-Next step:        **B-064 and B-066 are both done.** A conversation is a
-                  conversation now (**D-029**), verified live on 2026-08-17:
-                  *"How many orders were placed in July 2026?"* → **3718**, then
-                  *"check again"* → *"The recheck confirms that 3,718 orders were
-                  placed in July 2026"*, then *"and in June?"* → **3,742** — each
-                  running **its own** query and citing it, and the database says
-                  3718 and 3742. And the **eval harness can judge a model** now
-                  rather than only a script, so a nightly result may be read as a
-                  product signal. Then Phase 10 / **WP10.1**
-                  (`p10.1-knowledge`) — document ingest, chunking, embedding,
-                  tenant-isolated retrieval — which also closes **B-018**, and
-                  after it **WP10.2**, which owes **B-059** *and* **B-070**: a
-                  semantic layer must be able to *import* definitions a database
-                  already carries, and must settle which of two defensible
-                  denominators a metric means.
+Next step:        **Finish WP10.1a** on `p10.1-knowledge` — its entry under
+                  Phase 10 lists exactly what is left: embeddings, ingest,
+                  retrieve, and the org-isolation retrieval test. Then
+                  **WP10.1b** — the retrieval tool with L4 framing, the routes
+                  and the documents page, carrying **B-018** — and after it
+                  **WP10.2**, which owes **B-059** *and* **B-070**: a semantic
+                  layer must be able to *import* definitions a database already
+                  carries, and must settle which of two defensible denominators a
+                  metric means.
+                  Behind it, both merged on 2026-08-17: **B-064** (#62), so a
+                  conversation is a conversation — *"check again"* → *"The
+                  recheck confirms that 3,718 orders were placed in July 2026"*,
+                  running its own query and citing it — and **B-066** (#63), so
+                  the eval harness judges a model rather than only a script and a
+                  nightly result may be read as a product signal.
 Merge policy: ASK
 Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  (owner, 2026-08-17), so `nightly-evals.yml` can run — keep its
@@ -46,7 +46,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-17 by Claude Code (B-066 — the harness can judge a model)
+Last updated: 2026-08-17 by Claude Code (WP10.1a in progress; B-064 and B-066 merged)
 
 ---
 
@@ -1361,7 +1361,60 @@ unexplained.
       printed, which confirms the fallbacks are dead code in CI. Live on the
       affected cases: **#4, #8, #12, #16 pass**, #17 and #19 accepted as honest
       refusals, 6/7 — the seventh is B-070. 49,157 tokens. Raised **B-070**
-- [ ] WP10.1 Docs ingest/chunk/embed/retrieve under RLS + APIs
+- [~] WP10.1a Knowledge schema + chunking — `p10.1-knowledge` **(in progress)**
+      — **WP10.1 split in two** (plan §1.1), by what could go wrong: this half is
+      the **store and the text**, WP10.1b is the **agent and the API**. The split
+      is not a schema with no consumer — WP7.1's objection — because the library
+      is the schema's consumer and its tests exercise it end to end.
+      **Done and verified.** The **USER INPUT is in hand and checked**: the
+      owner's existing OpenAI key does the embedding (D-017 — one key, one bill,
+      one place to rotate), and `text-embedding-3-small` was verified against the
+      **live account** before being written into configuration rather than read
+      off a documentation page (standing note 4, B-027's habit). Its width was
+      measured too — one 5-token call — and it is **1536**, which is what
+      revision 0016 fixes for `knowledge_chunks.embedding`. A model of a
+      different width would have had every insert refused by a constraint nobody
+      was thinking about; `EMBEDDINGS_DIMENSIONS` exists so that mismatch is a
+      startup error naming both numbers.
+      **Revision 0016** adds `knowledge_documents` and `knowledge_chunks` — the
+      first new tenant tables in three phases, so the rule that has now bitten
+      six times applies: an RLS policy each, two lines in `TENANT_TABLES`, and
+      the rls_proof suite extended to seed **and forge** rows in both. Confirmed
+      live: RLS enabled *and* forced on both, one policy each, `vector(1536)`,
+      a **generated** `tsv` (revision 0009's reason: a column the database
+      derives cannot disagree with the text it indexes), and a **partial** index
+      over unembedded chunks so the backfill's work list is a query rather than a
+      scan. Migration round-trips to base and back. The proof suite was tampered
+      with — undeclaring one table — and
+      `test_no_tenant_table_can_be_added_without_protecting_it` failed, so the
+      guard is doing its job rather than passing quietly.
+      **`embedding` is nullable and that is a state, not an oversight.** A chunk
+      is lexically searchable the moment its text is written and semantically
+      searchable once a network round trip has succeeded; NOT NULL would force
+      ingest either to block on the provider or to lose the text.
+      **`knowledge/chunking.py`** is heading-aware and pure — the same document
+      chunks the same way on every machine, which is what lets its 15 goldens be
+      goldens. Four decisions each have a test: headings are the primary boundary
+      and length the secondary one; the heading **trail travels beside** the text
+      rather than inside it, so provenance is renderable and every embedding is
+      not inflated with the same words; overlap is a whole **paragraph**, never a
+      character window, because an embedding of half a number is worse than
+      useless; and a short section **stays short**, since merging across a
+      heading would make `headings` a lie. A `#` inside a code fence is not a
+      heading, which matters because a document full of SQL is exactly what an
+      analytics customer uploads. Tampered both ways — ignoring fences, dropping
+      the overlap — and the right two tests failed.
+      Raised **B-071** (no vector index yet, deliberately, and the decision owes
+      a measurement rather than an opinion).
+      **NEXT:** the rest of WP10.1a — `knowledge/embeddings.py` (batched, through
+      the Phase 6 provider config), `ingest.py` (extract, chunk, embed, store;
+      re-index as delete-and-rewrite) and `retrieve.py` (vector + lexical, RRF
+      merge, all under the org session so RLS isolates). Then the org-isolation
+      retrieval test in the rls_proof family — two orgs, one query, zero
+      cross-hits. **WP10.1b** is the `knowledge.search` tool with L4 framing, the
+      routes, the documents page, and the injection-framing test; **B-018**
+      (embedding the table cards and reranking `search_cards`) goes there too.
+- [ ] WP10.1b Retrieval tool + routes + documents page (carries **B-018**)
 - [ ] WP10.2 Semantic definitions + verified queries + critic enforcement ← gate
 - [ ] GATE: uploaded policy changes generated SQL; isolation test; sign-off
 

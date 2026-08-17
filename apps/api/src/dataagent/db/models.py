@@ -14,6 +14,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     ARRAY,
     BigInteger,
@@ -41,10 +42,13 @@ from dataagent.db.security_events import SecurityEvent
 
 __all__ = [
     "CARD_TEXT_CONFIGURATION",
+    "CHUNK_TEXT_CONFIGURATION",
     "COLUMN_POLICIES",
     "CONFIDENCE_LEVELS",
     "DATA_SOURCE_ENGINES",
     "DATA_SOURCE_STATUSES",
+    "DOCUMENT_STATUSES",
+    "EMBEDDING_DIMENSIONS",
     "EVENT_TYPES",
     "EXECUTION_STATUSES",
     "LLM_ROLES",
@@ -73,6 +77,8 @@ __all__ = [
     "DataSource",
     "Finding",
     "Invitation",
+    "KnowledgeChunk",
+    "KnowledgeDocument",
     "Message",
     "OrgMembership",
     "Organization",
@@ -128,6 +134,25 @@ PROFILE_STATUSES: tuple[str, ...] = ("none", "partial", "complete")
 #: whose card says "revenues". Changing it is a migration, because every row's
 #: generated index would have to be rebuilt.
 CARD_TEXT_CONFIGURATION = "english"
+
+#: The same configuration for knowledge chunks, and the same reasoning: a chunk
+#: is prose, so "revenue" should find "revenues". Separate constant rather than
+#: a shared one because the two indexes are rebuilt by different migrations, and
+#: a single name would make changing one of them look safe.
+CHUNK_TEXT_CONFIGURATION = "english"
+
+#: How wide `knowledge_chunks.embedding` is. Fixed by revision 0016 and matched
+#: by `Settings.embeddings_dimensions`, which the API asserts at startup — a
+#: model returning a different width would have every insert rejected by a
+#: constraint nobody was thinking about. 1536 is `text-embedding-3-small`'s,
+#: verified against the live account rather than read off a page (B-027).
+EMBEDDING_DIMENSIONS = 1536
+
+#: A document is `pending` until it has been extracted, chunked and embedded.
+#: `failed` is the value this set exists for: extraction and embedding are the
+#: two steps that reach outside the process, so they are the two that fail, and a
+#: document silently holding no chunks looks exactly like one nobody uploaded.
+DOCUMENT_STATUSES: tuple[str, ...] = ("pending", "indexed", "failed")
 
 
 class Organization(Base):
@@ -1017,6 +1042,118 @@ class Finding(Base):
     created_at: Mapped[CreatedAt]
 
 
+class KnowledgeDocument(Base):
+    """Something an organization wrote down (architecture 5.5, 10.1).
+
+    The other half of the agent's understanding. The catalog can discover that
+    `orders.total_amount` is numeric; only a document can say that net revenue
+    excludes cancelled orders — and 5.5's division of labour rests on that:
+    **RAG answers "what does this term mean here", the database answers "what is
+    the value"**.
+
+    ``status`` has three values and ``failed`` is the one this table exists to
+    make visible. Extraction and embedding are the two steps that reach outside
+    the process, so they are the two that fail, and a document that silently
+    holds no chunks looks identical to one nobody uploaded. The CHECK constraint
+    makes a failure without a reason impossible, the same shape WP5.2b gave a
+    refusal without a violation code.
+    """
+
+    __tablename__ = "knowledge_documents"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ({})".format(", ".join(f"'{s}'" for s in DOCUMENT_STATUSES)),
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "(status = 'failed') = (failure_reason IS NOT NULL)",
+            name="failure_reason_matches_status",
+        ),
+        Index("ix_knowledge_documents_org_id_created_at", "org_id", text("created_at DESC")),
+    )
+
+    id: Mapped[UuidPk]
+    org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    #: An `ArtifactStore` key, org-prefixed and checked, not a filesystem path —
+    #: the same interface WP5.2b introduced, so Phase 12's move to Blob is a
+    #: backend swap rather than a schema change.
+    blob_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    mime: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'pending'")
+    )
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    chunk_count: Mapped[int] = mapped_column(nullable=False, server_default=text("0"))
+    #: ``SET NULL`` per D-016: removing a person must not delete the record of
+    #: what their organization uploaded.
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[CreatedAt]
+    indexed_at: Mapped[datetime | None]
+
+
+class KnowledgeChunk(Base):
+    """One passage of a document, as retrieval will find it (architecture 5.5).
+
+    **``embedding`` is nullable, and that is a state rather than an oversight.**
+    A chunk exists as soon as its text does and is lexically searchable
+    immediately; it becomes semantically searchable once the provider has been
+    called, which is a network round trip that can fail or be rate limited. NOT
+    NULL would force ingest either to block on the provider or to lose the text.
+
+    **``tsv`` is generated**, for revision 0009's reason: a column the database
+    derives cannot disagree with the text it indexes, while one maintained by
+    application code eventually will.
+
+    ``seq`` is 0-based and gap-free within a document, which is what makes
+    re-indexing idempotent — the old chunks are deleted and rewritten from zero
+    rather than appended to — and what lets a citation name a position.
+    """
+
+    __tablename__ = "knowledge_chunks"
+    __table_args__ = (
+        UniqueConstraint("document_id", "seq", name="uq_knowledge_chunks_document_id_seq"),
+        Index("ix_knowledge_chunks_org_id_document_id", "org_id", "document_id"),
+        Index("ix_knowledge_chunks_tsv", "tsv", postgresql_using="gin"),
+        Index(
+            "ix_knowledge_chunks_unembedded",
+            "org_id",
+            "document_id",
+            postgresql_where=text("embedding IS NULL"),
+        ),
+    )
+
+    id: Mapped[UuidPk]
+    org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    #: ``CASCADE``, and deliberately not D-016's ``SET NULL``. That rule is about
+    #: records of *acts*, which outlive their subject; a chunk is a derived copy
+    #: of a document's own words, and one without its document is text with no
+    #: answer to "where is this from" — which is the property that makes
+    #: retrieved material safe to show at all (5.5).
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("knowledge_documents.id", ondelete="CASCADE"), nullable=False
+    )
+    seq: Mapped[int] = mapped_column(nullable=False)
+    text_: Mapped[str] = mapped_column("text", Text, nullable=False)
+    #: The heading trail, outermost first: `["Revenue policy", "Exclusions"]`.
+    #: Kept beside the text rather than inside it so provenance can be shown
+    #: without the chunk repeating its own context.
+    headings: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    token_estimate: Mapped[int] = mapped_column(nullable=False, server_default=text("0"))
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIMENSIONS))
+    #: Generated by the database. Never assigned in Python — writing ``text`` is
+    #: what updates it (revision 0016).
+    tsv: Mapped[str | None] = mapped_column(
+        TSVECTOR,
+        Computed(f"to_tsvector('{CHUNK_TEXT_CONFIGURATION}', text)", persisted=True),
+    )
+    created_at: Mapped[CreatedAt]
+
+
 #: Every tenant-scoped table mapped to the column that identifies its tenant.
 #: ``organizations`` is the exception worth spelling out: it *is* the tenant, so
 #: its key is ``id``, not ``org_id`` — a policy written against ``org_id`` there
@@ -1044,4 +1181,6 @@ TENANT_TABLES: dict[str, str] = {
     "messages": "org_id",
     "agent_events": "org_id",
     "findings": "org_id",
+    "knowledge_documents": "org_id",
+    "knowledge_chunks": "org_id",
 }

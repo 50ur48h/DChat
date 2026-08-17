@@ -282,6 +282,51 @@ class Settings(BaseSettings):
         description="Key for the Anthropic provider — the second provider in the chain.",
     )
 
+    # -- Phase 10: embeddings -------------------------------------------------
+    #
+    # Separate from `llm_models` on purpose. An embedding model is not a *tier*
+    # of the chat models — D-018's small/mid/strong ladder does not apply to it,
+    # nothing routes to it by role, and its output is a number that is written
+    # into a column whose width is fixed by a migration. Folding it into that map
+    # would let a config edit silently disagree with `vector(1536)`.
+    #
+    # No default for the model id, for D-017's reason: a model id compiled into a
+    # release is stale within months, and a stale one either 404s or writes
+    # vectors of the wrong width into a column that will accept none of them.
+    embeddings_provider: str = Field(
+        default="openai",
+        description=(
+            "Which provider embeds. The same account as the chat models by "
+            "default (D-017) — one key, one bill, one place to rotate."
+        ),
+    )
+    embeddings_model: str | None = Field(
+        default=None,
+        description=(
+            "Embedding model id, e.g. `text-embedding-3-small`. Required before "
+            "anything can be embedded, and verified against the account before "
+            "it is written here (B-027's habit): a pricing page says what "
+            "exists, not what a key may call."
+        ),
+    )
+    embeddings_dimensions: int = Field(
+        default=1536,
+        description=(
+            "How wide a vector this model returns. It must equal the width of "
+            "`knowledge_chunks.embedding`, which a migration fixed — so this is "
+            "asserted at startup rather than trusted, and a mismatch fails "
+            "loudly instead of writing rows nothing can search."
+        ),
+    )
+    embeddings_batch: int = Field(
+        default=64,
+        description=(
+            "How many chunks are embedded per request. One call per chunk is "
+            "slow and rate-limited; one call for a whole book is a request that "
+            "times out and loses everything in it."
+        ),
+    )
+
     llm_run_cost_limit_usd: float | None = Field(
         default=None,
         description=(
