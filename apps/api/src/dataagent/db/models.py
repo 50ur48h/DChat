@@ -1198,6 +1198,12 @@ class KnowledgeChunk(Base):
 #: isolation and without a test that proves it.
 
 
+#: `active` is shown to the planner; `retired` is kept and shown to nobody.
+#: Retired rather than deleted, so an answer grounded in an example last month
+#: is still explainable this month.
+VERIFIED_STATUSES = ("active", "retired")
+
+
 class SemanticDefinition(Base):
     """What a metric means here, in a form a check can read (arch 5.4, D-033).
 
@@ -1270,6 +1276,63 @@ class SemanticDefinition(Base):
     )
 
 
+class VerifiedQuery(Base):
+    """An Admin-approved question and the SQL that answers it (arch 5.4).
+
+    A definition says what a word means; a verified query shows what a good
+    answer **looks like** in this database — which join, which grain, which date
+    column, which of four plausible tables people actually use. Architecture 5.4
+    calls it the highest-leverage accuracy feature per dollar, and the reason is
+    that a worked example carries judgement that no amount of schema does.
+
+    **It informs and does not bind, and that is the whole reason it is not a
+    column on `SemanticDefinition`.** A definition's `required_filters` are
+    checked against the AST and a statement ignoring them is blocked; an example
+    is shown to the planner and nothing checks that the model followed it.
+    Demanding it did would be a false block on every question that merely
+    resembles the example — and standing note 5 calls a false block this
+    component's characteristic failure.
+
+    ``sql`` is validated at write time by the same validator that guards
+    execution, so an Admin cannot bless a statement the platform would refuse.
+    An approved example naming a table that does not exist would be a worked
+    demonstration of hallucination sitting in the prompt.
+    """
+
+    __tablename__ = "verified_queries"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ({})".format(", ".join(f"'{s}'" for s in VERIFIED_STATUSES)),
+            name="status_valid",
+        ),
+        UniqueConstraint(
+            "data_source_id", "question", name="uq_verified_queries_data_source_id_question"
+        ),
+        Index("ix_verified_queries_org_id_data_source_id", "org_id", "data_source_id"),
+    )
+
+    id: Mapped[UuidPk]
+    org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    data_source_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=False
+    )
+    #: In the words a person would ask it. Matched against a new question by
+    #: overlap, so the phrasing is load-bearing rather than a label.
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    sql: Mapped[str] = mapped_column(Text, nullable=False)
+    #: Why this shape is the right one. An example without its reason teaches
+    #: the SQL and not the judgement.
+    notes: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'active'"))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[CreatedAt]
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), nullable=False
+    )
+
+
 TENANT_TABLES: dict[str, str] = {
     "organizations": "id",
     "org_memberships": "org_id",
@@ -1292,4 +1355,5 @@ TENANT_TABLES: dict[str, str] = {
     "knowledge_documents": "org_id",
     "knowledge_chunks": "org_id",
     "semantic_definitions": "org_id",
+    "verified_queries": "org_id",
 }

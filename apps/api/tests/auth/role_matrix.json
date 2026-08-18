@@ -4,6 +4,11 @@
     "contributor": "deny(403)",
     "reader": "deny(403)"
   },
+  "DELETE /v1/orgs/{org_id}/data-sources/{data_source_id}/verified-queries/{verified_query_id}": {
+    "admin": "allow",
+    "contributor": "deny(403)",
+    "reader": "deny(403)"
+  },
   "DELETE /v1/orgs/{org_id}/documents/{document_id}": {
     "admin": "allow",
     "contributor": "allow",
@@ -55,6 +60,11 @@
     "reader": "deny(403)"
   },
   "GET /v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/proposals": {
+    "admin": "allow",
+    "contributor": "deny(403)",
+    "reader": "deny(403)"
+  },
+  "GET /v1/orgs/{org_id}/data-sources/{data_source_id}/verified-queries": {
     "admin": "allow",
     "contributor": "deny(403)",
     "reader": "deny(403)"
@@ -155,6 +165,11 @@
     "reader": "deny(403)"
   },
   "POST /v1/orgs/{org_id}/data-sources/{data_source_id}/test": {
+    "admin": "allow",
+    "contributor": "deny(403)",
+    "reader": "deny(403)"
+  },
+  "POST /v1/orgs/{org_id}/data-sources/{data_source_id}/verified-queries": {
     "admin": "allow",
     "contributor": "deny(403)",
     "reader": "deny(403)"

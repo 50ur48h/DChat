@@ -140,8 +140,23 @@ What is already on the branch, tested and green:
    nothing… an answer resting on it will say so"*. Two defects the tests found
    and no reading would have: the same error rendered in two cards at once, and
    two different controls both labelled "Table". 15 web tests; suite now 107.
-3. **`semantic/verified.py`** — admin-blessed query patterns surfaced to the
-   planner as few-shot grounding (arch 5.4).
+3. ~~**`semantic/verified.py`**~~ — **done.** Admin-approved question→SQL
+   pairs, matched to a new question **lexically** — free, deterministic, no
+   embedding and no provider dependency — and rendered at **L3** beside the
+   definitions, since an Admin approved them and the validator judged them. Two
+   properties carry it. **It informs and never binds**: no critic rule reads an
+   example, deliberately, because a question that merely resembles one is not
+   its question and demanding the same SQL would be a false block on a correct
+   answer — so `VerifiedFrame` says *"examples, not answers"* where
+   `DefinitionFrame` says the query is checked. And **an example is validated by
+   the validator that guards execution**, so an Admin cannot bless a statement
+   the platform would refuse: an approved query naming a table that does not
+   exist is a worked demonstration of hallucination sitting in the prompt.
+   Nothing is executed to approve one. The matcher is reluctant on purpose —
+   two shared content words minimum, three examples maximum — because a wrong
+   example is worse than none. Revision **0021**, RLS + `TENANT_TABLES` +
+   rls_proof extended, three Admin routes in the matrix. The screen is
+   **B-084**; the grounding is what 5.4 and this gate asked for.
 4. **B-070** — define `repeat_rate` with its denominator, so golden eval **#10**
    stops depending on which of two defensible readings a model picks. This is the
    pizza fixture's before-and-after and needs no customer data.

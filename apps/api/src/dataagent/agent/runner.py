@@ -73,6 +73,7 @@ from dataagent.llm.base import LLMError
 from dataagent.runs import service as runs
 from dataagent.runs.events import EventWriter
 from dataagent.semantic import definitions as semantic
+from dataagent.semantic import verified as verified_queries
 from dataagent.tenancy.session import org_session
 
 __all__ = ["RunOutcome", "execute_run", "relevant_pairs"]
@@ -290,6 +291,20 @@ async def _investigate(
     if applied:
         bundle = replace(bundle, definitions_applied=applied)
         state.applied_definitions = [definition.name for definition in applied]
+
+    # **How this organization has answered questions like this one** (arch 5.4).
+    # Matched lexically and for free: no embedding, so no spend and no dependency
+    # on a provider being reachable, and a miss costs the run an example it never
+    # had while a wrong example is actively misleading.
+    #
+    # Loaded whether or not a definition matched — the two are independent. A
+    # question can name no defined metric and still be one this organization has
+    # a worked answer for, which is the common case for "which table do I use".
+    examples = verified_queries.matching(
+        await verified_queries.verified_for(context.org_id, source_of(context)), state.question
+    )
+    if examples:
+        bundle = replace(bundle, verified_applied=examples)
 
     state.phase = "context"
     state.table_names = list(bundle.table_names)

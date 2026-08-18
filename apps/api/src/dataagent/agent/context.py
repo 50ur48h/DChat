@@ -62,6 +62,7 @@ from dataagent.config import Settings
 from dataagent.knowledge.embeddings import Embedder
 from dataagent.llm.base import Message, estimate_tokens
 from dataagent.semantic.definitions import Definition as SemanticDefinition
+from dataagent.semantic.verified import VerifiedQuery
 
 __all__ = [
     "HISTORY_TURNS",
@@ -72,6 +73,7 @@ __all__ = [
     "HistoryTurn",
     "KnowledgeFrame",
     "Layer",
+    "VerifiedFrame",
     "build_context",
     "history_block",
     "render",
@@ -152,6 +154,24 @@ DefinitionFrame = (
     "authoritative here. Prefer them over your own reading of the schema: where a "
     "definition names required filters, the query you write is checked against "
     "them and a query that omits one is rejected before its answer is shown."
+)
+
+#: L3. How an Admin's approved examples are introduced (arch 5.4).
+#:
+#: The wording carries the seam D-033 draws. A definition is stated as binding
+#: and says the query is checked; an example is stated as an **example** and
+#: says nothing of the sort, because nothing checks it — a question that merely
+#: resembles the example is not the example's question, and a model told to
+#: reproduce the SQL would answer the wrong one confidently. So it is framed as
+#: how this organization *has* answered something similar, and the last sentence
+#: exists to stop the failure the whole feature risks: copying.
+VerifiedFrame = (
+    "Below are queries this organization has reviewed and approved, with the "
+    "questions they answer. Use them to learn how this database is meant to be "
+    "queried — which tables people use, which joins are correct, which date "
+    "column a period means. They are examples, not answers: if the question you "
+    "have been asked differs from the one an example answers, write the query "
+    "the question you were asked needs."
 )
 
 #: How the thread is introduced (**D-029**). The same shape as `REFERENCE_FRAME`
@@ -367,6 +387,13 @@ class ContextBundle:
     #: enforced by the critic — rather than a customer's untrusted prose; a
     #: retrieved *passage* is the L4 kind and stays there.
     definitions_applied: tuple[SemanticDefinition, ...] = ()
+    #: Approved question→SQL pairs this question resembles (arch 5.4), rendered
+    #: at **L3** beside the definitions and for the same reason: an example an
+    #: Admin approved is the platform's own object, not a customer's untrusted
+    #: prose. Unlike a definition it **binds nothing** — no critic rule reads
+    #: this, deliberately, because a near-miss question demanding the same SQL
+    #: would be a false block on a correct answer.
+    verified_applied: tuple[VerifiedQuery, ...] = ()
     token_budget: int = DEFAULT_TOKEN_BUDGET
     #: The date this run treats as "today" (**D-027**, B-005). Every relative
     #: period in the question — *last month*, *recently*, *year to date* — is
@@ -494,6 +521,25 @@ def _layers(
                 title="What this organization means by these terms",
                 body="\n\n".join(
                     [DefinitionFrame, *(item.render() for item in bundle.definitions_applied)]
+                ),
+            )
+        )
+
+    if bundle.verified_applied:
+        # L3 beside the definitions: an Admin approved it, the validator judged
+        # it against this catalog, and neither is true of a document.
+        #
+        # **After the definitions**, because the two are read together and the
+        # order is the precedence a reader would infer: what a term *means* here
+        # settles the question an example can only illustrate. An example that
+        # contradicted a definition would be a defect in the example, and the
+        # definition is what the critic will enforce either way.
+        layers.append(
+            Layer(
+                tag="L3",
+                title="How this organization has answered questions like this",
+                body="\n\n".join(
+                    [VerifiedFrame, *(item.render() for item in bundle.verified_applied)]
                 ),
             )
         )

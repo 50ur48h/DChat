@@ -504,3 +504,138 @@ async def test_a_definition_from_another_organization_is_a_404(
     )
 
     assert status == 404
+
+
+# ---------------------------------------------------------------------------
+# Verified queries: approved examples, judged but never run
+# ---------------------------------------------------------------------------
+
+
+async def test_an_admin_approves_an_example_and_the_planner_can_be_shown_it(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/verified-queries"
+
+    status, created = await api.call(
+        "POST",
+        base,
+        "alice",
+        {
+            "question": "how many products do we list?",
+            "sql": "SELECT count(*) FROM products",
+            "notes": "products is unrelated to shops; do not try to join them.",
+        },
+    )
+
+    assert status == 201
+    assert created["question"] == "how many products do we list?"
+
+    status, listed = await api.call("GET", base, "alice")
+    assert status == 200
+    assert [item["sql"] for item in listed] == ["SELECT count(*) FROM products"]
+
+
+async def test_an_example_naming_a_table_that_does_not_exist_is_refused(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """**The property this feature most needs.** An approved statement naming a
+    table this database has never had is not merely broken — it is a worked
+    demonstration of hallucination sitting in the prompt, teaching the exact
+    habit catalog grounding exists to prevent. The same validator that guards
+    execution refuses it here, and the message names the identifier."""
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+
+    status, body = await api.call(
+        "POST",
+        f"/v1/orgs/{org_id}/data-sources/{source_id}/verified-queries",
+        "alice",
+        {"question": "how much revenue?", "sql": "SELECT sum(total) FROM invoices"},
+    )
+
+    assert status == 400
+    assert "invoices" in body["detail"]
+
+
+async def test_an_example_that_is_not_read_only_is_refused(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """An Admin cannot bless a statement the platform would refuse to run. The
+    approval path and the execution path answer to one validator, deliberately:
+    two would eventually disagree, and this is the direction that matters —
+    an approved example is SQL the planner is being told to imitate."""
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+
+    status, body = await api.call(
+        "POST",
+        f"/v1/orgs/{org_id}/data-sources/{source_id}/verified-queries",
+        "alice",
+        {"question": "clear the products", "sql": "DELETE FROM products"},
+    )
+
+    assert status == 400
+    assert "would run" in body["detail"]
+
+
+async def test_approving_an_example_reads_no_customer_rows(
+    api: Api,
+    app_database: URL,
+    isolated_customer_database: CustomerDatabase,
+) -> None:
+    """The statement is judged, not executed. Approving an example is not a
+    reason to read somebody's data, and asserted on `query_executions` rather
+    than on a mock because that row is what an auditor would look for."""
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+
+    await api.call(
+        "POST",
+        f"/v1/orgs/{org_id}/data-sources/{source_id}/verified-queries",
+        "alice",
+        {"question": "how many products?", "sql": "SELECT count(*) FROM products"},
+    )
+
+    engine = create_async_engine(app_database)
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(
+                text("SELECT set_config('app.org_id', :org, false)"), {"org": org_id}
+            )
+            reads = (
+                await connection.execute(
+                    text(
+                        "SELECT count(*) FROM query_executions "
+                        "WHERE sql_text ILIKE '%count(*) FROM products%'"
+                    )
+                )
+            ).scalar_one()
+    finally:
+        await engine.dispose()
+
+    assert reads == 0
+
+
+async def test_retiring_an_example_stops_showing_it_without_forgetting_it(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """Retired rather than deleted, so a run grounded in it last month is still
+    explainable this month — the reason D-016 keeps an audit row past its
+    subject."""
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/verified-queries"
+    _, created = await api.call(
+        "POST",
+        base,
+        "alice",
+        {"question": "how many products?", "sql": "SELECT count(*) FROM products"},
+    )
+
+    status, _ = await api.call("DELETE", f"{base}/{created['id']}", "alice")
+
+    assert status == 204
+    _, listed = await api.call("GET", base, "alice")
+    assert listed == []
+
+    # Retiring it twice is a 404: it is no longer an active example, and a
+    # second delete must not read as success on a row nothing would show.
+    status, _ = await api.call("DELETE", f"{base}/{created['id']}", "alice")
+    assert status == 404

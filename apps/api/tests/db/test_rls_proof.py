@@ -333,6 +333,18 @@ async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
                         ),
                     },
                 )
+                await connection.execute(
+                    text(
+                        "INSERT INTO verified_queries "
+                        "(org_id, data_source_id, question, sql) VALUES "
+                        "(:org, :ds, :question, 'SELECT count(*) FROM orders')"
+                    ),
+                    {
+                        "org": org_id,
+                        "ds": data_source_id,
+                        "question": f"how many orders has {name} taken?",
+                    },
+                )
                 if org_id == org_b:
                     catalog.update(
                         data_source=data_source_id,
@@ -471,6 +483,14 @@ def _forged_insert(table: str, seeded: SeededOrgs) -> str:
             "INSERT INTO semantic_definitions "
             "(org_id, data_source_id, name, description) VALUES "
             f"('{other_org}', '{seeded.b_data_source}', 'forged_metric', 'forged')"
+        ),
+        # A different question from the seeded one, because
+        # `(data_source_id, question)` is unique — a forged row colliding on
+        # that constraint would be refused before the policy was consulted, and
+        # the test would pass having proved nothing.
+        "verified_queries": (
+            "INSERT INTO verified_queries (org_id, data_source_id, question, sql) VALUES "
+            f"('{other_org}', '{seeded.b_data_source}', 'forged question?', 'SELECT 1')"
         ),
     }
     return statements[table]

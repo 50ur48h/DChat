@@ -52,13 +52,16 @@ from dataagent.dal.errors import PolicyViolation
 from dataagent.datasources.service import NotFoundError
 from dataagent.semantic import definitions as definitions_service
 from dataagent.semantic import proposals as proposals_service
+from dataagent.semantic import verified as verified_service
 from dataagent.semantic.definitions import FILTER_OPERATORS, Definition, DefinitionError
 from dataagent.semantic.proposals import ColumnMapping, Proposal
+from dataagent.semantic.verified import VerifiedQuery, VerifiedQueryError
 
 router = APIRouter(prefix="/v1", tags=["semantic"])
 
 DataSourceId = Annotated[uuid.UUID, Path(description="Data source within this organization")]
 DefinitionId = Annotated[uuid.UUID, Path(description="Definition within this organization")]
+VerifiedQueryId = Annotated[uuid.UUID, Path(description="Verified query in this organization")]
 
 
 class RequiredFilterModel(BaseModel):
@@ -187,6 +190,37 @@ class AcceptIn(BaseModel):
     required_filters: list[RequiredFilterModel] = Field(default_factory=list[RequiredFilterModel])
 
 
+class VerifiedQueryOut(BaseModel):
+    """One approved question and the statement that answers it (arch 5.4)."""
+
+    id: uuid.UUID
+    question: str
+    sql: str
+    notes: str | None = None
+
+    @classmethod
+    def of(cls, example: VerifiedQuery) -> VerifiedQueryOut:
+        return cls(id=example.id, question=example.question, sql=example.sql, notes=example.notes)
+
+
+class CreateVerifiedQueryIn(BaseModel):
+    """An example an Admin is approving.
+
+    The statement is validated against this data source's catalog by the same
+    validator that guards execution, so an approved example naming a table that
+    does not exist is refused here rather than sitting in a prompt teaching the
+    model to invent one.
+    """
+
+    question: str = Field(min_length=1, max_length=2000)
+    sql: str = Field(min_length=1, max_length=20000)
+    notes: str | None = Field(
+        default=None,
+        max_length=2000,
+        description="Why this shape is right — an example without its reason teaches copying.",
+    )
+
+
 def _filters(models: list[RequiredFilterModel]) -> list[dict[str, object]]:
     return [
         {"table": item.table, "column": item.column, "op": item.op, "values": list(item.values)}
@@ -209,6 +243,71 @@ def _no_such_source(error: Exception) -> HTTPException:
             f"{error} Refresh this data source's catalog and try again.",
         )
     return HTTPException(status.HTTP_404_NOT_FOUND, "No such data source")
+
+
+@router.get(
+    "/orgs/{org_id}/data-sources/{data_source_id}/verified-queries",
+    response_model=list[VerifiedQueryOut],
+    summary="Approved question and SQL pairs the planner is shown",
+)
+async def list_verified_queries(
+    context: Annotated[RequestContext, Depends(require_admin)],
+    data_source_id: DataSourceId,
+) -> list[VerifiedQueryOut]:
+    """The active ones, oldest first — the order the matcher breaks ties by."""
+    found = await verified_service.verified_for(context.org_id, data_source_id)
+    return [VerifiedQueryOut.of(example) for example in found]
+
+
+@router.post(
+    "/orgs/{org_id}/data-sources/{data_source_id}/verified-queries",
+    response_model=VerifiedQueryOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Approve a question and the SQL that answers it",
+)
+async def create_verified_query(
+    body: CreateVerifiedQueryIn,
+    context: Annotated[RequestContext, Depends(require_admin)],
+    data_source_id: DataSourceId,
+) -> VerifiedQueryOut:
+    """**Nothing is executed here.** The statement is judged against the catalog,
+    not run: approving an example is not a reason to read a customer's rows.
+
+    A refusal is a 400 carrying the validator's own message, which names the
+    identifier at fault because it was written to be repaired from.
+    """
+    try:
+        example = await verified_service.create(
+            org_id=context.org_id,
+            data_source_id=data_source_id,
+            question=body.question,
+            sql=body.sql,
+            notes=body.notes,
+            actor_user_id=context.user_id,
+        )
+    except VerifiedQueryError as error:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
+    except (NotFoundError, NoCatalogError) as error:
+        raise _no_such_source(error) from error
+    return VerifiedQueryOut.of(example)
+
+
+@router.delete(
+    "/orgs/{org_id}/data-sources/{data_source_id}/verified-queries/{verified_query_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Stop showing an approved example",
+)
+async def retire_verified_query(
+    context: Annotated[RequestContext, Depends(require_admin)],
+    data_source_id: DataSourceId,
+    verified_query_id: VerifiedQueryId,
+) -> None:
+    """Retired rather than deleted, so a run grounded in it last month is still
+    explainable this month."""
+    try:
+        await verified_service.retire(org_id=context.org_id, verified_query_id=verified_query_id)
+    except LookupError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such verified query") from error
 
 
 @router.get(

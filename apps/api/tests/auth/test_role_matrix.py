@@ -155,6 +155,20 @@ PROBES: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
         "/v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}/reject",
         None,
     ),
+    # Verified queries (arch 5.4). Admin like the rest of the semantic layer,
+    # and for a reason of its own: an approved example is SQL this organization
+    # is telling the planner to imitate.
+    ("GET", "/v1/orgs/{org_id}/data-sources/{data_source_id}/verified-queries", None),
+    (
+        "POST",
+        "/v1/orgs/{org_id}/data-sources/{data_source_id}/verified-queries",
+        {"question": "How many probes?", "sql": "SELECT probe_column FROM probe"},
+    ),
+    (
+        "DELETE",
+        "/v1/orgs/{org_id}/data-sources/{data_source_id}/verified-queries/{verified_query_id}",
+        None,
+    ),
     ("DELETE", "/v1/orgs/{org_id}/data-sources/{data_source_id}", None),
     # Documents (WP10.1b). Reading is member work like browsing a catalog;
     # **uploading is Contributor-or-Admin**, and the reason is worth stating:
@@ -235,6 +249,9 @@ class Matrix:
     #: would record an already-decided 404 for whichever ran second — a
     #: lifecycle fact wearing the clothes of a role decision.
     proposals: dict[str, dict[str, uuid.UUID]]
+    #: One approved example per role, for the same reason the proposals are per
+    #: role: the DELETE probe retires the row it is handed.
+    verified: dict[str, uuid.UUID]
     #: A document **per role**, and for a blunter reason than the conversations:
     #: documents are org-scoped, so one would be visible to all three — but the
     #: DELETE probe *removes* it, and roles are probed in order, so the second
@@ -288,6 +305,7 @@ async def matrix_app(
     users: dict[str, uuid.UUID] = {}
     conversations: dict[str, uuid.UUID] = {}
     proposals: dict[str, dict[str, uuid.UUID]] = {"accepted": {}, "rejected": {}}
+    verified: dict[str, uuid.UUID] = {}
     documents: dict[str, uuid.UUID] = {}
     runs: dict[str, uuid.UUID] = {}
     executions: dict[str, uuid.UUID] = {}
@@ -415,6 +433,16 @@ async def matrix_app(
                     ),
                     {"i": proposal_id, "o": org_id, "d": data_source_id, "n": f"{pool} {role}"},
                 )
+            example_id = uuid.uuid4()
+            verified[role] = example_id
+            await connection.execute(
+                text(
+                    "INSERT INTO verified_queries "
+                    "(id, org_id, data_source_id, question, sql) "
+                    "VALUES (:i, :o, :d, :q, 'SELECT probe_column FROM probe')"
+                ),
+                {"i": example_id, "o": org_id, "d": data_source_id, "q": f"probe {role}?"},
+            )
 
     app = create_app(settings=Settings(auth_mode="dev", env="ci", build_env="dev"))
     app.state.token_validator = _SubjectAsToken()
@@ -431,6 +459,7 @@ async def matrix_app(
             executions=executions,
             documents=documents,
             proposals=proposals,
+            verified=verified,
         )
     finally:
         await owner.dispose()
@@ -480,6 +509,7 @@ async def test_the_role_matrix_matches_its_snapshot(matrix_app: Matrix) -> None:
                 execution_id=matrix_app.executions[role],
                 document_id=matrix_app.documents[role],
                 definition_id=matrix_app.proposals[PROPOSAL_POOL.get(template, "accepted")][role],
+                verified_query_id=matrix_app.verified[role],
             ) + QUERIES.get(template, "")
             status = await _probe(matrix_app.app, method, path, role, body, UPLOADS.get(template))
             observed[key][role] = "allow" if status < 400 else f"deny({status})"

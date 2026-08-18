@@ -29,8 +29,7 @@ from dataagent.agent.context import (
     ContextBundle,
     DefinitionFrame,
     KnowledgeFrame,
-    Layer,
-    _layers,
+    render,
 )
 from dataagent.agent.state import ExecutionRef, ResearchState
 from dataagent.agent.tools.finalize import FinalizeIn
@@ -54,23 +53,29 @@ NET_REVENUE = Definition(
 
 
 def _prompt(bundle: ContextBundle) -> str:
-    """Every layer's body, as one string — what the model actually reads."""
-    return "\n\n".join(
-        layer.body for layer in _layers(bundle, cards=(), history=(), headline_only=False)
-    )
+    """The system message a model would actually receive.
 
-
-def _definition_layer(bundle: ContextBundle) -> Layer:
-    """The layer this organization's definitions render into, or a failure.
-
-    A `next()` with no default on purpose: a test that silently found no layer
-    and asserted about `None` would report the wrong thing.
+    Through the public `render`, as `test_context` does: what matters is the
+    text in front of the model, and a helper that reached past it could pass
+    while the assembled prompt said nothing.
     """
-    return next(
-        layer
-        for layer in _layers(bundle, cards=(), history=(), headline_only=False)
-        if layer.title.startswith("What this organization")
-    )
+    return render(bundle)[0].content
+
+
+DEFINITION_HEADING = "[L3] What this organization means by these terms"
+
+
+def _definition_block(bundle: ContextBundle) -> str:
+    """Everything the prompt says under the definitions heading.
+
+    Sliced out rather than searched for across the whole prompt, because
+    `PLATFORM_RULES` already contains several of the words these tests look for
+    — which is how one of them passed with this layer removed entirely.
+    """
+    prompt = _prompt(bundle)
+    assert DEFINITION_HEADING in prompt, "the definitions layer is not in the prompt at all"
+    after = prompt.split(DEFINITION_HEADING, 1)[1]
+    return after.split("[L4]", 1)[0].split("[L5]", 1)[0]
 
 
 def _evidence(
@@ -439,7 +444,7 @@ def test_the_model_is_told_the_query_will_be_checked() -> None:
     """
     bundle = ContextBundle(question="net revenue?", definitions_applied=(NET_REVENUE,))
 
-    assert "checked against" in _definition_layer(bundle).body
+    assert "checked against" in _definition_block(bundle)
 
 
 def test_a_definition_is_framed_as_authoritative_and_a_document_is_not() -> None:
@@ -459,19 +464,14 @@ def test_a_definition_is_framed_as_authoritative_and_a_document_is_not() -> None
 def test_a_question_matching_no_definition_renders_no_such_layer() -> None:
     """Most questions are about rows rather than about a defined measure, and
     that case must render exactly as it did before this layer existed."""
-    layers = _layers(
-        ContextBundle(question="how many orders were there?"),
-        cards=(),
-        history=(),
-        headline_only=False,
-    )
-
-    assert not [layer for layer in layers if layer.title.startswith("What this organization")]
+    assert DEFINITION_HEADING not in _prompt(ContextBundle(question="how many orders were there?"))
 
 
 def test_the_definition_layer_outranks_the_documents_it_came_from() -> None:
-    """L3, not L4. A definition that rendered beside untrusted passages would be
-    subject to the frame telling the model not to obey what it reads there."""
+    """L3, not L4. A definition rendered beside untrusted passages would sit
+    under the frame telling the model not to obey what it reads there."""
     bundle = ContextBundle(question="net revenue?", definitions_applied=(NET_REVENUE,))
 
-    assert _definition_layer(bundle).tag == "L3"
+    # The heading itself carries the tag, so this asserts the layer exists *and*
+    # which rank it was given.
+    assert DEFINITION_HEADING in _prompt(bundle)

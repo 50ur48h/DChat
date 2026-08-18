@@ -54,6 +54,12 @@ under "Unreleased", only for changes a user would notice.
   description, so a real question matched nothing at all.
 
 ### Added
+- An admin can approve a question and the SQL that answers it, and the agent is
+  shown the closest of those examples when a similar question is asked. It is
+  how a database's unwritten conventions get taught — which join is the right
+  one, which date column a period means, which of four plausible tables people
+  actually use. An approved query is checked against your catalog before it is
+  saved, so an example can never point at a table that does not exist.
 - Definitions your database already carries can be imported rather than retyped.
   Point an admin at the table that holds your metrics and their meanings, and
   each row arrives as a proposal showing what it says and which of your tables it
