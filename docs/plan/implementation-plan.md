@@ -80,6 +80,7 @@ A PR may be opened as draft any time, but is ready for review only when **all** 
 
 - **`docs/plan/BACKLOG.md` is the only home for deferred work.** Ideas, discovered bugs, "later" items, V1.1/V2 thoughts that come up mid-build — all of them, same file, same format (§2.3).
 - IDs are `B-001, B-002, …`, append-only, never renumbered, never deleted (status becomes `done` or `dropped` instead).
+- **`scripts/check_backlog.sh` guards the file** and runs in `hygiene` before anything else, next to `check_status.sh`: ids unique and contiguous from B-001, every row starting a line with the seven columns §2.3 declares, `Prio`/`Status` from the vocabulary below, and no id that existed on the base branch missing here. It carries its own `--selftest`, run first, so a guard that has stopped matching fails the build instead of passing every damaged file. Filed as **B-081** after a row was silently merged into its neighbour and only a hand audit noticed.
 - In-code `TODO`s must reference a backlog ID: `TODO(B-023)`. CI fails on orphan TODOs (§4.3). FIXME/HACK/XXX markers are banned outright — file a backlog item and write honest code.
 - Pulling a backlog item into active work: set its status to `planned`, add it to STATUS under the current phase as an extra line (`- [ ] B-023 …`), then treat it like a WP.
 - Optional mirror to GitHub Issues (`gh issue create`) is allowed for the user's convenience, but the file remains canonical.
@@ -266,7 +267,9 @@ Last updated: <date> by Claude Code
 | B-001 | 2026-08-11 | P0.4 | Example: compose healthcheck flaky on cold start — add retry | P0 | P2 | open |
 ```
 
-Rules: `Prio` ∈ P1 (blocks V1) / P2 (should fix before V1 ships) / P3 (V1.1+). `Status` ∈ open / planned / done (PR#) / dropped (reason). Never renumber. V2 ideas from arch Part 12 may be pre-seeded here.
+Rules: `Prio` ∈ P1 (blocks V1) / P2 (should fix before V1 ships) / P3 (V1.1+). `Status` ∈ open / planned / in progress (WP) / done (PR#) / dropped (reason) / accepted (reason). Never renumber. V2 ideas from arch Part 12 may be pre-seeded here.
+
+`in progress` and `accepted` were in use before they were declared — B-059 was half-built and the owner *accepted* B-053 rather than dropping it. They are named here because the vocabulary a guard enforces has to be the one the project uses, or the first thing anyone does with the guard is switch it off; declaring the two states changed no row's meaning, and rewriting two rows to fit the shorter list would have. A literal `|` inside a cell is written `\|`.
 
 ## 2.4 `docs/plan/DECISIONS.md`
 

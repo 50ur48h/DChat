@@ -115,13 +115,18 @@ secrets.key: ## Print a fresh LOCAL_SECRETS_KEY line to paste into .env
 	@$(UV_API) python -c "from cryptography.fernet import Fernet; print('LOCAL_SECRETS_KEY=' + Fernet.generate_key().decode())"
 
 .PHONY: preflight
-preflight: lint typecheck check.status test ## Everything CI will run, in CI's order
+preflight: lint typecheck check.status check.backlog test ## Everything CI will run, in CI's order
 	@echo "Preflight clean. Safe to push."
 
 .PHONY: check.status
 check.status: ## Fail if STATUS.md lost its phase checklist or signed-off work
 	bash scripts/check_status.sh --selftest
 	bash scripts/check_status.sh
+
+.PHONY: check.backlog
+check.backlog: ## Fail if BACKLOG.md lost a row, an id, or its column shape
+	bash scripts/check_backlog.sh --selftest
+	bash scripts/check_backlog.sh
 
 .PHONY: truths check.truths
 truths: ## Regenerate ops/seed/truths.json without touching the database

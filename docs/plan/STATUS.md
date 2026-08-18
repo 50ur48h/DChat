@@ -85,7 +85,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-18 by Claude Code (session end — five PRs merged; WP10.2d is a draft at #72, gate owes six things)
+Last updated: 2026-08-18 by Claude Code (WP10.2d in progress on #72 — B-081's guard is in; the six gate items follow)
 
 ---
 
@@ -220,7 +220,7 @@ The job only runs when the `connectors` path filter fires, which a `dal/` change
 does. Expect it on any PR touching the validator, and expect it to be slow even
 when healthy.
 
-### 6. A backlog row was lost, and nothing in the repo noticed
+### 6. A backlog row was lost, nothing in the repo noticed — now something does
 
 Filing **B-080** prepended its row to **B-076**'s and dropped the newline between
 them. Every character of B-076 survived — but it no longer began a line, so
@@ -230,16 +230,25 @@ session, by hand, and not by anything in the repository.
 
 BACKLOG.md is **append-only, never renumbered, never deleted** (plan §1.5) and it
 is the only record of why things were *not* done. **B-019** built precisely this
-guard for STATUS.md after #24 gutted it; the same argument transfers and the
-guard was never written. That is **B-081**. Until it exists, after editing
-BACKLOG run:
+guard for STATUS.md after #24 gutted it; the same argument transfers, and the
+guard is now written: **`scripts/check_backlog.sh`** (**B-081**, closed in #72),
+running in `hygiene` and in `make preflight`. Nothing has to be grepped by hand
+after editing the file any more.
 
-```sh
-grep -o '^| B-[0-9]\{3\} ' docs/plan/BACKLOG.md | tr -d '| ' | sort | uniq -d   # duplicates
-```
+The replay is the part worth keeping. Pointed at `dc35e7a` — the commit that
+caused this — it reports the lost row **four independent ways**: B-076 does not
+begin a line, there is a gap where B-076 should be, B-080's row carries fifteen
+columns, and B-076 was on the baseline and is absent. CI reported success on
+that commit.
 
-and check the highest id equals the row count — the gap check alone would have
-caught this in the commit that caused it.
+Running it on the file as it stood found two defects nobody was looking for.
+**B-013 and B-081 were rendering wrong on GitHub**: an unescaped `\|` inside a
+code span split them into ten and eight columns, and GFM drops whatever
+overflows the header — so B-013's Suggested phase, Prio and Status cells have
+been rendered away on a **public** repo since Phase 3, in a row about TLS. Both
+are escaped now and §2.3 says to write `\|`. The lesson generalises past this
+file: a markdown table is only as intact as its narrowest row, and nothing in a
+review shows you the cells GitHub silently dropped.
 
 The deeper lesson is one this file already records and I repeated anyway: **a
 patch script that reports success without asserting its edit landed will lie to
@@ -265,8 +274,7 @@ looked like afterwards.
 
 **P2** — **B-077** (`search_tables` and `describe_table` are advertised to the
 model and the loop cannot dispatch them — named in a test that fails if a third
-joins them), **B-081** (nothing guards BACKLOG.md; a row was lost this session),
-**B-070** (`repeat_rate`'s denominator — gate work now), **B-069**,
+joins them), **B-070** (`repeat_rate`'s denominator — gate work now), **B-069**,
 **B-067**, **B-065**, **B-058**, **B-054**, **B-052**, **B-038**, **B-035**,
 **B-003**, **B-048**, **B-028**.
 
@@ -1752,6 +1760,23 @@ unexplained.
       run: the critic blocked on the last permitted pass, the answer shipped
       anyway saying *"explicitly excluding cancelled and refunded orders"*, and
       the block was invisible because `limitations_for` reads only warnings
+- [ ] **B-081 (P2)** Nothing guarded BACKLOG.md, and a row was silently merged
+      into another — `scripts/check_backlog.sh`, in `hygiene` beside
+      `check_status.sh` and in `make preflight`. Ids unique and contiguous from
+      B-001, every row beginning a line with the seven columns the header
+      declares, `Prio`/`Status` from the vocabulary, and no id that was on the
+      base branch missing here. **Replayed against `dc35e7a`, the commit that
+      lost B-076, it reports the row four independent ways where CI reported
+      success.** A `--selftest` of fifteen files runs first, so a guard that has
+      stopped matching fails the build rather than passing every damaged file.
+      Its first run on the real file found two more: **B-013 and B-081 were
+      rendering wrong on GitHub**, an unescaped `\|` in a code span splitting
+      them into 10 and 8 columns — GFM drops the overflow, so B-013's Phase,
+      Prio and Status cells have been invisible on a public repo since Phase 3.
+      Both escaped, the rule written into §2.3. The Status vocabulary now names
+      `in progress` and `accepted`, which two rows already used: a guard that
+      enforces a vocabulary the project does not use is one that gets
+      switched off.
 - [ ] WP10.2d Import (B-059) + verified queries + admin UI ← gate
 - [ ] GATE: uploaded policy changes generated SQL; isolation test; sign-off
 
