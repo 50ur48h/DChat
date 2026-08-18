@@ -177,6 +177,13 @@ jobs:
     needs: changes
     if: needs.changes.outputs.connectors == 'true'
     runs-on: ubuntu-latest
+    # The heaviest job here, and the only one that installs from a third-party
+    # apt repository — so it is the one that can hang on somebody else's mirror.
+    # It did, on #71: `apt-get update` sat on azure.archive.ubuntu.com for 32
+    # minutes and would have run to GitHub's 360-minute default. A ceiling turns
+    # that into a red job in a quarter of an hour, which is a thing a person can
+    # act on.
+    timeout-minutes: 20
     env:
       # A throwaway for a container that lives for one job and listens on
       # localhost. It still has to satisfy SQL Server's password policy.
@@ -219,6 +226,10 @@ jobs:
       # The same script the image uses, so the driver install is exercised on
       # every connector change rather than only when an image is rebuilt.
       - name: Install the SQL Server ODBC driver
+        # Its own, tighter ceiling: the job's 20 minutes would be spent here and
+        # report "the job timed out", which says nothing about which step. This
+        # says the driver install is what hung.
+        timeout-minutes: 8
         run: sudo KEEP_BUILD_TOOLS=1 sh apps/api/docker/install-odbc.sh
       - name: Install
         run: uv sync --locked --directory apps/api
