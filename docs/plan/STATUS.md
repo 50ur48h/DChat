@@ -85,7 +85,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-18 by Claude Code (WP10.2d in progress on #72 — B-081's guard is in; the six gate items follow)
+Last updated: 2026-08-18 by Claude Code (WP10.2d — six of seven gate items done and proved live; the critic-block demo is owed and is step 7 of the manual script)
 
 ---
 
@@ -172,14 +172,71 @@ What is already on the branch, tested and green:
    silently with every scripted run still green. **This only worked because
    B-083 was fixed first** — before that the definition reached the critic and
    never the model.
-5. **The live walk against the F&B source** — `make seed.fnb SQLITE=…`, import its
-   **18 metrics** from `meta_metric`, accept them as an Admin, and re-ask the
-   question that answered **0 units**. B-059's evidence has to be a live
-   before-and-after rather than an assertion, and the phase has done its job when
-   that answer changes.
-6. **A run the critic could not talk out of a bad draft**, with the block first on
-   the card (D-034). A gate that only walks the happy path proves the machinery
-   and not the disclosure.
+5. ~~**The live walk against the F&B source**~~ — **done, and the answer
+   changed.** Against the real 112k-row warehouse, through the real routes.
+
+   **Before** — *"Which item brings in the most sales revenue, and how many units
+   of it did we sell?"* →
+   **"Ayam Penyet Set brings in the most sales revenue, with 0.00 units sold."**
+   `limitations: []`. Correct SQL, business nonsense, and **no caveat at all** —
+   B-059's finding reproduced exactly, four months of revenue attached to zero
+   units because that item's sale lines are `parent_zero_qty` rows carrying money
+   with no quantity. The customer's own view `v_menu_performance` sums `qty`
+   across every row role, so their own reporting carries the same hole.
+
+   **Import** — `meta_metric` → **18 proposals**, each with its provenance
+   (`public.meta_metric`), none of them binding anything.
+
+   **Accept** — `prep_quantity` blessed as Admin with one required filter,
+   `fact_sale.row_role not_in (parent_zero_qty)` — the rule the customer's own
+   `meta_gate` table asks about in English as **G_ROWROLE** and marks
+   `enforced = 0`. Response: `"binds": true`.
+
+   **After** — the same question in the organization's own metric vocabulary →
+   **"Ayam Penyet Combo brings in the most sales revenue, at 157,258.26. Its prep
+   quantities by weekday are 21.48, 20.37, 18.42, 19.50, 18.29, 19.87 and 22.35
+   units."** The executed SQL carries
+   `WHERE "fs"."row_role" <> 'parent_zero_qty'`, inside a CTE.
+
+   **A definition an Admin accepted changed the SQL the model generated, on a
+   customer's warehouse.** That is the phase's whole claim and it is no longer an
+   assertion. The walk also found **B-085** — see below; without that fix the
+   import is inert and this step would have proved nothing.
+6. **A run the critic could not talk out of a bad draft**, with the block first
+   on the card (D-034) — **still owed, and it got harder for the right reason.**
+   B-078's criterion is a run where a required filter is *dropped* by the model
+   and *caught* by the critic. Three live attempts on the F&B source produced
+   three outcomes and none of them is that one:
+
+   * asked the plain question, the model **complied** — it wrote
+     `row_role <> 'parent_zero_qty'` into a CTE unprompted;
+   * asked to include every row explicitly — *"including the set lines… do not
+     filter any of them out"* — it **refused, naming the definition**:
+     *"The authoritative prep_quantity definition requires excluding fact_sale
+     rows where row_role is parent_zero_qty. The request to include every row …
+     cannot produce a compliant prep_quantity result."*
+   * and before any definition existed it answered **0.00 units** without a
+     caveat, which is the failure the whole phase is about.
+
+   The middle one is worth keeping even though it is not the criterion: a
+   definition bound firmly enough that the agent **declined a direct instruction
+   to violate it, and said which definition and which rule**. That is a stronger
+   demonstration of binding than a critic catch, because it happened at planning
+   time rather than needing enforcement — but it is *compliance*, and the owner's
+   criterion is explicit that a run where the model complies proves nothing about
+   the constraint.
+
+   **Compliance only became possible when B-083 was fixed.** Before that the
+   model never saw the definition, so it would have dropped the filter every
+   time and this criterion would have been met for the worst possible reason —
+   proving a model is punished for not reading minds. Getting harder is the
+   right direction.
+
+   The enforcement itself is proved deterministically —
+   `tests/agent/test_required_filters.py`, 23 tests including the block case and
+   its false-block twin. The **live** drop-and-catch is **step 7** of the manual
+   test script, for the owner, with both outcomes written down and the box left
+   unticked if the model complies again.
 7. **The manual test script**, and the gate box left unticked.
 
 ### 1. Session ritual
@@ -333,8 +390,8 @@ the entry asks for a measurement rather than an opinion), **B-072**, **B-074**,
 
 ### 9. Suite numbers
 
-**API: `1363 passed, 20 skipped`. Web: 92 tests.** `make preflight` clean on
-`p10.2d-import`. Run one suite at a time on this machine — the per-test databases
+**API: `1405 passed, 20 skipped`. Web: 107 tests.** Lint, format, pyright and
+both guards clean on `p10.2d-import`. Run one suite at a time on this machine — the per-test databases
 are created and dropped by name, and two pytest processes racing over them is
 enough to break one.
 
