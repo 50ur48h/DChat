@@ -51,8 +51,17 @@ Next step:        **WP10.2d** (`p10.2d-import`), the Phase 10 **gate** PR —
                   what the gate still owes is the **demo**: a run the critic
                   could not talk out of a bad draft, with the block first on the
                   card. A gate that only walks the happy path proves the
-                  machinery and not the disclosure. The criteria that still
-                  govern it:
+                  machinery and not the disclosure.
+                  **B-059's import service is also built** on that branch —
+                  proposals read through the DAL, provenance kept, an Admin's
+                  `accept` being where prose becomes a constraint. What the gate
+                  still needs beyond that: **routes and the admin review UI**,
+                  **verified queries**, **B-070** (`repeat_rate`'s denominator,
+                  the pizza fixture's before-and-after), and the **live walk
+                  against the F&B source** — importing its 18 metrics and
+                  re-asking the question that answered **0 units**, which is
+                  B-059's evidence and cannot be an assertion.
+                  The criteria that govern it:
                   **B-078 is its central criterion, not a side rule**
                   (owner, 2026-08-18): the demo must show a run where a
                   definition's filter is **required**, the model **drops**
