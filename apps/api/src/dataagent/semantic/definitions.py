@@ -36,28 +36,39 @@ from __future__ import annotations
 
 import re
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from contextlib import suppress
-from dataclasses import dataclass
-from typing import cast
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
+from typing import Final, cast
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from dataagent.dal.policy import SourcePolicy
-from dataagent.db.models import SemanticDefinition
+from dataagent.db.models import SemanticDefinition, SemanticDefinitionVersion
+from dataagent.orgs.service import audit
 from dataagent.tenancy.session import org_session
 
 __all__ = [
     "FILTER_OPERATORS",
+    "KEEP",
     "Definition",
+    "Keep",
     "RequiredFilter",
+    "Version",
     "create",
     "definitions_for",
     "matching",
+    "record_version",
+    "retire",
+    "update",
     "validate",
+    "versions_for",
 ]
 
 STATUS_ACTIVE = "active"
+STATUS_RETIRED = "retired"
 
 #: The operators a filter may use. Closed, and small on purpose: every one of
 #: these has an unambiguous reading in a `WHERE` clause, and an operator the
@@ -144,6 +155,10 @@ class Definition:
     expression: str | None = None
     required_filters: tuple[RequiredFilter, ...] = ()
     synonyms: tuple[str, ...] = ()
+    #: Which state of this definition the caller is holding (B-088). Defaulted
+    #: because most callers reason about what a metric means rather than about
+    #: which edit said so; the ones that have to cite it read it here.
+    version: int = 1
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -274,29 +289,40 @@ async def create(
     validate(definition, resolved)
 
     async with org_session(org_id) as session:
-        session.add(
-            SemanticDefinition(
-                id=definition.id,
-                org_id=org_id,
-                data_source_id=data_source_id,
-                name=definition.name,
-                kind=definition.kind,
-                description=definition.description,
-                expression=definition.expression,
-                required_filters=[
-                    {
-                        "table": item.table,
-                        "column": item.column,
-                        "op": item.op,
-                        "values": list(item.values),
-                    }
-                    for item in definition.required_filters
-                ],
-                synonyms=list(definition.synonyms),
-                status=status,
-                created_by=actor_user_id,
-            )
+        row = SemanticDefinition(
+            id=definition.id,
+            org_id=org_id,
+            data_source_id=data_source_id,
+            name=definition.name,
+            kind=definition.kind,
+            description=definition.description,
+            expression=definition.expression,
+            required_filters=_filters_json(definition.required_filters),
+            synonyms=list(definition.synonyms),
+            status=status,
+            version=1,
+            created_by=actor_user_id,
         )
+        session.add(row)
+        if status == STATUS_ACTIVE:
+            # A proposal is not a version: it binds nothing while it waits, and
+            # numbering sentences an Admin has not agreed to would make version 1
+            # mean two different things. `accept` writes the first version of an
+            # imported one, at the moment it takes effect.
+            record_version(session, row, change="created", actor_user_id=actor_user_id)
+            audit(
+                session,
+                org_id=org_id,
+                actor_user_id=actor_user_id,
+                action="semantic.definition_created",
+                object_type="semantic_definition",
+                object_id=str(row.id),
+                details={
+                    "name": row.name,
+                    "version": row.version,
+                    "binds": bool(definition.required_filters),
+                },
+            )
         await session.flush()
     return definition
 
@@ -327,6 +353,273 @@ async def definitions_for(org_id: uuid.UUID, data_source_id: uuid.UUID) -> tuple
     return tuple(_definition_of(row) for row in rows)
 
 
+@dataclass(frozen=True, slots=True)
+class Version:
+    """One state a definition has been in force in (**B-088**, revision 0022).
+
+    The whole state rather than a diff, because the question this answers —
+    *"what did this metric require when that answer was written"* — is asked by
+    somebody looking at an answer they distrust, and a reconstruction they have
+    to replay is one they will not perform.
+    """
+
+    version: int
+    change: str
+    name: str
+    description: str
+    expression: str | None
+    required_filters: tuple[RequiredFilter, ...]
+    synonyms: tuple[str, ...]
+    status: str
+    changed_by: uuid.UUID | None
+    changed_at: datetime
+
+
+class Keep:
+    """The sentinel meaning *"this field was not sent"*.
+
+    Needed for exactly one field. ``expression`` is nullable, so ``None`` is a
+    real value — *this metric has no formula* — and an edit that used ``None``
+    for both "unchanged" and "clear it" could not express one of them. The other
+    fields have no such ambiguity and use ``None`` for "unchanged".
+    """
+
+    __slots__ = ()
+
+
+KEEP: Final = Keep()
+
+
+def _filters_json(filters: Sequence[RequiredFilter]) -> list[dict[str, object]]:
+    return [
+        {"table": item.table, "column": item.column, "op": item.op, "values": list(item.values)}
+        for item in filters
+    ]
+
+
+def record_version(
+    session: AsyncSession,
+    row: SemanticDefinition,
+    *,
+    change: str,
+    actor_user_id: uuid.UUID | None,
+) -> None:
+    """Append the state ``row`` is now in to its history.
+
+    Staged on the caller's session rather than opening its own, for the reason
+    ``audit`` gives: a change without its history row, or a history row for a
+    change that did not happen, are both worse than either alone.
+
+    Call it **after** the row's fields and ``version`` are set — it snapshots
+    what is there.
+    """
+    session.add(
+        SemanticDefinitionVersion(
+            org_id=row.org_id,
+            definition_id=row.id,
+            version=row.version,
+            name=row.name,
+            kind=row.kind,
+            description=row.description,
+            expression=row.expression,
+            required_filters=list(row.required_filters),
+            synonyms=list(row.synonyms),
+            status=row.status,
+            change=change,
+            changed_by=actor_user_id,
+        )
+    )
+
+
+async def update(
+    *,
+    org_id: uuid.UUID,
+    definition_id: uuid.UUID,
+    description: str | None = None,
+    expression: str | Keep | None = KEEP,
+    synonyms: Sequence[str] | None = None,
+    required_filters: Sequence[Mapping[str, object]] | None = None,
+    actor_user_id: uuid.UUID | None = None,
+) -> Definition:
+    """Correct an **active** definition, validating it exactly as ``accept`` does.
+
+    **B-088.** Until this existed a definition was write-once: no edit, no
+    un-accept, and ``accept`` refuses anything that is not still ``proposed``, so
+    the only way to give a filter the column it should have had was to delete the
+    row in psql and import the table again. For a feature whose premise is that
+    an Admin decides what binds, being unable to revise that decision is a hole
+    in the premise — and the likeliest moment to get a filter wrong is the first
+    time you write one, which is exactly when you were locked out.
+
+    **The same validation as at the door, not a lighter one.** An edit changes
+    what the platform enforces on generated SQL, so a filter naming a column this
+    database does not have is refused here for the same reason it is refused on
+    the way in: it would never match, and the run that discovered it would report
+    a critic finding nobody could act on. The check runs before anything is
+    written, so a rejected edit leaves the definition exactly as it was.
+
+    **Omitted is not empty.** ``None`` leaves a field alone; a list replaces it.
+    Sending an empty ``required_filters`` is a real request — *stop enforcing
+    this, keep the prose* — and one an Admin has to be able to make, since the
+    alternative way to un-bind a wrong filter would again be the database.
+
+    The name is not editable, deliberately: it is what a question is matched
+    against and what a run trace recorded, so renaming it would silently change
+    which questions the definition answers and orphan every citation of it. Say
+    it differently in ``synonyms``, which is what the matcher actually reads.
+    """
+    from dataagent.dal.policy import source_policy
+
+    async with org_session(org_id) as session:
+        row = await session.get(SemanticDefinition, definition_id)
+        if row is None or row.status != STATUS_ACTIVE:
+            # Proposals are not edited, they are accepted — with the filters and
+            # synonyms the accept route already takes. A retired one is history.
+            raise LookupError("No such definition")
+
+        current = _definition_of(row)
+        edited = current
+        if description is not None:
+            edited = replace(edited, description=description.strip())
+        if not isinstance(expression, Keep):
+            edited = replace(edited, expression=expression)
+        if synonyms is not None:
+            edited = replace(
+                edited, synonyms=tuple(word.strip() for word in synonyms if word.strip())
+            )
+        if required_filters is not None:
+            edited = replace(
+                edited,
+                required_filters=tuple(RequiredFilter.of(dict(item)) for item in required_filters),
+            )
+
+        if edited.required_filters:
+            validate(edited, await source_policy(org_id, row.data_source_id))
+
+        changed = tuple(
+            field
+            for field, before, after in (
+                ("description", current.description, edited.description),
+                ("expression", current.expression, edited.expression),
+                ("synonyms", current.synonyms, edited.synonyms),
+                ("required_filters", current.required_filters, edited.required_filters),
+            )
+            if before != after
+        )
+        if not changed:
+            # Nothing to record. A version saying the same as the one before it
+            # is noise in the only history anybody consults under suspicion, and
+            # an audit row for a no-op edit is a false lead.
+            return current
+
+        row.description = edited.description
+        row.expression = edited.expression
+        row.synonyms = list(edited.synonyms)
+        row.required_filters = _filters_json(edited.required_filters)
+        row.updated_at = datetime.now(UTC)
+        row.version += 1
+        record_version(session, row, change="updated", actor_user_id=actor_user_id)
+        audit(
+            session,
+            org_id=org_id,
+            actor_user_id=actor_user_id,
+            action="semantic.definition_updated",
+            object_type="semantic_definition",
+            object_id=str(row.id),
+            # Which fields moved and which version to read, not the values. The
+            # version row already holds the content in full and is the right home
+            # for it; copying a customer own literals into a second table would
+            # widen where they live for no gain.
+            details={
+                "name": row.name,
+                "changed": list(changed),
+                "version": row.version,
+                "binds": bool(edited.required_filters),
+            },
+        )
+        await session.flush()
+        return replace(edited, version=row.version)
+
+
+async def retire(
+    *, org_id: uuid.UUID, definition_id: uuid.UUID, actor_user_id: uuid.UUID | None = None
+) -> None:
+    """Take an active definition out of force, keeping what it said.
+
+    Retired rather than deleted, like everything else in this layer: an answer
+    that was checked against this definition last month should still be
+    explainable this month, and the row is what explains it. ``definitions_for``
+    loads active ones alone, so the metric stops binding and stops reaching the
+    prompt the moment this returns.
+    """
+    async with org_session(org_id) as session:
+        row = await session.get(SemanticDefinition, definition_id)
+        if row is None or row.status != STATUS_ACTIVE:
+            raise LookupError("No such definition")
+        row.status = STATUS_RETIRED
+        row.updated_at = datetime.now(UTC)
+        row.version += 1
+        record_version(session, row, change="retired", actor_user_id=actor_user_id)
+        audit(
+            session,
+            org_id=org_id,
+            actor_user_id=actor_user_id,
+            action="semantic.definition_retired",
+            object_type="semantic_definition",
+            object_id=str(row.id),
+            details={"name": row.name, "version": row.version},
+        )
+        await session.flush()
+
+
+async def versions_for(org_id: uuid.UUID, definition_id: uuid.UUID) -> tuple[Version, ...]:
+    """Everything this definition has said, oldest first.
+
+    Oldest first because it reads as a life rather than as a feed: what it
+    started as, what somebody changed, and what it is now.
+    """
+    async with org_session(org_id) as session:
+        rows = (
+            (
+                await session.execute(
+                    select(SemanticDefinitionVersion)
+                    .where(SemanticDefinitionVersion.definition_id == definition_id)
+                    .order_by(SemanticDefinitionVersion.version)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return tuple(
+        Version(
+            version=row.version,
+            change=row.change,
+            name=row.name,
+            description=row.description,
+            expression=row.expression,
+            required_filters=tuple(_readable_filters(row.required_filters)),
+            synonyms=tuple(str(word) for word in row.synonyms),
+            status=row.status,
+            changed_by=row.changed_by,
+            changed_at=row.created_at,
+        )
+        for row in rows
+    )
+
+
+def _readable_filters(raw: Sequence[dict[str, object]]) -> list[RequiredFilter]:
+    """The filters a stored row carries, skipping any that cannot be read.
+
+    Skipped rather than fatal for the reason ``_definition_of`` gives: one
+    malformed filter must not take a whole definition out of the answer.
+    """
+    filters: list[RequiredFilter] = []
+    for item in raw:
+        with suppress(DefinitionError):
+            filters.append(RequiredFilter.of(item))
+    return filters
+
+
 def _definition_of(row: SemanticDefinition) -> Definition:
     filters: list[RequiredFilter] = []
     for raw in row.required_filters:
@@ -344,4 +637,5 @@ def _definition_of(row: SemanticDefinition) -> Definition:
         expression=row.expression,
         required_filters=tuple(filters),
         synonyms=tuple(str(word) for word in row.synonyms),
+        version=row.version,
     )

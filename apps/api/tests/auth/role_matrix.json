@@ -4,6 +4,11 @@
     "contributor": "deny(403)",
     "reader": "deny(403)"
   },
+  "DELETE /v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}": {
+    "admin": "allow",
+    "contributor": "deny(403)",
+    "reader": "deny(403)"
+  },
   "DELETE /v1/orgs/{org_id}/data-sources/{data_source_id}/verified-queries/{verified_query_id}": {
     "admin": "allow",
     "contributor": "deny(403)",
@@ -64,6 +69,11 @@
     "contributor": "deny(403)",
     "reader": "deny(403)"
   },
+  "GET /v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}/versions": {
+    "admin": "allow",
+    "contributor": "deny(403)",
+    "reader": "deny(403)"
+  },
   "GET /v1/orgs/{org_id}/data-sources/{data_source_id}/verified-queries": {
     "admin": "allow",
     "contributor": "deny(403)",
@@ -110,6 +120,11 @@
     "reader": "deny(403)"
   },
   "PATCH /v1/orgs/{org_id}/data-sources/{data_source_id}/columns/{column_id}/policy": {
+    "admin": "allow",
+    "contributor": "deny(403)",
+    "reader": "deny(403)"
+  },
+  "PATCH /v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}": {
     "admin": "allow",
     "contributor": "deny(403)",
     "reader": "deny(403)"

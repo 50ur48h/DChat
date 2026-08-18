@@ -25,8 +25,18 @@ Current position: **Phases 0–5 and 7–10 signed off. Phase 6 merged, its gate
                   definition that bound the critic and never reached the model —
                   would have made the gate demo pass for the exact opposite of
                   its intended reason.
-Next step:        **Phase 11, not yet started** (owner: *"don't start Phase 11"*,
-                  2026-08-18). It opens with **two P1s the owner scheduled**,
+Next step:        **Phase 11 is under way.** **B-088a is built** — the API half
+                  of the edit route: `PATCH`, `DELETE` (retire) and
+                  `GET .../versions`, validated as `accept` is, Admin-only,
+                  audited, and **versioned** (D-036, migration 0022) because a
+                  definition binds and an overwrite makes *"what did it require
+                  when that answer was written"* unanswerable. Next: **B-088b**
+                  (the same on the Definitions screen), then **B-090**, then
+                  **B-060** — which the owner asked to be *reproduced and
+                  explained before anything is built*, since it is about answer
+                  stability rather than a missing feature.
+                  The original scheduling note follows. It opened with **two P1s
+                  the owner scheduled**,
                   both of them guards against a class of silence rather than
                   features:
                   **1. B-088 — an accepted definition cannot be edited.** No
@@ -58,15 +68,16 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-18 by Claude Code (session end — Phase 10 signed off and merged; Phase 11 scheduled and **not started**; B-090 filed as its second P1)
+Last updated: 2026-08-18 by Claude Code (B-088a: definitions can be corrected, retired and read back version by version — D-036, migration 0022)
 
 ---
 
 ## ⚠ Session end, 2026-08-18 — start here
 
-**Phase 10 is signed off and merged. Phase 11 is scheduled and deliberately not
-started** (owner's instruction). `main` is at #73; every phase branch is
-deleted; nothing is in flight.
+**Phase 10 is signed off and merged. Phase 11 has since started** on the owner's
+instruction of 2026-08-18, in the order they set: **B-088, then B-090, then
+B-060, then WP11.1.** The paragraphs below were written when nothing was in
+flight and are kept because their three warnings are still the three warnings.
 
 **Do this first:** the ritual in plan §7.1 — `git fetch --all && git checkout
 main && git pull`, then `gh pr list`. Then read the **Next step** block at the
@@ -75,9 +86,10 @@ guard rather than a feature.
 
 **Three things a new session will get wrong without being told.**
 
-1. **`make migrate` before anything runs.** Revision **0021**
-   (`verified_queries`) landed this phase, and a missing revision surfaces as a
-   CHECK violation mid-run rather than as a migration error.
+1. **`make migrate` before anything runs.** Revision **0022**
+   (`semantic_definition_versions`, B-088a) is the head as of this line, and a
+   missing revision surfaces as a CHECK violation mid-run rather than as a
+   migration error.
 2. **`docker compose … restart web` after editing the web app**, and verify what
    is *served* rather than what is on disk — the recipe is in CLAUDE.md. This
    caught me twice in one session, once while proving a fix the owner was
@@ -1982,7 +1994,28 @@ unexplained.
       read.
 
 ## Phase 11 — Charts + polish (M11)
-- [ ] **B-088 (P1)** An accepted definition cannot be edited — no edit, no
+- [x] **B-088a (P1)** — the API half. `PATCH .../definitions/{id}` edits an
+      **active** definition's `description`, `expression`, `synonyms` and
+      `required_filters`; `DELETE` retires one; `GET .../versions` says what it
+      has said. Validated against the catalog exactly as `accept` is, Admin-only
+      by the role matrix, and **audited** — all five decisions now write an
+      `audit_log` row, not only the two this item named. Versioning was
+      **decided rather than deferred** (**D-036**, migration 0022): a definition
+      binds, so *"what did it require when that answer was written"* is a
+      question about whether an answer was right, and the day editing ships is
+      the day every overwrite starts costing one. `semantic_definition_versions`
+      is append-only in the database — 0022 revokes UPDATE and DELETE from
+      `dataagent_app`, and `rls_proof` proves it. Split from the item below
+      because the whole of B-088 is past §1.1's size target
+- [ ] **B-088b (P1)** — the web half: editing and retiring on the Definitions
+      screen, so the fix is reachable without curl. The API is what the gate walk
+      needed; the screen is what makes it a product
+- [ ] B-091 (P2) a run records the definitions that governed it by **name**, so
+      a citation cannot be resolved to the version in force at the time. Harmless
+      while definitions were write-once; B-088a is what ends that. Filed with the
+      versioning that makes it fixable
+- [ ] **B-088 (P1) — original entry, kept for its reasoning.** An accepted
+      definition cannot be edited — no edit, no
       un-accept, and re-accepting is a 404. **Raised from P2 to P1 and scheduled
       here by the owner on 2026-08-18**, having hit it mid-walk: *"a semantic
       layer whose definitions are write-once will not survive real use."* The

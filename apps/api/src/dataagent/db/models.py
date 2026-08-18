@@ -25,6 +25,7 @@ from sqlalchemy import (
     ForeignKey,
     Identity,
     Index,
+    Integer,
     Numeric,
     String,
     Text,
@@ -48,6 +49,7 @@ __all__ = [
     "CONFIDENCE_LEVELS",
     "DATA_SOURCE_ENGINES",
     "DATA_SOURCE_STATUSES",
+    "DEFINITION_CHANGES",
     "DEFINITION_KINDS",
     "DEFINITION_STATUSES",
     "DOCUMENT_STATUSES",
@@ -89,6 +91,7 @@ __all__ = [
     "ResultArtifact",
     "SecurityEvent",
     "SemanticDefinition",
+    "SemanticDefinitionVersion",
     "UsageLedger",
     "User",
 ]
@@ -167,6 +170,12 @@ DEFINITION_KINDS: tuple[str, ...] = ("metric", "dimension")
 #: `retired` rather than deletion, so a run that cited one can still explain
 #: itself.
 DEFINITION_STATUSES: tuple[str, ...] = ("proposed", "active", "retired")
+
+#: What put a definition into the state a version row records (revision 0022,
+#: B-088). `created` and `accepted` are both first versions and are told apart
+#: because their provenance differs: one is an Admin's own sentence, the other
+#: is the customer's, blessed.
+DEFINITION_CHANGES: tuple[str, ...] = ("created", "accepted", "updated", "retired")
 
 
 class Organization(Base):
@@ -1263,6 +1272,10 @@ class SemanticDefinition(Base):
     #: the customer's own table is visible rather than silently stale.
     provenance: Mapped[dict[str, object] | None] = mapped_column(JSONB)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'active'"))
+    #: Which row of ``semantic_definition_versions`` this one currently is
+    #: (revision 0022, B-088). On the live row so that a reader of this table
+    #: alone can say which version bound a query, without joining history.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
@@ -1274,6 +1287,68 @@ class SemanticDefinition(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), nullable=False
     )
+
+
+class SemanticDefinitionVersion(Base):
+    """Every state a definition has been in force in (revision 0022, **B-088**).
+
+    A definition **binds**: its ``required_filters`` are enforced against the AST
+    of generated SQL. So *"what did this metric require when that answer was
+    written"* is a question about whether an answer was right, and an edit that
+    overwrites makes it unanswerable. Architecture 5.4 already asked for this —
+    definitions are *"validated against the catalog at save time and versioned"*
+    — and nothing versioned anything until editing existed to need it (D-036).
+
+    **The whole state, not a diff.** A diff is smaller and cannot answer the
+    question without replaying every row before it, which is a reconstruction
+    nobody performs while looking at an answer they distrust.
+
+    **A proposal is not a version.** It binds nothing while it waits, and
+    numbering sentences an Admin has not agreed to would make version 1 mean two
+    different things. The first version is the one that took effect.
+
+    Append-only in the database, not merely by convention: the app role is
+    granted SELECT and INSERT and had UPDATE and DELETE revoked, the same shape
+    ``audit_log`` uses and for the same reason.
+    """
+
+    __tablename__ = "semantic_definition_versions"
+    __table_args__ = (
+        CheckConstraint(
+            "change IN ({})".format(", ".join(f"'{c}'" for c in DEFINITION_CHANGES)),
+            name="change_valid",
+        ),
+        UniqueConstraint(
+            "definition_id",
+            "version",
+            name="uq_semantic_definition_versions_definition_id_version",
+        ),
+        Index("ix_semantic_definition_versions_org_id_definition_id", "org_id", "definition_id"),
+    )
+
+    id: Mapped[UuidPk]
+    org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    definition_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("semantic_definitions.id", ondelete="CASCADE"), nullable=False
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    expression: Mapped[str | None] = mapped_column(Text)
+    required_filters: Mapped[list[dict[str, object]]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    synonyms: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    #: What put it into this state: created, accepted, updated or retired.
+    change: Mapped[str] = mapped_column(String(20), nullable=False)
+    changed_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[CreatedAt]
 
 
 class VerifiedQuery(Base):
@@ -1355,5 +1430,6 @@ TENANT_TABLES: dict[str, str] = {
     "knowledge_documents": "org_id",
     "knowledge_chunks": "org_id",
     "semantic_definitions": "org_id",
+    "semantic_definition_versions": "org_id",
     "verified_queries": "org_id",
 }

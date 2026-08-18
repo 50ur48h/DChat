@@ -4,6 +4,45 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-036 — An edited definition is versioned, not overwritten
+Date: 2026-08-18 · Phase: 11 · PR: B-088 · Migration 0022
+Context: **B-088** asked for an edit route, because a definition was write-once —
+no edit, no un-accept, re-accepting a 404 — and the owner hit it mid-gate-walk
+with `psql` as the only way back. It also asked whether an edit should be
+**versioned**, which architecture 5.4 has said since it was written (definitions
+are *"validated against the catalog at save time and versioned"*) and which
+nothing implemented, because until editing existed there was nothing to version.
+That changes the day the route ships: a definition **binds** — `required_filters`
+are enforced against the AST of generated SQL — so *"what did this metric require
+when that answer was written"* is a question about whether an answer was right,
+and every overwrite between shipping the edit and shipping the history is a
+question that can no longer be answered.
+Options: (a) overwrite the row and treat the audit trail as the history —
+cheapest, no migration, but `audit_log.details` is a generic blob and
+reconstructing a past state from it is versioning reimplemented badly, on data
+nobody promised to keep in that shape; (b) copy-on-write rows in
+`semantic_definitions` — breaks `(data_source_id, name)` uniqueness and makes
+every reader filter for the live one; (c) a monotonic `version` on the live row
+plus an append-only snapshot table.
+Decision: (c). `semantic_definitions.version` counts the states a definition has
+been **in force** in, and `semantic_definition_versions` holds each of them in
+full — name, description, expression, filters, synonyms, status — with the
+change that produced it (`created`, `accepted`, `updated`, `retired`), who made
+it and when. The whole state rather than a diff, because the person asking has an
+answer they distrust in front of them and will not replay a chain. A **proposal
+is not a version**: it binds nothing while it waits, so version 1 is the state
+that first took effect.
+Consequences: the table is append-only in the database, not by convention — 0022
+revokes UPDATE and DELETE from `dataagent_app` (0002's default privileges would
+otherwise grant them) and `rls_proof` proves it, the same lock `audit_log` and
+`agent_events` carry. An edit that changes nothing writes no version, so history
+stays free of no-ops. Definitions written before 0022 have no recorded past and
+`GET …/versions` returns an empty list rather than implying one. **A run still
+records definition *names* only**, so a citation cannot yet be resolved to the
+version that governed it — the history makes that possible and B-091 is where it
+gets wired. Architecture 5.4 needed no deviation entry: this implements a
+sentence it already contained.
+
 ## D-035 — A definition is the one organization-authored text the model is told to obey
 Date: 2026-08-18 · Phase: 10 · PR: #72 (WP10.2d, B-083)
 Context: **D-033** settled that prose informs and structure binds, but not how

@@ -54,6 +54,15 @@ under "Unreleased", only for changes a user would notice.
   description, so a real question matched nothing at all.
 
 ### Added
+- A definition an admin accepted can now be corrected. Its description, formula,
+  synonyms and required filters can all be changed, checked against your catalog
+  exactly as they were when it was accepted, and a definition that turned out to
+  be wrong can be taken out of force without being forgotten. Until now the only
+  route was editing the database by hand.
+- Every state a definition has been in is kept, so a definition that binds can
+  be read back as it stood: what it required, who changed it and when. An answer
+  checked against a metric last month is still explainable after the metric is
+  edited.
 - An admin can approve a question and the SQL that answers it, and the agent is
   shown the closest of those examples when a similar question is asked. It is
   how a database's unwritten conventions get taught — which join is the right

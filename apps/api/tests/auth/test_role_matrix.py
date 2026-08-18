@@ -155,6 +155,25 @@ PROBES: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
         "/v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}/reject",
         None,
     ),
+    # Editing and retiring an *active* definition (B-088). Admin like the rest,
+    # and for the sharpest version of the reason: a PATCH here changes what the
+    # critic will enforce on generated SQL, which is a privileged act however
+    # ordinary the verb looks.
+    (
+        "PATCH",
+        "/v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}",
+        {"description": "A metric, corrected."},
+    ),
+    (
+        "DELETE",
+        "/v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}",
+        None,
+    ),
+    (
+        "GET",
+        "/v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}/versions",
+        None,
+    ),
     # Verified queries (arch 5.4). Admin like the rest of the semantic layer,
     # and for a reason of its own: an approved example is SQL this organization
     # is telling the planner to imitate.
@@ -183,12 +202,17 @@ PROBES: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
 )
 
 
-#: Which proposal a probe acts upon. Accept and reject each **consume** the row
-#: they are given — an accepted proposal is no longer a proposal — so they must
-#: not share one, or whichever ran second would record ``deny(404)`` where the
-#: matrix means allow. Same shape of problem as the per-role documents.
+#: Which definition row a probe acts upon. Accept, reject and retire each
+#: **consume** the row they are given — an accepted proposal is no longer a
+#: proposal — so they must not share one, or whichever ran second would record
+#: ``deny(404)`` where the matrix means allow. Same shape of problem as the
+#: per-role documents. The PATCH and versions probes need a row in the *active*
+#: state instead, since editing a proposal is a 404 by design.
+DEFINITIONS = "/v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}"
 PROPOSAL_POOL: dict[str, str] = {
-    "/v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}/reject": "rejected"
+    f"{DEFINITIONS}/reject": "rejected",
+    DEFINITIONS: "edited",
+    f"{DEFINITIONS}/versions": "edited",
 }
 
 #: Query strings for routes that require one. Without it the probe earns a 422
@@ -244,8 +268,9 @@ class Matrix:
     #: evidence probe records a role decision rather than "that execution is not
     #: on this run", which is a 404 of an entirely different kind.
     executions: dict[str, uuid.UUID]
-    #: Two proposals **per role**: one for the accept probe and one for the
-    #: reject probe. Each verb consumes the row it is handed, so a shared one
+    #: Four definitions **per role**: one each for the accept, reject and retire
+    #: probes, plus an active one the edit and versions probes read. Each of
+    #: those verbs consumes the row it is handed, so a shared one
     #: would record an already-decided 404 for whichever ran second — a
     #: lifecycle fact wearing the clothes of a role decision.
     proposals: dict[str, dict[str, uuid.UUID]]
@@ -304,7 +329,15 @@ async def matrix_app(
     column_id = uuid.uuid4()
     users: dict[str, uuid.UUID] = {}
     conversations: dict[str, uuid.UUID] = {}
-    proposals: dict[str, dict[str, uuid.UUID]] = {"accepted": {}, "rejected": {}}
+    proposals: dict[str, dict[str, uuid.UUID]] = {
+        "accepted": {},
+        "rejected": {},
+        # Active rather than proposed: PATCH and DELETE act on a definition that
+        # is already in force, and probing them against a proposal would record
+        # a 404 about state as though it were a decision about role.
+        "edited": {},
+        "retired": {},
+    }
     verified: dict[str, uuid.UUID] = {}
     documents: dict[str, uuid.UUID] = {}
     runs: dict[str, uuid.UUID] = {}
@@ -421,17 +454,23 @@ async def matrix_app(
         # because the import path is stubbed above and because what the accept
         # and reject probes need is simply a row in the state those verbs act on.
         for role in ROLES:
-            for pool in ("accepted", "rejected"):
+            for pool in ("accepted", "rejected", "edited", "retired"):
                 proposal_id = uuid.uuid4()
                 proposals[pool][role] = proposal_id
+                status = "proposed" if pool in ("accepted", "rejected") else "active"
                 await connection.execute(
                     text(
                         "INSERT INTO semantic_definitions "
                         "(id, org_id, data_source_id, name, kind, description, status) "
-                        "VALUES (:i, :o, :d, :n, 'metric', 'A proposal, for probing.', "
-                        "'proposed')"
+                        "VALUES (:i, :o, :d, :n, 'metric', 'A definition, for probing.', :s)"
                     ),
-                    {"i": proposal_id, "o": org_id, "d": data_source_id, "n": f"{pool} {role}"},
+                    {
+                        "i": proposal_id,
+                        "o": org_id,
+                        "d": data_source_id,
+                        "n": f"{pool} {role}",
+                        "s": status,
+                    },
                 )
             example_id = uuid.uuid4()
             verified[role] = example_id
@@ -464,6 +503,19 @@ async def matrix_app(
     finally:
         await owner.dispose()
         await app_engine.dispose()
+
+
+def _pool(method: str, template: str) -> str:
+    """Which pool of definitions this probe draws from.
+
+    Keyed on the **verb** as well as the path, because ``PATCH`` and ``DELETE``
+    share one template and only the second consumes its row. Handing them the
+    same definition would make the retire probe run against a row the edit probe
+    had already changed, or worse, the reverse.
+    """
+    if method == "DELETE" and template == DEFINITIONS:
+        return "retired"
+    return PROPOSAL_POOL.get(template, "accepted")
 
 
 async def _probe(
@@ -508,7 +560,7 @@ async def test_the_role_matrix_matches_its_snapshot(matrix_app: Matrix) -> None:
                 run_id=matrix_app.runs[role],
                 execution_id=matrix_app.executions[role],
                 document_id=matrix_app.documents[role],
-                definition_id=matrix_app.proposals[PROPOSAL_POOL.get(template, "accepted")][role],
+                definition_id=matrix_app.proposals[_pool(method, template)][role],
                 verified_query_id=matrix_app.verified[role],
             ) + QUERIES.get(template, "")
             status = await _probe(matrix_app.app, method, path, role, body, UPLOADS.get(template))

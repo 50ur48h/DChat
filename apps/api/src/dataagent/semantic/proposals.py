@@ -54,7 +54,8 @@ from dataclasses import dataclass, replace
 from sqlalchemy import select
 
 from dataagent.db.models import SemanticDefinition
-from dataagent.semantic.definitions import Definition, RequiredFilter, validate
+from dataagent.orgs.service import audit
+from dataagent.semantic.definitions import Definition, RequiredFilter, record_version, validate
 from dataagent.tenancy.session import org_session
 
 __all__ = [
@@ -327,22 +328,49 @@ async def accept(
         # Who blessed it, over who imported it: acceptance is the act that made
         # this bind anything, and it is the one worth being able to ask about.
         row.created_by = actor_user_id or row.created_by
+        # Version 1 is the first state it was ever *in force* in, which is this
+        # one — the proposal it was before bound nothing (B-088, revision 0022).
+        record_version(session, row, change="accepted", actor_user_id=actor_user_id)
+        audit(
+            session,
+            org_id=org_id,
+            actor_user_id=actor_user_id,
+            action="semantic.definition_accepted",
+            object_type="semantic_definition",
+            object_id=str(row.id),
+            details={"name": row.name, "version": row.version, "binds": bool(parsed)},
+        )
         await session.flush()
-    return definition
+    return replace(definition, version=row.version)
 
 
-async def reject(*, org_id: uuid.UUID, definition_id: uuid.UUID) -> None:
+async def reject(
+    *, org_id: uuid.UUID, definition_id: uuid.UUID, actor_user_id: uuid.UUID | None = None
+) -> None:
     """Retire a proposal rather than deleting it.
 
     Kept, so that *"we looked at this and said no"* is answerable — and so a
     second import of the same table does not silently re-propose what an Admin
     has already turned down.
+
+    **Audited, but not versioned.** A rejected proposal never took effect, so it
+    has no state the history is about; what is worth recording is that somebody
+    considered it and said no, which is what the audit row says.
     """
     async with org_session(org_id) as session:
         row = await session.get(SemanticDefinition, definition_id)
         if row is None or row.status != STATUS_PROPOSED:
             raise LookupError("No such proposal")
         row.status = STATUS_RETIRED
+        audit(
+            session,
+            org_id=org_id,
+            actor_user_id=actor_user_id,
+            action="semantic.definition_rejected",
+            object_type="semantic_definition",
+            object_id=str(row.id),
+            details={"name": row.name},
+        )
         await session.flush()
 
 
