@@ -289,4 +289,59 @@ describe("<Definitions />", () => {
 
     expect(await screen.findByText(/already known here/)).toBeInTheDocument();
   });
+
+  it("carries the customer's own names into the import (B-085, B-087)", async () => {
+    // The field the form did not have, found when a gate walk imported 18
+    // metrics and every question sailed past all of them. A definition is
+    // matched by name and synonym; imported without synonyms it answers only to
+    // its key, which nobody types. The import binds nothing and looks like the
+    // feature not working.
+    const calls = stubFetch();
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
+    await screen.findByText(/Nothing waiting/);
+
+    fireEvent.change(screen.getByLabelText("Metric table"), {
+      target: { value: "meta_metric" },
+    });
+    fireEvent.change(screen.getByLabelText("Name column"), { target: { value: "metric_key" } });
+    fireEvent.change(screen.getByLabelText("Definition column"), {
+      target: { value: "definition" },
+    });
+    fireEvent.change(screen.getByLabelText("Names column (optional)"), {
+      target: { value: "metric_name" },
+    });
+    fireEvent.click(screen.getByText("Import"));
+
+    await waitFor(() => {
+      const call = calls.find((entry) => entry.url.endsWith("/definitions/import"));
+      expect(call).toBeDefined();
+      expect(JSON.parse(String(call?.init.body))).toMatchObject({
+        table: "meta_metric",
+        name_column: "metric_key",
+        description_column: "definition",
+        synonyms_column: "metric_name",
+      });
+    });
+  });
+
+  it("omits the optional columns rather than sending them empty", async () => {
+    // An empty string is a column name the API would look for and never find.
+    const calls = stubFetch();
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
+    await screen.findByText(/Nothing waiting/);
+
+    fireEvent.change(screen.getByLabelText("Metric table"), { target: { value: "m" } });
+    fireEvent.change(screen.getByLabelText("Name column"), { target: { value: "k" } });
+    fireEvent.change(screen.getByLabelText("Definition column"), { target: { value: "d" } });
+    fireEvent.click(screen.getByText("Import"));
+
+    await waitFor(() => {
+      const call = calls.find((entry) => entry.url.endsWith("/definitions/import"));
+      const body = JSON.parse(String(call?.init.body)) as Record<string, unknown>;
+      expect(body).not.toHaveProperty("synonyms_column");
+      expect(body).not.toHaveProperty("expression_column");
+    });
+  });
 });

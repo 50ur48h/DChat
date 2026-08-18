@@ -93,6 +93,14 @@ table**:
 | Name column | `metric_key` |
 | Definition column | `definition` |
 | Formula column | *(leave blank)* |
+| **Names column** | **`metric_name`** |
+
+**The last row is the one that matters and the first version of this script left
+it out** (B-087). A definition is matched to a question by **name and synonym**.
+Imported without synonyms it answers only to `prep_quantity` — which nobody
+types — so it binds nothing, every question sails past it, and the failure looks
+exactly like the feature not working. `metric_name` is where that warehouse
+keeps the words people actually use.
 
 Press **Import**.
 
@@ -118,7 +126,18 @@ First, read the sentence above the buttons **before touching anything**:
 
 and the button says **Accept as prose**.
 
-Now fill the filter editor on that card:
+Now, on that card, set **Also called** to:
+
+```
+units, units sold
+```
+
+*This is what makes step 6 work.* The definition has to answer to a word the
+question contains, and the question asks about **units**. The field is prefilled
+with whatever the import found, so with the Names column mapped you are adding
+to real synonyms rather than supplying the only ones.
+
+Then fill the filter editor on the same card:
 
 | Field | Value |
 |---|---|
@@ -136,10 +155,18 @@ before the answer is written"*, and the button change to **Accept and enforce**.
 *That change is the whole of D-033 on one screen: the button names the act it is
 about to perform, before it performs it.*
 
-Press **Accept and enforce**.
+Press **Accept and enforce** — *not* "Accept as prose". If the button still
+reads "Accept as prose", the filter did not stage: check that Table, Column and
+Values are all filled and press **Add filter** again.
 
 **You should see** the card leave the queue and appear under **In force** with a
-green **enforced** badge and its filter listed. Accept any other proposal without
+green **enforced** badge, its filter listed, and *"Also called: units, units
+sold"*.
+
+**Check before moving on.** Under **In force**, the badge must be green
+**enforced** and not grey **prose only**. A grey badge means no filter was
+attached, and steps 5–6 will then answer exactly as they did before — which is
+what happened on the first walk of this script. Accept any other proposal without
 adding a filter: it appears under **In force** with a grey **prose only** badge
 and the line *"Nothing checks this one."*
 
@@ -172,16 +199,24 @@ English, as **G_ROWROLE**, marked `enforced = 0`.
 
 ### 6. The same question, with the definition binding — **the after**
 
-Ask, against the same source:
+Ask **the same question as step 5**, word for word:
 
-> Which item brings in the most sales revenue, and what is the prep quantity for it?
+> Which item brings in the most sales revenue, and how many units of it did we sell?
+
+It reaches the definition now because you gave it the synonym **units** in
+step 4. (The original script asked a differently-worded question here to force
+the match; with the Names column and Also called filled, the same question works
+both times, which is the comparison worth having.)
 
 **You should see** an answer naming a **different item** with **real unit
-numbers** — the run recorded here was:
+numbers**. The equivalent run recorded during development answered:
 
 > **"Ayam Penyet Combo brings in the most sales revenue, at 157,258.26. Its prep
 > quantities by weekday are 21.48, 20.37, 18.42, 19.50, 18.29, 19.87 and 22.35
 > units."**
+
+Your wording will differ. What must not differ is that the item changes and the
+units stop being `0.00`.
 
 Open the run's trace and read the SQL. **You should see**
 `WHERE "fs"."row_role" <> 'parent_zero_qty'` in it.

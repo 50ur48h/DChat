@@ -140,6 +140,11 @@ export function Definitions({
   const [nameColumn, setNameColumn] = useState("");
   const [descriptionColumn, setDescriptionColumn] = useState("");
   const [expressionColumn, setExpressionColumn] = useState("");
+  //: The column holding what people actually call each metric. Optional, and
+  //: the most valuable optional field on this form: a definition is matched to
+  //: a question by name and synonym, so an import that carries no synonyms
+  //: produces metrics no question can reach (B-085, B-087).
+  const [synonymsColumn, setSynonymsColumn] = useState("");
 
   const load = useCallback(async () => {
     const [active, waiting] = await Promise.all([
@@ -200,6 +205,7 @@ export function Definitions({
         name_column: nameColumn.trim(),
         description_column: descriptionColumn.trim(),
         ...(expressionColumn.trim() ? { expression_column: expressionColumn.trim() } : {}),
+        ...(synonymsColumn.trim() ? { synonyms_column: synonymsColumn.trim() } : {}),
       });
       // An import that proposed nothing succeeded — every name was already
       // known. Saying so is the difference between "done" and "did my mapping
@@ -301,6 +307,16 @@ export function Definitions({
             value={expressionColumn}
             placeholder="calculation"
             onChange={(event) => setExpressionColumn(event.target.value)}
+          />
+          {/* Worth more than it looks. A definition is found by name and synonym,
+              so a metric imported without the words people use is one no question
+              reaches — it binds nothing however carefully its filters are
+              written (B-085). Most metric tables already have this column. */}
+          <Input
+            label="Names column (optional)"
+            value={synonymsColumn}
+            placeholder="metric_name — what people call it"
+            onChange={(event) => setSynonymsColumn(event.target.value)}
           />
           <Button
             onClick={() => void importFromTable()}
