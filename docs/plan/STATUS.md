@@ -157,9 +157,21 @@ What is already on the branch, tested and green:
    example is worse than none. Revision **0021**, RLS + `TENANT_TABLES` +
    rls_proof extended, three Admin routes in the matrix. The screen is
    **B-084**; the grounding is what 5.4 and this gate asked for.
-4. **B-070** — define `repeat_rate` with its denominator, so golden eval **#10**
-   stops depending on which of two defensible readings a model picks. This is the
-   pizza fixture's before-and-after and needs no customer data.
+4. ~~**B-070**~~ — **done, and proved live.** Same question, same model, one
+   definition apart. **Before**: `FROM customers AS c LEFT JOIN orders o` —
+   denominator 8000, `[FAIL] 0.984471 was in no result`, 5,960 tokens.
+   **After**: `FROM orders GROUP BY customer_id` — denominator 7985, `[PASS]`,
+   6,102 tokens. The definition **changed the generated SQL**, which is the
+   phase's whole claim, shown on the fixture this project designed rather than
+   on a customer's warehouse. It carries **no required filters and does not
+   pretend to**: the ambiguity is in which rows are counted, and no predicate
+   expresses *"customers that appear in orders"* — so it informs and does not
+   bind, which is the honest shape (D-033). The fragile part is reachability and
+   it has tests of its own: nobody types `repeat_rate`, so the match is on the
+   synonym *"ordered more than once"*, and rewording golden #10 would undo this
+   silently with every scripted run still green. **This only worked because
+   B-083 was fixed first** — before that the definition reached the critic and
+   never the model.
 5. **The live walk against the F&B source** — `make seed.fnb SQLITE=…`, import its
    **18 metrics** from `meta_metric`, accept them as an Admin, and re-ask the
    question that answered **0 units**. B-059's evidence has to be a live
