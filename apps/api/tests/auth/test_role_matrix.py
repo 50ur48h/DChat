@@ -33,6 +33,7 @@ from dataagent.db import engine as engine_module
 from dataagent.knowledge import routes as knowledge_routes
 from dataagent.main import create_app
 from dataagent.secrets.local import LocalSecretsProvider
+from dataagent.semantic import proposals as proposals_service
 from dataagent.tenancy import session as session_module
 
 SNAPSHOT = Path(__file__).with_name("role_matrix.json")
@@ -123,6 +124,37 @@ PROBES: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
     # member route like the two above. Each role probes an execution on *its own*
     # run, for the same reason the conversations do.
     ("GET", "/v1/orgs/{org_id}/runs/{run_id}/executions/{execution_id}", None),
+    # The semantic layer (WP10.2d, B-059). **Every one of these is Admin, the
+    # read side included** — an accepted definition constrains generated SQL, so
+    # the list is an administrative view of the platform's own controls rather
+    # than a view of the customer's data. Whether a Reader should see it is a
+    # real product question and is filed as B-082, not answered by default here.
+    ("GET", "/v1/orgs/{org_id}/data-sources/{data_source_id}/definitions", None),
+    ("GET", "/v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/proposals", None),
+    (
+        "POST",
+        "/v1/orgs/{org_id}/data-sources/{data_source_id}/definitions",
+        {"name": "probe metric", "description": "A metric, for probing."},
+    ),
+    (
+        "POST",
+        "/v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/import",
+        {
+            "table": "probe",
+            "name_column": "probe_column",
+            "description_column": "probe_column",
+        },
+    ),
+    (
+        "POST",
+        "/v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}/accept",
+        {"required_filters": []},
+    ),
+    (
+        "POST",
+        "/v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}/reject",
+        None,
+    ),
     ("DELETE", "/v1/orgs/{org_id}/data-sources/{data_source_id}", None),
     # Documents (WP10.1b). Reading is member work like browsing a catalog;
     # **uploading is Contributor-or-Admin**, and the reason is worth stating:
@@ -136,6 +168,14 @@ PROBES: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
     ("DELETE", "/v1/orgs/{org_id}/documents/{document_id}", None),
 )
 
+
+#: Which proposal a probe acts upon. Accept and reject each **consume** the row
+#: they are given — an accepted proposal is no longer a proposal — so they must
+#: not share one, or whichever ran second would record ``deny(404)`` where the
+#: matrix means allow. Same shape of problem as the per-role documents.
+PROPOSAL_POOL: dict[str, str] = {
+    "/v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}/reject": "rejected"
+}
 
 #: Query strings for routes that require one. Without it the probe earns a 422
 #: from validation, and the matrix would record a validation error as though it
@@ -190,6 +230,11 @@ class Matrix:
     #: evidence probe records a role decision rather than "that execution is not
     #: on this run", which is a 404 of an entirely different kind.
     executions: dict[str, uuid.UUID]
+    #: Two proposals **per role**: one for the accept probe and one for the
+    #: reject probe. Each verb consumes the row it is handed, so a shared one
+    #: would record an already-decided 404 for whichever ran second — a
+    #: lifecycle fact wearing the clothes of a role decision.
+    proposals: dict[str, dict[str, uuid.UUID]]
     #: A document **per role**, and for a blunter reason than the conversations:
     #: documents are org-scoped, so one would be visible to all three — but the
     #: DELETE probe *removes* it, and roles are probed in order, so the second
@@ -225,11 +270,24 @@ async def matrix_app(
     # And the same for cards: refreshing a catalog embeds them since B-018.
     monkeypatch.setattr(catalog_routes, "card_embedder", lambda: None)
 
+    # The import probe reads the customer's database through the DAL, and this
+    # fixture's data source points at port 1 so that nothing here ever waits on
+    # a socket. Left alone it would answer 502 for the admin and the matrix
+    # would record "not reachable" as though it were an authorization decision —
+    # the one confusion this file exists to prevent. What an import actually
+    # reads is proved in tests/semantic and tests/agent, against a real
+    # database; this file is about **who may call what**.
+    async def _no_rows(**_: object) -> tuple[object, ...]:
+        return ()
+
+    monkeypatch.setattr(proposals_service, "propose_from_table", _no_rows)
+
     org_id = uuid.uuid4()
     data_source_id = uuid.uuid4()
     column_id = uuid.uuid4()
     users: dict[str, uuid.UUID] = {}
     conversations: dict[str, uuid.UUID] = {}
+    proposals: dict[str, dict[str, uuid.UUID]] = {"accepted": {}, "rejected": {}}
     documents: dict[str, uuid.UUID] = {}
     runs: dict[str, uuid.UUID] = {}
     executions: dict[str, uuid.UUID] = {}
@@ -341,6 +399,23 @@ async def matrix_app(
             {"i": column_id, "o": org_id, "t": table_id},
         )
 
+        # A proposal per role per verb. Written directly rather than imported,
+        # because the import path is stubbed above and because what the accept
+        # and reject probes need is simply a row in the state those verbs act on.
+        for role in ROLES:
+            for pool in ("accepted", "rejected"):
+                proposal_id = uuid.uuid4()
+                proposals[pool][role] = proposal_id
+                await connection.execute(
+                    text(
+                        "INSERT INTO semantic_definitions "
+                        "(id, org_id, data_source_id, name, kind, description, status) "
+                        "VALUES (:i, :o, :d, :n, 'metric', 'A proposal, for probing.', "
+                        "'proposed')"
+                    ),
+                    {"i": proposal_id, "o": org_id, "d": data_source_id, "n": f"{pool} {role}"},
+                )
+
     app = create_app(settings=Settings(auth_mode="dev", env="ci", build_env="dev"))
     app.state.token_validator = _SubjectAsToken()
 
@@ -355,6 +430,7 @@ async def matrix_app(
             runs=runs,
             executions=executions,
             documents=documents,
+            proposals=proposals,
         )
     finally:
         await owner.dispose()
@@ -403,6 +479,7 @@ async def test_the_role_matrix_matches_its_snapshot(matrix_app: Matrix) -> None:
                 run_id=matrix_app.runs[role],
                 execution_id=matrix_app.executions[role],
                 document_id=matrix_app.documents[role],
+                definition_id=matrix_app.proposals[PROPOSAL_POOL.get(template, "accepted")][role],
             ) + QUERIES.get(template, "")
             status = await _probe(matrix_app.app, method, path, role, body, UPLOADS.get(template))
             observed[key][role] = "allow" if status < 400 else f"deny({status})"

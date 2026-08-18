@@ -113,11 +113,19 @@ What is already on the branch, tested and green:
 
 **What the gate still owes, in the order that makes sense:**
 
-1. **Routes** for definitions and proposals — list, create, import, accept,
-   reject. Without them the import has no product surface and an Admin cannot
-   accept anything. Role: **Admin**, because an accepted definition constrains
-   generated SQL. Add all of them to `tests/auth/test_role_matrix.py`, which
-   fails if an org-scoped route has no entry.
+1. ~~**Routes** for definitions and proposals~~ — **done.**
+   `semantic/routes.py`: list, list proposals, create, import, accept, reject,
+   all six **Admin**, all six in the role matrix and its snapshot
+   (`admin: allow`, `contributor: deny(403)`, `reader: deny(403)`, a pure
+   addition — no existing route's access moved). `binds` is on the wire so a
+   screen never has to infer "this constrains the SQL" from an empty array.
+   Import returns **201 with an empty list** when everything was already known:
+   a request that succeeded and proposed nothing is not a wrong mapping.
+   Thirteen route tests, and the one that matters asserts what the
+   **definitions** list says after an import — still empty — rather than what
+   the import returned, because activating on import is the shortcut a product
+   surface would take. Locking the *read* side to Admin is deliberate and is
+   the weaker half of the argument: filed as **B-082** rather than defaulted.
 2. **The admin review UI** — the screen that shows a proposal, its provenance and
    what it would create, and lets an Admin accept or reject each row. Follow
    B-008: a Reader sees no controls, and an unknown role fails closed.

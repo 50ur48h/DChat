@@ -49,6 +49,16 @@
     "contributor": "allow",
     "reader": "allow"
   },
+  "GET /v1/orgs/{org_id}/data-sources/{data_source_id}/definitions": {
+    "admin": "allow",
+    "contributor": "deny(403)",
+    "reader": "deny(403)"
+  },
+  "GET /v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/proposals": {
+    "admin": "allow",
+    "contributor": "deny(403)",
+    "reader": "deny(403)"
+  },
   "GET /v1/orgs/{org_id}/documents": {
     "admin": "allow",
     "contributor": "allow",
@@ -110,6 +120,26 @@
     "reader": "allow"
   },
   "POST /v1/orgs/{org_id}/data-sources": {
+    "admin": "allow",
+    "contributor": "deny(403)",
+    "reader": "deny(403)"
+  },
+  "POST /v1/orgs/{org_id}/data-sources/{data_source_id}/definitions": {
+    "admin": "allow",
+    "contributor": "deny(403)",
+    "reader": "deny(403)"
+  },
+  "POST /v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/import": {
+    "admin": "allow",
+    "contributor": "deny(403)",
+    "reader": "deny(403)"
+  },
+  "POST /v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}/accept": {
+    "admin": "allow",
+    "contributor": "deny(403)",
+    "reader": "deny(403)"
+  },
+  "POST /v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}/reject": {
     "admin": "allow",
     "contributor": "deny(403)",
     "reader": "deny(403)"

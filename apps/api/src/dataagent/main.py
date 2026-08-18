@@ -22,6 +22,7 @@ from dataagent.invitations import routes as invitation_routes
 from dataagent.knowledge import routes as knowledge_routes
 from dataagent.orgs import routes as orgs_routes
 from dataagent.runs import routes as runs_routes
+from dataagent.semantic import routes as semantic_routes
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(catalog_routes.router)
     app.include_router(knowledge_routes.router)
     app.include_router(runs_routes.router)
+    app.include_router(semantic_routes.router)
 
     if resolved.auth_mode == "dev":
         # Imported here, not at module scope: the prod image does not contain
