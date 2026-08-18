@@ -1,0 +1,100 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+
+.itemHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.meta {
+  margin: var(--space-2) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.description {
+  margin: var(--space-3) 0 0;
+}
+
+.expression {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+}
+
+/* The filters are the half a check can act on, so they are set apart from the
+   sentence rather than run together with it. */
+.filters {
+  margin: var(--space-3) 0 0;
+  padding-left: var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.importForm,
+.filterForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: flex-end;
+}
+
+.filterForm {
+  margin-top: var(--space-3);
+}
+
+/* The two outcomes of accepting are genuinely different, so they do not look
+   the same. "Binds" is the stronger claim and carries the stronger colour. */
+.binds {
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised, transparent);
+  border-left: 3px solid var(--accent-mint, #12b76a);
+  font-size: var(--text-sm);
+}
+
+.prose {
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--border-muted, #d0d5dd);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.notice {
+  margin: var(--space-3) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.empty {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.error {
+  margin: var(--space-3) 0 0;
+  color: var(--danger-text, #b42318);
+  font-size: var(--text-sm);
+}

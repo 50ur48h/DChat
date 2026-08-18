@@ -78,15 +78,28 @@ def test_a_critic_warning_becomes_a_limitation() -> None:
     assert limitations_for(_state(_ref()), verdict) == ("9,999.00 appears in no result",)
 
 
-def test_a_blocking_finding_is_not_repeated_as_a_limitation() -> None:
-    """A block either sent the run round again or is already reflected in an
-    answer that says what it could not establish. Repeating it beside that answer
-    would read as a second, unexplained doubt."""
+def test_a_blocking_finding_that_survived_is_the_first_thing_said() -> None:
+    """**Reversed by D-034, and the old reasoning is worth keeping visible.**
+
+    This test used to assert the opposite, on the grounds that a block either
+    sent the run round again or was already reflected in an answer saying what it
+    could not establish. A live run disproved both halves at once (**B-079**):
+    the critic blocked, the run took its one permitted re-entry, came back with
+    the same shape, was blocked again — and the draft shipped claiming to have
+    done precisely what the critic said it had not.
+
+    A block that reaches this function is therefore unresolved by construction,
+    and the answer is going out anyway. It goes first, in the critic's own words.
+    """
     verdict = CriticVerdict(
         verdict="revise", findings=(CriticFinding("range_matches", BLOCK, "wrong month"),)
     )
 
-    assert limitations_for(_state(_ref()), verdict) == ()
+    notes = limitations_for(_state(_ref()), verdict)
+
+    assert notes
+    assert "did not pass" in notes[0]
+    assert "wrong month" in notes[0]
 
 
 def test_insufficient_evidence_says_so_in_the_answer() -> None:

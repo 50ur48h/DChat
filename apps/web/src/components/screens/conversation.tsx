@@ -239,6 +239,39 @@ function RunProgress({ orgId, run }: { orgId: string; run: Run }) {
  * completed, and the reply explains why the data could not answer. What is
  * absent then is the findings list, because a refusal concluded nothing.
  */
+/**
+ * What this organization's own definitions did to this answer (**B-087**).
+ *
+ * The absence of this line cost three gate walks. A definition is matched to a
+ * question by name and synonym, so a question that never says "prep quantity"
+ * reaches nothing — and the run then answers exactly as it would have with no
+ * semantic layer at all. Indistinguishable from the feature being broken, which
+ * is what it was taken for, three times.
+ *
+ * **Silent when there was nothing to match.** An organization that has defined
+ * no metrics does not need telling that none applied, and a caveat on every
+ * answer is how people learn to stop reading caveats — the failure B-079 was
+ * filed about, arriving from the other direction. The line appears only when
+ * definitions existed and the question reached none of them, which is precisely
+ * the state nobody could see.
+ */
+function Grounding({ run }: { run: Run }) {
+  const applied = run.definitions_applied ?? [];
+  const available = run.definitions_available ?? 0;
+
+  if (applied.length > 0) {
+    return <span className={styles.step}>governed by {applied.join(", ")}</span>;
+  }
+  if (available > 0) {
+    return (
+      <span className={styles.step}>
+        no definition matched this question ({available} defined here)
+      </span>
+    );
+  }
+  return null;
+}
+
 function AnswerCard({
   orgId,
   run,
@@ -259,6 +292,7 @@ function AnswerCard({
         {run.findings.length === 0 && !failed && (
           <span className={styles.step}>no supporting query</span>
         )}
+        {!failed && <Grounding run={run} />}
       </Row>
       {failed ? (
         <p className={styles.failure}>

@@ -181,6 +181,14 @@ class ResearchState(BaseModel):
     #: run merely read — which is the entire distinction the layer exists for.
     applied_definitions: list[str] = Field(default_factory=list[str])
 
+    #: How many active definitions this data source had when the question was
+    #: asked (**B-087**). Recorded because the interesting number is not how
+    #: many matched but how many *could* have: none matched out of none is
+    #: silence worth keeping, and none matched out of eighteen is the sentence
+    #: three gate walks needed and never got. Without this the two are
+    #: indistinguishable downstream and the honest message cannot be written.
+    definitions_available: int = 0
+
     #: Set when a ceiling stopped the run, so the composed answer can say which.
     stopped_by: str | None = None
     #: How many consecutive iterations added nothing — 4.4's monotone-progress

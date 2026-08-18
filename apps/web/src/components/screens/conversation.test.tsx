@@ -431,4 +431,51 @@ describe("which findings are evidence", () => {
     expect(await screen.findByText("The first thing.")).toBeInTheDocument();
     expect(screen.getByText("The second thing.")).toBeInTheDocument();
   });
+
+  it("says which definitions governed the answer (B-087)", async () => {
+    routeFetch({
+      run: { ...ANSWERED, definitions_applied: ["prep_quantity"], definitions_available: 18 },
+    });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    expect(await screen.findByText(/governed by prep_quantity/)).toBeInTheDocument();
+  });
+
+  it("says when a question matched none of the definitions that exist (B-087)", async () => {
+    // The sentence three gate walks needed and never got. Without it a question
+    // that named no metric answers exactly as it would with no semantic layer at
+    // all, and reads as the feature being broken rather than as the metric not
+    // being found.
+    routeFetch({ run: { ...ANSWERED, definitions_applied: [], definitions_available: 18 } });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    expect(await screen.findByText(/no definition matched this question/)).toBeInTheDocument();
+    expect(screen.getByText(/18 defined here/)).toBeInTheDocument();
+  });
+
+  it("stays silent when there was nothing to match (B-087)", async () => {
+    // The case that keeps the line worth reading. An organization that has
+    // defined no metrics does not need telling that none applied, and a caveat
+    // on every answer is how people learn to stop reading caveats.
+    routeFetch({ run: { ...ANSWERED, definitions_applied: [], definitions_available: 0 } });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    await screen.findByText(/6,214 orders/);
+    expect(screen.queryByText(/no definition matched/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/governed by/)).not.toBeInTheDocument();
+  });
+
+  it("renders a run recorded before these fields existed (B-087)", async () => {
+    // Old rows carry neither field. The page whose whole job is explaining what
+    // happened must not be the page that breaks.
+    routeFetch({ run: ANSWERED });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    expect(await screen.findByText(/6,214 orders/)).toBeInTheDocument();
+    expect(screen.queryByText(/no definition matched/)).not.toBeInTheDocument();
+  });
 });

@@ -73,6 +73,7 @@ from dataagent.llm.base import LLMError
 from dataagent.runs import service as runs
 from dataagent.runs.events import EventWriter
 from dataagent.semantic import definitions as semantic
+from dataagent.semantic import verified as verified_queries
 from dataagent.tenancy.session import org_session
 
 __all__ = ["RunOutcome", "execute_run", "relevant_pairs"]
@@ -284,12 +285,30 @@ async def _investigate(
     # WP10.2c). Matched by name and synonym, narrowly: a definition applied to a
     # question it is not about becomes a critic rule enforcing a filter the
     # answer never needed, which is a false block.
-    applied = semantic.matching(
-        await semantic.definitions_for(context.org_id, source_of(context)), state.question
-    )
+    available = await semantic.definitions_for(context.org_id, source_of(context))
+    applied = semantic.matching(available, state.question)
+    # **Both numbers, always** (B-087). A run that matched nothing looks exactly
+    # like a run with nothing to match, and for three gate walks in a row that
+    # made a naming problem read as a broken feature. Recording what was on
+    # offer is what lets the answer say which of the two happened.
+    state.definitions_available = len(available)
     if applied:
         bundle = replace(bundle, definitions_applied=applied)
         state.applied_definitions = [definition.name for definition in applied]
+
+    # **How this organization has answered questions like this one** (arch 5.4).
+    # Matched lexically and for free: no embedding, so no spend and no dependency
+    # on a provider being reachable, and a miss costs the run an example it never
+    # had while a wrong example is actively misleading.
+    #
+    # Loaded whether or not a definition matched — the two are independent. A
+    # question can name no defined metric and still be one this organization has
+    # a worked answer for, which is the common case for "which table do I use".
+    examples = verified_queries.matching(
+        await verified_queries.verified_for(context.org_id, source_of(context)), state.question
+    )
+    if examples:
+        bundle = replace(bundle, verified_applied=examples)
 
     state.phase = "context"
     state.table_names = list(bundle.table_names)
@@ -305,6 +324,11 @@ async def _investigate(
             # follow-up answered from three turns of context is a different act
             # from one answered cold, and nothing else would say which happened.
             "history_turns": len(bundle.history),
+            # Which definitions governed this run, and how many there were to
+            # match (**B-087**). Emitted even when the list is empty, because an
+            # empty list beside a non-zero count is the whole finding.
+            "definitions_applied": list(state.applied_definitions),
+            "definitions_available": state.definitions_available,
             "tables_found_via": "thread" if bundle.cards_from_thread else "question",
             # Which arm of the card search reached each table (**B-018**).
             # `tables_found_via` says which *words* chose them; this says by

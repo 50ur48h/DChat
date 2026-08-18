@@ -35,6 +35,52 @@ sys.path.insert(0, str(REPO_ROOT / "apps" / "api" / "src"))
 
 #: Stable, so a rerun finds what the last run made rather than creating another.
 ORG_NAME = "evals"
+
+#: The definitions this organization needs to answer its own questions the way
+#: its own truths compute them (**B-070**).
+#:
+#: Golden **#10** — *"what proportion of customers ordered more than once?"* —
+#: has two defensible readings and the English does not choose between them. The
+#: truth is 7861/**7985**, customers who have *placed an order*; a live model
+#: wrote a `LEFT JOIN` from `customers` and computed 7861/**8000**, the
+#: proportion of everyone on file. Both are correct readings, and the model's is
+#: arguably the better one — "customers" plainly means all of them. The gap is
+#: 0.0018 against a tolerance of 0.001, so the eval failed a run that did nothing
+#: wrong.
+#:
+#: Widening the tolerance would accept genuinely wrong numbers and rewriting the
+#: question to match the answer is the self-deception B-070 is about. **The
+#: semantic layer is whose job this is**: the organization says which reading is
+#: authoritative, once, and the question stops depending on a coin flip.
+#:
+#: **No `required_filters`, and that is not an omission.** The ambiguity is in
+#: the *denominator* — which rows are counted at all — and no `{table, column,
+#: op, values}` predicate expresses "customers that appear in orders". So this
+#: definition **informs and does not bind** (D-033), which is the honest shape
+#: for it: the critic cannot check a denominator, and claiming to would be worse
+#: than saying plainly that only the filters bind.
+#:
+#: The synonyms are what make it reachable. Matching is whole-word against the
+#: question, and nobody types `repeat_rate` — the question says *"ordered more
+#: than once"*, so that is what it answers to. Narrow on purpose: a broader
+#: synonym like "proportion of customers" would attach this definition to
+#: questions about a different proportion entirely.
+EVAL_DEFINITIONS: tuple[dict[str, object], ...] = (
+    {
+        "name": "repeat_rate",
+        "description": (
+            "The proportion of customers who have placed more than one order, out of "
+            "customers who have placed at least one. The denominator is customers with "
+            "an order — not every customer on file. A customer who has never ordered is "
+            "counted in neither half, so compute both halves from the orders table "
+            "rather than joining out from customers."
+        ),
+        "expression": (
+            "count(customers with more than one order) / count(customers with at least one order)"
+        ),
+        "synonyms": ("ordered more than once", "repeat customers", "repeat rate"),
+    },
+)
 SOURCE_NAME = "Demo"
 EVAL_USER_EMAIL = "evals@localhost"
 
@@ -47,6 +93,7 @@ async def main() -> int:
     from dataagent.datasources import service as datasources
     from dataagent.db.engine import build_engine
     from dataagent.knowledge import embeddings
+    from dataagent.semantic import definitions as semantic
     from dataagent.tenancy.session import org_session
 
     # The repository's own .env, when there is one. `load_dotenv` does not
@@ -157,6 +204,27 @@ async def main() -> int:
     # run could not — which is the whole point of the backfill being separate.
     embedded = await cards.embed_cards(org_id, view.id, embedder=embedder)
     print(f"  embedded {embedded} card(s)")
+
+    # The definitions this organization has agreed on (**B-070**). Idempotent
+    # like everything else here: a name this source already knows is left alone,
+    # so a rerun does not fail on the unique constraint and does not overwrite an
+    # edit somebody made by hand.
+    known = {definition.name for definition in await semantic.definitions_for(org_id, view.id)}
+    for spec in EVAL_DEFINITIONS:
+        name = str(spec["name"])
+        if name in known:
+            print(f"  definition {name}: already defined")
+            continue
+        await semantic.create(
+            org_id=org_id,
+            data_source_id=view.id,
+            actor_user_id=user_id,
+            name=name,
+            description=str(spec["description"]),
+            expression=str(spec["expression"]),
+            synonyms=tuple(spec["synonyms"]),  # type: ignore[arg-type]
+        )
+        print(f"  definition {name}: created")
 
     async with org_session(org_id) as session:
         cards = (

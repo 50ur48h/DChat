@@ -54,6 +54,26 @@ under "Unreleased", only for changes a user would notice.
   description, so a real question matched nothing at all.
 
 ### Added
+- An admin can approve a question and the SQL that answers it, and the agent is
+  shown the closest of those examples when a similar question is asked. It is
+  how a database's unwritten conventions get taught — which join is the right
+  one, which date column a period means, which of four plausible tables people
+  actually use. An approved query is checked against your catalog before it is
+  saved, so an example can never point at a table that does not exist.
+- Definitions your database already carries can be imported rather than retyped.
+  Point an admin at the table that holds your metrics and their meanings, and
+  each row arrives as a proposal showing what it says and which of your tables it
+  came from. Nothing takes effect until an admin accepts it.
+- A definitions screen, per data source, which draws the line the rest of the
+  product depends on: accepted with the filters a metric requires, a definition
+  is **enforced** and a query that ignores it is stopped; accepted as it stands,
+  it is guidance the agent reads and nothing checks. The screen says which of the
+  two a click is about to do, before the click, and labels every definition in
+  force with which one it is.
+- When a review of an answer does not pass and the answer is shown anyway, the
+  review's objection is now the first thing listed beside it, in the reviewer's
+  own words, and the answer can no longer describe itself as highly confident.
+  An answer that overstates its own rigour is worse than one that admits doubt.
 - Metrics can be defined once and then enforced. A definition says what a metric
   means and which filters it requires; the agent is shown it, and the query it
   writes is checked against it — an answer computed without a required filter is

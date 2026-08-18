@@ -76,6 +76,17 @@ jobs:
                 && format('origin/{0}', github.base_ref)
                 || 'HEAD^' }}
         run: bash scripts/check_status.sh
+      # Same argument, same order, for the other file only a careful human reads
+      # (B-081). A row was silently merged into its neighbour and nothing noticed.
+      - name: The BACKLOG guard still catches a lost row
+        run: bash scripts/check_backlog.sh --selftest
+      - name: BACKLOG.md keeps every row it had
+        env:
+          BACKLOG_BASE_REF: >-
+            ${{ github.event_name == 'pull_request'
+                && format('origin/{0}', github.base_ref)
+                || 'HEAD^' }}
+        run: bash scripts/check_backlog.sh
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
