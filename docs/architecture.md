@@ -824,7 +824,9 @@ GET/PATCH /v1/orgs/{o}/agent-config          [admin]
 ```
 run_started, intent_classified, context_selected {tables, skills, definitions, docs},
 capability_checked {verdicts}, plan_created {steps}, step_started {purpose},
-tool_called {tool, safe_args}, sql_validated | sql_rejected {rule},
+tool_called {tool, safe_args},
+knowledge_consulted {term, passages, sources, found_by, note},
+sql_validated | sql_rejected {rule},
 query_executed {execution_id, tables, row_count, duration_ms},
 result_summarized {one_liner}, finding_added {statement, support},
 hypothesis_updated, reflection {continue|finish, public_rationale},

@@ -48,10 +48,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dataagent.agent.budget import BudgetState
 from dataagent.agent.capability import JoinGraph
-from dataagent.agent.context import ContextBundle, history_block
+from dataagent.agent.context import ContextBundle, Definition, history_block
 from dataagent.agent.planner import Plan, plan_query
 from dataagent.agent.state import ExecutionRef, ResearchState, StateFinding, Step
 from dataagent.agent.tools.base import ToolContext, ToolResult
+from dataagent.agent.tools.knowledge import PassageOut, SearchKnowledgeOut
 from dataagent.agent.tools.registry import ToolRegistry
 from dataagent.agent.tools.sql import RunSqlOut
 from dataagent.config import Settings
@@ -76,6 +77,19 @@ COMPOSE_PREVIEWS = 3
 #: Anything larger is summarised by shape alone, so a prompt cannot grow with the
 #: size of a customer's table.
 INLINE_CELLS = 3
+
+#: How many terms one run may look up in its documents (**B-075**, D-032). Two,
+#: and it is a ceiling rather than a target: a question that turns on three
+#: undefined terms is one the organization has not written down enough about, and
+#: spending the whole iteration budget discovering that helps nobody. Every other
+#: ceiling in this loop is a number the controller enforces, and so is this.
+MAX_LOOKUPS = 2
+
+#: How many passages a lookup puts in front of the next plan. Smaller than the
+#: tool's own default because these are carried *forward* — they stay in the
+#: prompt for the rest of the run, so each one is paid for on every subsequent
+#: iteration.
+LOOKUP_PASSAGES = 3
 
 
 class ReflectFinding(BaseModel):
@@ -255,6 +269,35 @@ async def research(
                 "tokens": tokens,
             },
         )
+
+        # **The agent asked what a word means here** (B-075, D-032). Checked
+        # **before `answerable`**, and that order was bought with a live run: a
+        # model that needs a definition says so by refusing — *"the reference
+        # data does not define 'anchor order'; the organization's definition is
+        # needed"* — with `answerable` false and the term in `define`. Refusing
+        # first turned the one state this feature exists for into a dead run.
+        # An unanswerable plan that names something to look up is not a refusal;
+        # it is a request, and the refusal below is what it becomes if the
+        # documents have nothing to say.
+        #
+        # It is also checked before the statement, because `sql` on a lookup step
+        # is whatever the model wrote while it still did not know — running it
+        # would spend a query on the guess this branch exists to avoid.
+        if wanted := _lookup_wanted(plan, state):
+            bundle = await _look_up(
+                context=context,
+                tools=tools,
+                events=events,
+                state=state,
+                bundle=bundle,
+                term=wanted,
+            )
+            await save()
+            # Costs this iteration and no model call beyond the plan that asked:
+            # nothing ran, so there is nothing to reflect on. That is what keeps
+            # D-024's and D-028's arithmetic true — an iteration spent looking
+            # something up is *cheaper* than an ordinary one.
+            continue
 
         if not plan.answerable:
             state.phase = "finished"
@@ -453,6 +496,88 @@ def _no_progress(state: ResearchState, previews: tuple[tuple[str, str], ...]) ->
     )
 
 
+def _lookup_wanted(plan: Plan, state: ResearchState) -> str:
+    """The term to look up, or empty when this step is not a lookup.
+
+    Three ways to get nothing back, and each is a ceiling rather than a
+    judgement about the term:
+
+    * the model did not ask;
+    * it has asked before in this run — the duplicate-query rule's shape applied
+      to a second kind of repetition, because a corpus does not change mid-run
+      and asking it twice buys an iteration's worth of nothing;
+    * the run has spent its lookups (`MAX_LOOKUPS`).
+
+    In the last two cases the plan's SQL runs as written. That is deliberate: the
+    model wrote a statement, and refusing to run it because it also asked a
+    question would turn a ceiling into a dead end. It is told what it already
+    knows through the ordinary progress notes.
+    """
+    term = plan.define.strip()
+    if not term:
+        return ""
+    if term.lower() in state.lookups:
+        return ""
+    if len(state.lookups) >= MAX_LOOKUPS:
+        return ""
+    return term
+
+
+async def _look_up(
+    *,
+    context: ToolContext,
+    tools: ToolRegistry,
+    events: EventWriter,
+    state: ResearchState,
+    bundle: ContextBundle,
+    term: str,
+) -> ContextBundle:
+    """Dispatch `search_knowledge` and put what it found in front of the next plan.
+
+    **Through the registry**, like every other tool call: it validates the
+    arguments, filters by role, and emits `tool_called` — so a lookup appears in
+    the trace as the act it was, which is what makes *"the agent consulted a
+    document"* something a person can verify rather than take on trust.
+
+    Recorded as spent **whatever comes back**, including nothing. A corpus that
+    has no answer for a term will still have none next iteration, and a run that
+    could re-ask on failure would spend its whole budget discovering that.
+    """
+    state.lookups.append(term.lower())
+    result = await tools.call(
+        context, "search_knowledge", {"query": term, "limit": LOOKUP_PASSAGES}, events=events
+    )
+
+    passages: list[PassageOut] = []
+    note = ""
+    if result.ok and isinstance(result.data, SearchKnowledgeOut):
+        passages, note = result.data.passages, result.data.note
+
+    for passage in passages:
+        bundle = bundle.with_definition(
+            Definition(term=term, text=passage.text, source=passage.source)
+        )
+
+    await events.emit(
+        "knowledge_consulted",
+        {
+            # The three facts a reader of the timeline needs: what was asked,
+            # whether the organization had written anything down, and which
+            # documents answered. `found_by` says whether meaning or wording
+            # reached them, which is the retrieval regression B-018 made visible.
+            "term": term,
+            "passages": len(passages),
+            "sources": [passage.source for passage in passages][:LOOKUP_PASSAGES],
+            "found_by": sorted({passage.found_by for passage in passages}),
+            # Empty on the happy path. When the corpus said nothing, or said it
+            # through half a search, this is the sentence that explains an answer
+            # that went on without a definition.
+            "note": note,
+        },
+    )
+    return bundle
+
+
 async def _next_step(
     context: ToolContext,
     bundle: ContextBundle,
@@ -486,13 +611,26 @@ def _progress_so_far(state: ResearchState) -> str:
     every previous result would write its next query against a transcript instead
     of against the catalog, and the prompt would grow with the data.
     """
-    if not state.executions and not state.findings:
+    if not state.executions and not state.findings and not state.lookups:
         return ""
     lines = ["What you have already established in this investigation:"]
     for reference in state.executions:
         lines.append(f"- ran `{reference.purpose}` -> {reference.summary}")
     for finding in state.findings:
         lines.append(f"- concluded: {finding.statement}")
+    if state.lookups:
+        # **Told, because a lookup it cannot see it already made is a lookup it
+        # will ask for again.** Found live: given the definition of a term at
+        # iteration 2, the model asked for the same term at iteration 3, had the
+        # duplicate refused in silence, and hedged an answer it had already
+        # computed correctly. The refusal was right; saying nothing about it was
+        # not. Nothing here repeats the definition — that is above, at L4, where
+        # it belongs.
+        lines.append(
+            "- already looked up, and the answer is in the documents section of the "
+            f"reference material above: {', '.join(sorted(state.lookups))}. Do not ask "
+            "for these again; use what it says."
+        )
     if state.open_questions:
         lines.append("Still open: " + "; ".join(state.open_questions))
     lines.append(

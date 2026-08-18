@@ -47,6 +47,25 @@ class Plan(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    #: A term this run needs defined before the SQL can be right (**B-075**,
+    #: D-032). Empty on the overwhelming majority of steps, and that is the
+    #: intended shape: looking something up costs an iteration, so it is worth it
+    #: only when the question turns on a word the business defines for itself.
+    #: When it is set the loop dispatches `search_knowledge` and re-plans; `sql`
+    #: is ignored on that step, which is why the field can be filled in with
+    #: anything plausible rather than left blank — a closed schema has no
+    #: optional fields (B-033).
+    define: str = Field(
+        default="",
+        max_length=200,
+        description=(
+            "Leave empty unless this question depends on how the business "
+            "defines a term — 'net revenue', 'active customer', 'churn' — and "
+            "you have not been told that definition. Then put the term here, in "
+            "ordinary words, and the organization's own documents will be "
+            "searched before you are asked again. Do not guess a definition."
+        ),
+    )
     sql: str = Field(
         min_length=1,
         max_length=20_000,
@@ -100,7 +119,14 @@ Before you write it: if the reference data does not contain what the question
 needs, set answerable to false and say what is missing in reason. Do not invent a
 table or a column, and do not write a query that is merely plausible — a
 statement naming anything outside the catalog will be refused, and refusals cost
-the person asking a round trip for nothing."""
+the person asking a round trip for nothing.
+
+And if the question turns on a term this business defines for itself — what
+counts as net revenue, who is an active customer, when an order is complete — and
+nothing above tells you what it means here, put that term in `define` instead of
+guessing. This organization's own documents will be searched and you will be
+asked again with what they say. A number computed from the wrong definition is
+wrong in a way nobody reading it can see."""
 
 
 async def plan_query(

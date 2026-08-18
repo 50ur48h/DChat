@@ -810,6 +810,7 @@ EVENT_TYPES: tuple[str, ...] = (
     "plan_created",
     "step_started",
     "tool_called",
+    "knowledge_consulted",
     "sql_validated",
     "sql_rejected",
     "query_executed",

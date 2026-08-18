@@ -65,6 +65,13 @@ EventType = Literal[
     "plan_created",
     "step_started",
     "tool_called",
+    # The result of a `tool_called` for `search_knowledge` — what the agent
+    # asked its documents and what they said (**B-075**, D-032). Twenty-first
+    # in a list architecture 10.3 fixed at twenty, and it earns the place: the
+    # Phase 10 gate turns on a person being able to *see* a document being
+    # consulted mid-run, and `tool_called` records the asking without the
+    # answer.
+    "knowledge_consulted",
     "sql_validated",
     "sql_rejected",
     "query_executed",

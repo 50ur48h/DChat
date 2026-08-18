@@ -159,6 +159,13 @@ class ResearchState(BaseModel):
     #: most one" is a property of the run, not of one call to the runner).
     critic_passes: int = 0
 
+    #: Terms this run has looked up in the organization's documents (**B-075**,
+    #: D-032), lowercased. On the state rather than in a local for the reason
+    #: `critic_passes` is: an interrupted run must not come back and spend the
+    #: lookup budget again, and asking the same question of the same corpus twice
+    #: is the duplicate-query rule's failure wearing different clothes.
+    lookups: list[str] = Field(default_factory=list[str])
+
     #: Set when a ceiling stopped the run, so the composed answer can say which.
     stopped_by: str | None = None
     #: How many consecutive iterations added nothing — 4.4's monotone-progress

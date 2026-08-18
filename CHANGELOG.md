@@ -54,6 +54,10 @@ under "Unreleased", only for changes a user would notice.
   description, so a real question matched nothing at all.
 
 ### Added
+- The agent can now look a term up in your documents in the middle of answering.
+  When a question turns on how your business defines something — net revenue, an
+  active customer — it searches what you have written down, and the answer's
+  timeline shows which document it consulted and what it found.
 - A documents screen: upload a policy or a definition, see how much of it is
   searchable, re-index it, or remove it. A document that could not be read says
   why in words you can act on — a scanned PDF says it needs OCR — and one whose
