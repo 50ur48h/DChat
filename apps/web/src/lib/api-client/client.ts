@@ -225,6 +225,7 @@ export interface Api {
     dataSourceId: string,
     definitionId: string,
     requiredFilters: RequiredFilter[],
+    synonyms?: string[] | undefined,
   ): Promise<SemanticDefinition>;
   rejectProposal(orgId: string, dataSourceId: string, definitionId: string): Promise<void>;
   conversations(orgId: string): Promise<Conversation[]>;
@@ -395,11 +396,21 @@ export function createApi(getToken: () => Promise<string | null>): Api {
       }
       return payload;
     },
-    async acceptProposal(orgId, dataSourceId, definitionId, requiredFilters) {
+    async acceptProposal(orgId, dataSourceId, definitionId, requiredFilters, synonyms) {
       return narrow(
         await call(
           `/v1/orgs/${orgId}/data-sources/${dataSourceId}/definitions/${definitionId}/accept`,
-          { method: "POST", body: { required_filters: requiredFilters } },
+          {
+            method: "POST",
+            body: {
+              required_filters: requiredFilters,
+              // Omitted rather than sent empty when the Admin typed nothing:
+              // the API reads an absent field as "keep what the import found"
+              // and an empty list as "replace it with none", and stripping a
+              // metric's own label would make it unreachable (B-085).
+              ...(synonyms && synonyms.length > 0 ? { synonyms } : {}),
+            },
+          },
         ),
         isSemanticDefinition,
         "definition",

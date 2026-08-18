@@ -639,3 +639,50 @@ async def test_retiring_an_example_stops_showing_it_without_forgetting_it(
     # second delete must not read as success on a row nothing would show.
     status, _ = await api.call("DELETE", f"{base}/{created['id']}", "alice")
     assert status == 404
+
+
+async def test_accepting_is_where_an_imported_metric_becomes_reachable(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """**B-085.** A definition is matched to a question by name and synonym, and an
+    imported one answers only to its key and to the label its own table carried.
+    Nobody asks a question in those words, so an import that cannot be reached
+    binds nothing however carefully its filters were written — the whole feature
+    is inert. Acceptance is where an Admin says what people actually call it."""
+    await _metric_table(isolated_customer_database)
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+    _, proposed = await api.call("POST", f"{base}/import", "alice", _import_body())
+
+    status, accepted = await api.call(
+        "POST",
+        f"{base}/{proposed[0]['id']}/accept",
+        "alice",
+        {"required_filters": [], "synonyms": ["what we have on the shelves", "listed value"]},
+    )
+
+    assert status == 200
+    assert accepted["synonyms"] == ["what we have on the shelves", "listed value"]
+
+    _, active = await api.call("GET", base, "alice")
+    assert active[0]["synonyms"] == ["what we have on the shelves", "listed value"]
+
+
+async def test_accepting_without_saying_keeps_the_words_the_import_found(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """Omitting the field is not the same as sending an empty list. An Admin who
+    only wanted to add a filter must not silently strip the metric's own label
+    and make it unreachable."""
+    await _metric_table(isolated_customer_database)
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+    _, proposed = await api.call("POST", f"{base}/import", "alice", _import_body())
+    imported = proposed[0]["synonyms"]
+    assert imported, "the fixture's metric table carries synonyms"
+
+    _, accepted = await api.call(
+        "POST", f"{base}/{proposed[0]['id']}/accept", "alice", {"required_filters": []}
+    )
+
+    assert accepted["synonyms"] == imported

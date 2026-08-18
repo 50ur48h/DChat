@@ -188,6 +188,15 @@ class AcceptIn(BaseModel):
     """
 
     required_filters: list[RequiredFilterModel] = Field(default_factory=list[RequiredFilterModel])
+    synonyms: list[str] | None = Field(
+        default=None,
+        description=(
+            "What people actually call it. Omit to keep what the import found; send a "
+            "list to replace it. An imported metric answers only to its key and to its "
+            "own table's label until somebody says otherwise, and a metric nobody can "
+            "name is a metric nobody gets (B-085)."
+        ),
+    )
 
 
 class VerifiedQueryOut(BaseModel):
@@ -458,6 +467,7 @@ async def accept_proposal(
             org_id=context.org_id,
             definition_id=definition_id,
             required_filters=_filters(body.required_filters),
+            synonyms=body.synonyms,
             actor_user_id=context.user_id,
         )
     except DefinitionError as error:

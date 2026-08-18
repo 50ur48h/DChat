@@ -130,6 +130,10 @@ export function Definitions({
   //: Filters staged against one proposal, by proposal id. Kept here rather than
   //: inside the card so that a re-render after accepting cannot resurrect them.
   const [staged, setStaged] = useState<Record<string, RequiredFilter[]>>({});
+  //: What an Admin says people actually call this metric, by proposal id.
+  //: An imported definition answers only to its key and to the label its own
+  //: table carried, and nobody asks a question in those words (B-085).
+  const [alsoCalled, setAlsoCalled] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState<Record<string, RequiredFilter>>({});
 
   const [table, setTable] = useState("");
@@ -227,8 +231,12 @@ export function Definitions({
 
   const accept = async (proposal: DefinitionProposal) => {
     const filters = staged[proposal.id] ?? [];
+    const words = (alsoCalled[proposal.id] ?? "")
+      .split(",")
+      .map((word) => word.trim())
+      .filter((word) => word.length > 0);
     await run(async () => {
-      await api.acceptProposal(orgId, dataSourceId, proposal.id, filters);
+      await api.acceptProposal(orgId, dataSourceId, proposal.id, filters, words);
       // Cleared inside the action, so it only happens on success: a rejected
       // filter leaves the Admin's work on screen to correct rather than retype.
       setStaged((current) => {
@@ -346,6 +354,20 @@ export function Definitions({
                       ))}
                     </ul>
                   ) : null}
+
+                  <div className={styles.filterForm}>
+                    <Input
+                      label="Also called"
+                      value={alsoCalled[proposal.id] ?? proposal.synonyms.join(", ")}
+                      placeholder="the words people use when they ask"
+                      onChange={(event) =>
+                        setAlsoCalled((current) => ({
+                          ...current,
+                          [proposal.id]: event.target.value,
+                        }))
+                      }
+                    />
+                  </div>
 
                   <div className={styles.filterForm}>
                     <Input

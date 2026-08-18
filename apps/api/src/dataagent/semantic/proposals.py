@@ -49,7 +49,7 @@ from __future__ import annotations
 import re
 import uuid
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from sqlalchemy import select
 
@@ -267,6 +267,7 @@ async def accept(
     org_id: uuid.UUID,
     definition_id: uuid.UUID,
     required_filters: Sequence[Mapping[str, object]] = (),
+    synonyms: Sequence[str] | None = None,
     actor_user_id: uuid.UUID | None = None,
 ) -> Definition:
     """Bless a proposal into a definition, optionally giving it filters.
@@ -280,6 +281,16 @@ async def accept(
     Filters are validated against the catalog **before** the row is activated, so
     one naming a column this database does not have is refused now rather than
     surfacing later as a critic finding nobody can act on.
+
+    **`synonyms` is the other half of making it real** (B-085). A definition is
+    matched to a question by name and synonym, and an imported one answers only
+    to its key and to the label its own table carried. Nobody asks a question in
+    those words: the F&B warehouse's own golden question for `prep_quantity` is
+    *"how much should I prepare of each item tomorrow?"*, which reaches neither
+    the key nor the label. An import that no question can reach binds nothing, so
+    acceptance is where an Admin says what people actually call it. `None` keeps
+    what the import found; a list replaces it, because correcting a bad label has
+    to be possible and appending forever is not a correction.
     """
     from dataagent.dal.policy import source_policy
 
@@ -297,6 +308,9 @@ async def accept(
             required_filters=parsed,
             synonyms=tuple(str(word) for word in row.synonyms),
         )
+        if synonyms is not None:
+            words = tuple(word.strip() for word in synonyms if word.strip())
+            definition = replace(definition, synonyms=words)
         if parsed:
             validate(definition, await source_policy(org_id, row.data_source_id))
         row.required_filters = [
@@ -308,6 +322,7 @@ async def accept(
             }
             for item in parsed
         ]
+        row.synonyms = list(definition.synonyms)
         row.status = STATUS_ACTIVE
         # Who blessed it, over who imported it: acceptance is the act that made
         # this bind anything, and it is the one worth being able to ask about.
