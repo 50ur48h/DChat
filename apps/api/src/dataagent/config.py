@@ -12,7 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["local", "ci", "dev", "prod"]
@@ -370,6 +370,35 @@ class Settings(BaseSettings):
         default=("http://localhost:3000",),
         description="Browser origins allowed to call this API. The web app only.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _blank_is_unset(cls, values: object) -> object:
+        """``KEY=`` anywhere means *not set*, so the field's default applies.
+
+        **This is what lets compose pass every setting without copying its
+        defaults.** ``DAL_MAX_ROWS: ${DAL_MAX_ROWS:-}`` is how a variable that
+        the developer has not set arrives in the container: as the empty string.
+        Without this rule an integer field would refuse to parse it and the API
+        would not boot — so the safe-looking fix is to write the default into
+        `ops/docker-compose.yml` too, and then there are two defaults that drift.
+
+        The alternative to passing them is worse and is **B-090**: a setting
+        tuned on the host that reaches nothing where the product runs.
+        ``EMBEDDINGS_DIMENSIONS`` was already passed this way, so a `.env`
+        without that line was a container that could not start.
+
+        Empty means unset, never "the empty value". ``LOCAL_SECRETS_KEY=`` has
+        said so since Phase 3 (below, kept because a caller may pass ``""``
+        directly rather than through the environment); this generalises it.
+        """
+        if not isinstance(values, dict):
+            return values
+        return {
+            key: value
+            for key, value in values.items()  # pyright: ignore[reportUnknownVariableType]
+            if not (isinstance(value, str) and not value.strip())
+        }
 
     @field_validator("local_secrets_key", mode="before")
     @classmethod

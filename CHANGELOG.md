@@ -37,6 +37,13 @@ under "Unreleased", only for changes a user would notice.
   knowing its address.
 
 ### Fixed
+- Settings you put in your local configuration now reach the running product.
+  Six of them — the row and time caps on every query, how long a stored result
+  lives, the embedding batch size, what a run does when a model has no price,
+  and the expected token issuer — were read on the machine you ran tests from
+  and ignored by the container the product actually runs in. A key left empty
+  now means "use the default" everywhere, so a fresh setup starts rather than
+  failing to parse a blank.
 - Searching an organization's documents now really does look for meaning and not
   only wording: nothing had ever been embedded, because no part of the
   application built an embedder. Uploading fills it in, and re-indexing fills it

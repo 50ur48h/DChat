@@ -25,14 +25,16 @@ Current position: **Phases 0–5 and 7–10 signed off. Phase 6 merged, its gate
                   definition that bound the critic and never reached the model —
                   would have made the gate demo pass for the exact opposite of
                   its intended reason.
-Next step:        **Phase 11 is under way.** **B-088's API half is built** —
-                  the edit route: `PATCH`, `DELETE` (retire) and
-                  `GET .../versions`, validated as `accept` is, Admin-only,
-                  audited, and **versioned** (D-036, migration 0022) because a
-                  definition binds and an overwrite makes *"what did it require
-                  when that answer was written"* unanswerable. Next: the same
-                  on the Definitions screen, then **B-090**, then
-                  **B-060** — which the owner asked to be *reproduced and
+Next step:        **Phase 11 is under way**, in the order the owner set on
+                  2026-08-18: B-088, B-090, B-060, then WP11.1. **B-088's API
+                  half is merged** (#75) — the edit route: `PATCH`, `DELETE`
+                  (retire) and `GET .../versions`, validated as `accept` is,
+                  Admin-only, audited, and **versioned** (D-036, migration 0022)
+                  because a definition binds and an overwrite makes *"what did
+                  it require when that answer was written"* unanswerable.
+                  **B-090 is this PR.** Next are the edit route's other half on
+                  the Definitions screen, and **B-060** — which the owner asked
+                  to be *reproduced and
                   explained before anything is built*, since it is about answer
                   stability rather than a missing feature.
                   The original scheduling note follows. It opened with **two P1s
@@ -68,7 +70,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-18 by Claude Code (B-088, API half: definitions can be corrected, retired and read back version by version — D-036, migration 0022)
+Last updated: 2026-08-18 by Claude Code (B-090: a guard compares .env.example with what the container is given, and found six more of B-086's class on its first run; B-088's API half merged in #75)
 
 ---
 
@@ -1994,6 +1996,22 @@ unexplained.
       read.
 
 ## Phase 11 — Charts + polish (M11)
+- [x] **B-090 (P1)** Nothing compared a developer's environment with the
+      container's. `scripts/check_env.sh` now does, as a **declaration** rather
+      than a diff — every key that stays on the host is named with its reason,
+      so adding a variable costs one deliberate line and forgetting costs a red
+      build. It runs in `hygiene` with its `--selftest` first, like the STATUS
+      and BACKLOG guards, and `make check.env` runs it locally. **On its first
+      run against this repo it found six more instances of B-086's class** —
+      `DAL_MAX_ROWS`, `DAL_TIMEOUT_SECONDS`, `ARTIFACT_RETENTION_DAYS`,
+      `EMBEDDINGS_BATCH`, `LLM_REFUSE_UNPRICED_WHEN_CAPPED` and `OIDC_ISSUER` —
+      every one a setting a developer could tune on the host while the product
+      ignored it, proved with `DAL_MAX_ROWS=7` reaching a container that
+      answered 1000. All six are passed now, and one rule made that safe: **a
+      variable set to nothing is unset**, because `${VAR:-}` is how compose
+      passes a key nobody set and an integer field refused to parse it. That
+      rule also fixes a latent break B-086 shipped — a `.env` missing
+      `EMBEDDINGS_DIMENSIONS` was a container that could not start
 - [ ] **B-088 (P1)** An accepted definition cannot be edited — no edit, no
       un-accept, and re-accepting is a 404. **Raised from P2 to P1 and scheduled
       here by the owner on 2026-08-18**, having hit it mid-walk: *"a semantic

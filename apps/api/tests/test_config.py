@@ -60,6 +60,49 @@ def test_unknown_environment_is_rejected(monkeypatch: pytest.MonkeyPatch) -> Non
         Settings()
 
 
+def test_a_variable_set_to_nothing_falls_back_to_the_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """**B-090.** ``DAL_MAX_ROWS: ${DAL_MAX_ROWS:-}`` is how compose passes a
+    setting the developer has not set: as the empty string. An integer field
+    would refuse to parse it and the API would not boot — so the tempting fix is
+    to write the default into the compose file as well, and then two defaults
+    drift.
+
+    Not passing the variable at all is the worse option and is the defect B-090
+    exists for: a cap tuned on the host that reaches nothing in the container.
+    ``EMBEDDINGS_DIMENSIONS`` was already passed this way, so a `.env` missing
+    that one line was a container that could not start.
+    """
+    monkeypatch.setenv("DAL_MAX_ROWS", "")
+    monkeypatch.setenv("EMBEDDINGS_DIMENSIONS", "")
+    monkeypatch.setenv("ARTIFACT_RETENTION_DAYS", "  ")
+
+    settings = Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
+
+    assert settings.dal_max_rows == Settings.model_fields["dal_max_rows"].default
+    assert settings.embeddings_dimensions == 1536
+    assert settings.artifact_retention_days == 30
+
+
+def test_a_variable_set_to_nothing_is_not_the_empty_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty means *unset*, never "the empty string" — the rule
+    ``LOCAL_SECRETS_KEY=`` has followed since Phase 3, applied to every field.
+
+    A key held as ``""`` fails much later and somewhere unhelpful; a provider
+    named ``""`` would be a provider nothing can look up.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    monkeypatch.setenv("OIDC_ISSUER", "")
+
+    settings = Settings(_env_file=None)  # pyright: ignore[reportCallIssue]
+
+    assert settings.openai_api_key is None
+    assert settings.oidc_issuer is None
+
+
 def test_settings_are_immutable() -> None:
     settings = Settings()
 

@@ -87,6 +87,13 @@ jobs:
                 && format('origin/{0}', github.base_ref)
                 || 'HEAD^' }}
         run: bash scripts/check_backlog.sh
+      # Third guard, same order and same argument (B-090). B-086 was a variable
+      # every developer had and no container was given, invisible for a whole
+      # phase because the tests run where the variable was.
+      - name: The environment guard still catches a variable that reaches nothing
+        run: bash scripts/check_env.sh --selftest
+      - name: .env.example and compose agree about what the container gets
+        run: bash scripts/check_env.sh
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
