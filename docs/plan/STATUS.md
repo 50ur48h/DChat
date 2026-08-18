@@ -202,6 +202,23 @@ What is already on the branch, tested and green:
    customer's warehouse.** That is the phase's whole claim and it is no longer an
    assertion. The walk also found **B-085** — see below; without that fix the
    import is inert and this step would have proved nothing.
+
+   **The owner's own walk produced a second, stronger outcome** on 2026-08-18,
+   and it is worth recording above the one I scripted for. Asked the same
+   question, the run applied the filter to the units half only and answered
+   *"I can't determine the answer… the available preparation data is for Ayam
+   Penyet items, but it does not establish that one is the top-selling item."*
+   `applied_definitions: ["prep_quantity"]`, and `row_role <> 'parent_zero_qty'`
+   in **4 of 4** executed queries. The reason is in the data: **`Ayam Penyet Set`
+   has 1,581 sale rows and every one is `parent_zero_qty` with `qty = 0`** — no
+   component or standalone rows exist for it. Without the definition, `SUM(qty)`
+   over those rows is `0.00` and the agent reports it as fact; with it, those are
+   exactly the rows excluded, nothing remains to count, and the agent says so.
+   **A confident wrong number became a truthful refusal** — Phase 9's thesis and
+   D-033's claim arriving in the same answer, which is a better demonstration
+   than the changed number I had recorded. The two outcomes differ only in where
+   the model scopes the filter across a question mixing revenue with units, and
+   that ambiguity is filed as **B-089**.
 6. **A run the critic could not talk out of a bad draft**, with the block first
    on the card (D-034) — **still owed, and it got harder for the right reason.**
    B-078's criterion is a run where a required filter is *dropped* by the model

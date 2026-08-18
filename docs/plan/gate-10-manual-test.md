@@ -216,15 +216,50 @@ That is a real edge the product does not yet handle well: nothing tells you a
 question matched no definition, so the two runs look identical and the failure
 is silent (**B-087**, open).
 
-**You should see** an answer naming a **different item** with **real unit
-numbers**. The equivalent run recorded during development answered:
+**Two answers are correct here and you may see either.** Both are the
+definition binding; which one you get depends on how the model scopes the filter
+across a question that mixes revenue with units.
 
-> **"Ayam Penyet Combo brings in the most sales revenue, at 157,258.26. Its prep
-> quantities by weekday are 21.48, 20.37, 18.42, 19.50, 18.29, 19.87 and 22.35
-> units."**
+* **An honest refusal** — *"I can't determine… the available preparation data is
+  for Ayam Penyet items, but it does not establish that one is the top-selling
+  item."* This is the **stronger** of the two and it is worth understanding why.
+  `Ayam Penyet Set` has **1,581 sale rows and every one is `parent_zero_qty`
+  with `qty = 0`** — it has no component or standalone rows at all. Without the
+  definition, `SUM(qty)` over those 1,581 rows is `0.00` and the agent reports it
+  as fact. With the definition, those are exactly the rows excluded, nothing is
+  left to count, and the agent says so instead of inventing a number. **A
+  confident wrong number became a truthful "I cannot tell you"** — which is the
+  Phase 9 thesis and the D-033 claim arriving together.
 
-Your wording will differ. What must not differ is that the item changes and the
-units stop being `0.00`.
+* **A different item with real numbers** — the development run answered *"Ayam
+  Penyet Combo brings in the most sales revenue, at 157,258.26. Its prep
+  quantities by weekday are 21.48, 20.37, …"* This happens when the model applies
+  the filter to the revenue ranking as well, which changes **which** item counts
+  as top. Defensible, and arguably the weaker answer, since it quietly answers a
+  slightly different question than the one asked.
+
+**What must be true either way**, and this is what you are checking:
+
+```sh
+RUN=$(docker exec dataagent-platform-pg-1 psql -U dataagent -d dataagent -t -A -c \
+  "SELECT id FROM agent_runs ORDER BY created_at DESC LIMIT 1;")
+docker exec dataagent-platform-pg-1 psql -U dataagent -d dataagent -t -A -c \
+  "SELECT state::jsonb->>'applied_definitions' FROM agent_runs WHERE id='$RUN';"
+docker exec dataagent-platform-pg-1 psql -U dataagent -d dataagent -t -A -c \
+  "SELECT count(*) FROM query_executions WHERE run_id='$RUN' AND sql_text LIKE '%row_role%';"
+```
+
+**You should see** `["prep_quantity"]` and a non-zero count — the definition
+reached the run, and its filter reached the SQL. In the recorded walk it was in
+**4 of 4** queries.
+
+**If you want the unambiguous version**, ask about an item that has countable
+units, which removes the ranking from the question entirely:
+
+> What is the prep quantity by weekday for Ayam Penyet Combo?
+
+**You should see** real per-weekday numbers, and `row_role <> 'parent_zero_qty'`
+in the trace's SQL.
 
 Open the run's trace and read the SQL. **You should see**
 `WHERE "fs"."row_role" <> 'parent_zero_qty'` in it.
