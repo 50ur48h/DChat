@@ -29,10 +29,23 @@ from dataagent.auth.guards import require_admin, require_contributor, require_me
 from dataagent.catalog import browse, discovery, policies, profiler, search
 from dataagent.dal import policy as dal_policy
 from dataagent.datasources.service import NotFoundError
+from dataagent.knowledge import embeddings
+from dataagent.knowledge.embeddings import Embedder
 
 router = APIRouter(prefix="/v1", tags=["catalog"])
 
 DataSourceId = Annotated[uuid.UUID, Path(description="Data source within this organization")]
+
+
+def card_embedder() -> Embedder | None:
+    """The embedder these routes build and search cards with (**B-018**).
+
+    A function rather than a call at each site, for the reason
+    `knowledge.routes.document_embedder` is one: it is the seam a test replaces,
+    and there is exactly one of it. None means this deployment configured no
+    embedding model, which leaves the cards lexically searchable and `queued`.
+    """
+    return embeddings.get_embedder()
 
 
 class SnapshotOut(BaseModel):
@@ -172,6 +185,11 @@ async def refresh_catalog(
             org_id=context.org_id,
             actor_user_id=context.user_id,
             data_source_id=data_source_id,
+            # So a new catalog is searchable by meaning as well as by wording
+            # from the moment it exists (**B-018**). None when the deployment
+            # has no embedding model, which costs the cards their vectors and
+            # nothing else.
+            embedder=card_embedder(),
         )
     except NotFoundError as error:
         raise _not_found() from error
@@ -303,6 +321,9 @@ async def profile_catalog(
             org_id=context.org_id,
             actor_user_id=context.user_id,
             data_source_id=data_source_id,
+            # Profiling rewrites the cards, and a rewritten card's old vector
+            # describes words it no longer contains (**B-018**).
+            embedder=card_embedder(),
         )
     except NotFoundError as error:
         raise _not_found() from error
@@ -367,6 +388,10 @@ class CardHitOut(BaseModel):
     table_name: str
     card_text: str
     rank: float = Field(description="Comparable within one result set only, not across queries.")
+    found_by: str = Field(
+        default="lexical",
+        description="Which arm found it: vector, lexical, or both.",
+    )
 
 
 @router.get(
@@ -382,7 +407,17 @@ async def search_catalog(
 ) -> list[CardHitOut]:
     """Any member may search: a card describes structure, and its examples were
     masked before they were stored."""
-    hits = await search.search_cards(context.org_id, q, data_source_id=data_source_id, limit=limit)
+    hits = await search.search_cards(
+        context.org_id,
+        q,
+        data_source_id=data_source_id,
+        limit=limit,
+        # The same search the agent gets, so "what would it have found" is
+        # answerable by asking. No `run_id`: a person typing in a search box is
+        # not a run and has no ledger to accumulate against (D-031).
+        embedder=card_embedder(),
+        actor_user_id=context.user_id,
+    )
     return [
         CardHitOut(
             data_source_id=hit.data_source_id,
@@ -390,6 +425,7 @@ async def search_catalog(
             table_name=hit.table_name,
             card_text=hit.card_text,
             rank=hit.rank,
+            found_by=hit.found_by,
         )
         for hit in hits
     ]

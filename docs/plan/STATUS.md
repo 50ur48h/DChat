@@ -3,25 +3,29 @@
 Current position: **Phases 0–5 and 7–9 signed off. Phase 6 merged, its gate
                   partially met and deliberately unticked. Phase 10 is half
                   built: WP10.1 is complete and on `main` (#64 and #65, merged
-                  2026-08-17), **B-073 is open for review**, and WP10.2 — the
-                  gate — has not started.** An organization's own documents can
-                  now be uploaded, chunked, embedded, retrieved and consulted,
-                  tenant-isolated by RLS like every other tenant table — and
-                  since B-073 they are **actually embedded**, which nothing in
-                  the application had ever done: no code path built an embedder,
-                  so every upload stored text alone and the vector arm was dead
-                  in production. It is now a metered, run-charged, ceiling-checked
-                  spend like every other. What is missing is the half of Phase 10
-                  that says what a *word* means, which is where both of the
-                  phase's P1s live — plus **B-075**, which says the agent cannot
-                  currently call the retrieval tool at all. The **Phase 9 gate
+                  2026-08-17), **B-073 is merged (#67)**, **B-018 is open for
+                  review (#68)**, and WP10.2 — the gate — has not started.** An
+                  organization's own documents can now be uploaded, chunked,
+                  embedded, retrieved and consulted, tenant-isolated by RLS like
+                  every other tenant table — and since B-073 they are **actually
+                  embedded**, which nothing in the application had ever done: no
+                  code path built an embedder, so every upload stored text alone
+                  and the vector arm was dead in production. It is now a metered,
+                  run-charged, ceiling-checked spend like every other. And with
+                  **B-018** a **table card** is found by meaning too: golden eval
+                  **#14** passes live, where the same question used to retrieve
+                  nothing and hand the planner an empty catalog. What is missing
+                  is the half of Phase 10 that says what a *word* means, which is
+                  where both of the phase's P1s live — plus **B-075**, which says
+                  the agent cannot currently call the retrieval tool at all. The **Phase 9 gate
                   was signed off on 2026-08-16** (#60): 20/20 golden evals, a
                   seeded wrong-date draft caught deterministically with no model
                   call, and an answer card showing its citation and its
                   limitations. The **live** run is recorded at **12/20** and that
                   number stands — five of the eight failures are one harness
                   defect (**B-066**), two are the harness expecting the wrong
-                  thing, one is **B-018**. The **Phase 8 gate
+                  thing, one is **B-018** — and that last one is **now fixed and
+                  green live** (#68). The **Phase 8 gate
                   was signed off on 2026-08-16** (#52): the revenue-decline
                   question answered **$938.28** in two research steps against a
                   cap of eight, *"which menu items sell best?"* refused honestly
@@ -37,14 +41,7 @@ Current position: **Phases 0–5 and 7–9 signed off. Phase 6 merged, its gate
                   a green suite. See "Second data source" below. Two of them
                   are already closed: **WP8.4** (#55) fixed the capability check
                   the hub table defeated, and **B-056** with it.
-Next step:        **B-018** (`b018-card-embeddings`), which **B-073 has just
-                  unblocked** — a vector column on `catalog_tables`, an
-                  idempotent backfill over cards, and a rerank in `search_cards`
-                  fed by a **query** embedding computed inside `build_context`.
-                  That is the agent's own path, so it is where the spending
-                  machinery B-073 built is actually exercised on every run, and
-                  golden eval **#14** going green live is its evidence. Then
-                  **WP10.2** (`p10.2-semantic`), the Phase 10 **gate** PR —
+Next step:        **WP10.2** (`p10.2-semantic`), the Phase 10 **gate** PR —
                   semantic definitions and verified queries, which owe
                   **B-059** *and* **B-070**: the layer must be able to *import*
                   definitions a database already carries, admin-reviewed with
@@ -59,8 +56,13 @@ Next step:        **B-018** (`b018-card-embeddings`), which **B-073 has just
                   prompt, and **unreachable**. Whatever puts definitions in front
                   of the planner is the same mechanism that puts a retrieved
                   passage there, so the two are one piece of work.
-                  **In flight**: `b073-embedder-in-the-loop`, B-073's PR, open for
-                  review.
+                  **In flight**: **#68** (`b018-card-embeddings`), open for
+                  review. It was stacked on #67 and was rebased onto `main` after
+                  that merged — with `git rebase --onto origin/main <old-base>
+                  <branch>`, because after a squash merge a plain rebase replays
+                  commits already in `main`. The lesson has now been needed
+                  twice, on #65 and here; the conflict GitHub reported was the
+                  deleted base branch, not the content, and the rebase was clean.
 Merge policy: ASK
 Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  (owner, 2026-08-17), so `nightly-evals.yml` can run — keep its
@@ -68,7 +70,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-17 by Claude Code (B-073 open for review; B-018 next, then WP10.2)
+Last updated: 2026-08-18 by Claude Code (B-073 merged in #67; B-018 open in #68, rebased onto main)
 
 ---
 
@@ -78,6 +80,14 @@ Last updated: 2026-08-17 by Claude Code (B-073 open for review; B-018 next, then
 #65 (WP10.1b).** **Nothing is in flight** — no open PR, no unmerged branch,
 nothing local. `main` is at **29b028e** and every branch this session used has
 been deleted on the remote.
+
+> **Partly superseded on 2026-08-18.** The session after this one took **B-073**
+> (merged, #67) and **B-018** (open, #68) before WP10.2, at the owner's
+> direction. So section 2's *"B-018 is not closable"* and section 3's *"what
+> B-073 needs"* are both **done** — read them as the reasoning behind two closed
+> items rather than as work outstanding. Section 0 still stands: **WP10.2 is
+> next**, and it inherited a new P1 on the way, **B-075**. The header above is
+> the current position.
 
 ### 0. Where to pick up: WP10.2, the Phase 10 gate
 
@@ -1615,6 +1625,38 @@ unexplained.
       D-031 is about. Raised **B-076**: at $0.02 per million tokens a 7-token
       embedding costs $0.00000014 and `cost_usd` rounds it to **zero**, so a
       thousand searches are invisible to the ceiling that sums that column
+- [x] **B-018 (P2)** A table card can be found by meaning, and golden eval #14
+      goes green live
+      — the oldest item in Phase 10, open since WP4.3, and B-073 is what
+      unblocked it: a **query** embedding inside `build_context` is the agent's
+      own path, so it needed to be a metered, capped spend before it could exist
+      at all. Revision **0018** adds `catalog_tables.embedding`, which **D-014**
+      refused to create until something could fill it — that condition, stated in
+      2026-08-13, is exactly what was met here.
+      `cards.embed_cards` is the **idempotent backfill**, run from discovery,
+      from profiling and from the eval provisioner, so a deployment that
+      configured a key after its first crawl catches up by refreshing.
+      `search_cards` is hybrid, merged by **RRF on rank** exactly as
+      `knowledge/retrieve.py` merges its two — a `ts_rank_cd` and a cosine
+      distance are numbers on unrelated scales, and with one arm RRF is a
+      monotone transformation of that arm's own order, so a deployment with no
+      embedder gets precisely the search it had.
+      **A refresh that changes nothing re-embeds nothing** — D-012's rule applied
+      to the half that costs money. Both failure paths degrade rather than break
+      (D-031): a provider failure during the backfill leaves the cards lexically
+      searchable and `queued`, and a failed *query* embedding falls back to
+      wording, because this is the context stage of **every** run and raising
+      here would turn a busy provider into an unanswerable question.
+      **Verified live** on 2026-08-17 against the eval catalog. *"Which day of
+      the week is busiest?"* returns **0 cards lexically and 5 hybrid**, every
+      one `found_by=vector`, `public.orders` among them — and `context_selected`
+      records that, so a run whose tables all came from the lexical arm on a
+      deployment that has an embedder is now a visible regression rather than a
+      silent one. **Golden eval #14 passed live, 5,795 tokens**, against the
+      known live failure this entry was filed for. One honest limit: the vector
+      arm decides *candidacy*, not perfect ranking — `stores` outranks `orders`
+      on that question and both reach the prompt, which is what the planner
+      needs. 10 new tests; tampering the vector arm off fails three of them
 - [ ] WP10.2 Semantic definitions + verified queries + critic enforcement ← gate
 - [ ] GATE: uploaded policy changes generated SQL; isolation test; sign-off
 

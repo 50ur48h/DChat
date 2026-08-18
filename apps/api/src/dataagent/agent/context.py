@@ -58,6 +58,8 @@ from datetime import UTC, date, datetime
 
 from dataagent.catalog.browse import CatalogTableView
 from dataagent.catalog.search import CardHit
+from dataagent.config import Settings
+from dataagent.knowledge.embeddings import Embedder
 from dataagent.llm.base import Message, estimate_tokens
 
 __all__ = [
@@ -191,6 +193,11 @@ class TableCard:
     table_name: str
     card_text: str
     rank: float = 0.0
+    #: Which arm of the card search found it (**B-018**): `vector`, `lexical`,
+    #: or `both`. Carried into `context_selected` because "which words chose
+    #: these tables" is the silent decision **B-060** was filed for, and after
+    #: this WP there are two mechanisms it could have been.
+    found_by: str = "lexical"
 
     @property
     def qualified(self) -> str:
@@ -210,6 +217,7 @@ class TableCard:
             table_name=hit.table_name,
             card_text=hit.card_text or "",
             rank=hit.rank,
+            found_by=hit.found_by,
         )
 
 
@@ -520,12 +528,19 @@ async def build_context(
     token_budget: int = DEFAULT_TOKEN_BUDGET,
     as_of: date | None = None,
     history: Sequence[HistoryTurn] = (),
+    embedder: Embedder | None = None,
+    run_id: uuid.UUID | None = None,
+    actor_user_id: uuid.UUID | None = None,
+    settings: Settings | None = None,
 ) -> ContextBundle:
     """Select what this question needs from the catalog.
 
-    Lexical search over table cards for now — the embeddings that would let
-    "how much did we make" find `orders` are **B-018**, and the seam for a rerank
-    is already in ``search_cards``. Cards are prose whose examples were masked
+    **Hybrid card search since B-018.** With an embedder the question is matched
+    by meaning as well as by wording, which is what lets *"which day of the week
+    is busiest?"* find `orders` — a card that contains neither "day" nor
+    "busiest". The embedding is charged to ``run_id`` and checked against D-019's
+    ceiling like every other spend (**B-073**); without an embedder this is
+    exactly the lexical search it was. Cards are prose whose examples were masked
     before they were stored (D-013), so nothing selected here can carry a value
     the DAL would have hidden.
 
@@ -544,13 +559,25 @@ async def build_context(
     """
     from dataagent.catalog.search import search_cards
 
-    hits = await search_cards(org_id, question, data_source_id=data_source_id, limit=limit)
+    async def search(text: str) -> list[CardHit]:
+        return await search_cards(
+            org_id,
+            text,
+            data_source_id=data_source_id,
+            limit=limit,
+            embedder=embedder,
+            run_id=run_id,
+            actor_user_id=actor_user_id,
+            settings=settings,
+        )
+
+    hits = await search(question)
     from_thread = False
     if not hits and history:
         # Newest first: the turn just before this one is what a follow-up is
         # usually about, and `search_cards` ranks what it is given.
         thread = " ".join(turn.question for turn in reversed(list(history)))
-        hits = await search_cards(org_id, thread, data_source_id=data_source_id, limit=limit)
+        hits = await search(thread)
         from_thread = bool(hits)
     cards = tuple(TableCard.from_hit(hit) for hit in hits if hit.card_text)
     restrictions = await _restrictions_for(org_id, cards)

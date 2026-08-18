@@ -262,6 +262,13 @@ async def _investigate(
         data_source_id=context.data_source_id,
         as_of=context.as_of,
         history=history,
+        # The run's own embedder, so card search is hybrid and its query
+        # embedding is charged to this run and bounded by its ceiling (B-018,
+        # B-073). None here costs the search its vector arm and nothing else.
+        embedder=context.embedder,
+        run_id=context.run_id,
+        actor_user_id=context.actor_user_id,
+        settings=settings,
     )
     state.phase = "context"
     state.table_names = list(bundle.table_names)
@@ -278,6 +285,12 @@ async def _investigate(
             # from one answered cold, and nothing else would say which happened.
             "history_turns": len(bundle.history),
             "tables_found_via": "thread" if bundle.cards_from_thread else "question",
+            # Which arm of the card search reached each table (**B-018**).
+            # `tables_found_via` says which *words* chose them; this says by
+            # which *mechanism*, and a run whose tables all came from the
+            # lexical arm on a deployment that has an embedder is a retrieval
+            # regression with no other symptom.
+            "tables_found_by": {card.qualified: card.found_by for card in bundle.cards},
             # In the trace because a person reading an answer about "last month"
             # is owed the date that phrase was resolved against (D-027). It is
             # also the only way to tell a stale answer from a wrong one.

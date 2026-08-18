@@ -715,9 +715,11 @@ catalog_tables(id, org_id, snapshot_id, schema_name, table_name, kind table|view
                structural_hash, row_estimate, description, card_text,
                card_tsv tsvector GENERATED, flags jsonb,
                embedding vector(1536))
-               -- embedding is NOT built yet: it arrives with the embeddings key
-               -- that can fill it (D-014, B-018). Cards carry
-               -- flags.embedding = 'queued' until then, and search is lexical.
+               -- Built in revision 0018 (B-018), once something could fill it:
+               -- D-014's condition was an embedder the agent's own path could
+               -- reach safely, which is B-073. Nullable, and null is a state —
+               -- flags.embedding is 'queued' until the backfill has been, and a
+               -- queued card is findable by wording and not yet by meaning.
 catalog_columns(id, org_id, table_id, name, ordinal, data_type, nullable, is_pk, fk_ref,
                 description, sample_rows, null_frac, distinct_est, min_val, max_val,
                 top_values jsonb, semantic_role measure|dimension|time|id|other,

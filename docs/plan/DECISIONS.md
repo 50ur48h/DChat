@@ -634,6 +634,15 @@ Consequences: revision 0009 adds `card_text`, a **generated** `card_tsv` and
 exists, and `search_cards` already has the seam it needs (rank, then reorder).
 **B-018** carries the work. Architecture Part 10.1 annotated so the absence is
 deliberate rather than an omission a later session "fixes".
+**Closed 2026-08-17 by B-018**, and the condition this decision set is exactly
+what was met: the column arrives in revision **0018**, in the same PR as the
+backfill that fills it and the rerank that reads it. The thing that unblocked it
+was not a key — the key had been available since WP10.1a — but **B-073**, which
+made an embedder reachable from `build_context` as a metered, capped spend rather
+than an unwatched one. The index question this entry left open is still open and
+still deliberate: revision 0018 creates no vector index, for the reason revision
+0016 gave and one more of its own (a missed *card* costs the planner the table
+its question is about, which is worse than a missed chunk).
 
 ## D-013 — A profile belongs to a snapshot; a policy belongs to a column
 Date: 2026-08-12 · Phase: 4 · PR: #22

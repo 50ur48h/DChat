@@ -369,6 +369,14 @@ class CatalogTable(Base):
             unique=True,
         ),
         Index("ix_catalog_tables_card_tsv", "card_tsv", postgresql_using="gin"),
+        # The backfill's work list (revision 0018, **B-018**): a card with text
+        # and no vector. Partial, so "what still needs embedding" never scans.
+        Index(
+            "ix_catalog_tables_unembedded",
+            "org_id",
+            "snapshot_id",
+            postgresql_where=text("embedding IS NULL AND card_text IS NOT NULL"),
+        ),
     )
 
     id: Mapped[UuidPk]
@@ -401,6 +409,12 @@ class CatalogTable(Base):
             f"to_tsvector('{CARD_TEXT_CONFIGURATION}', COALESCE(card_text, ''))", persisted=True
         ),
     )
+    #: The card's text as a vector (revision 0018, **B-018**). Nullable, and the
+    #: null state is a real one: the card is lexically searchable the moment it
+    #: is written and semantically searchable once the provider has been called.
+    #: Unlike `card_tsv` this is **not** generated — a vector costs a network
+    #: round trip and money, so it is written by code that can be told not to.
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIMENSIONS))
 
 
 class CatalogColumn(Base):

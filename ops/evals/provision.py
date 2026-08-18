@@ -43,9 +43,10 @@ async def main() -> int:
     from dotenv import load_dotenv
     from sqlalchemy import text
 
-    from dataagent.catalog import discovery, profiler
+    from dataagent.catalog import cards, discovery, profiler
     from dataagent.datasources import service as datasources
     from dataagent.db.engine import build_engine
+    from dataagent.knowledge import embeddings
     from dataagent.tenancy.session import org_session
 
     # The repository's own .env, when there is one. `load_dotenv` does not
@@ -135,10 +136,27 @@ async def main() -> int:
         # Discovery refuses an unverified source anyway; failing here says why.
         raise SystemExit(f"the credentials were not proven read-only: {health.detail}")
 
-    found = await discovery.discover(org_id=org_id, actor_user_id=user_id, data_source_id=view.id)
+    # Cards are embedded here or nowhere (**B-018**): the evals' catalog is built
+    # by this script and never through the UI, so a run with no vectors would
+    # measure the lexical half of a hybrid search and call it the product. In CI
+    # there is no embedding key, `get_embedder` returns None, and this is a
+    # no-op — which is correct there, because FakeLLM mode takes its SQL from
+    # `golden.yaml` and never depends on which cards were retrieved.
+    embedder = embeddings.get_embedder()
+    print(f"  embedder: {'configured' if embedder is not None else 'none — cards stay lexical'}")
+
+    found = await discovery.discover(
+        org_id=org_id, actor_user_id=user_id, data_source_id=view.id, embedder=embedder
+    )
     print(f"  discovery: {found.detail}")
-    profiled = await profiler.profile(org_id=org_id, actor_user_id=user_id, data_source_id=view.id)
+    profiled = await profiler.profile(
+        org_id=org_id, actor_user_id=user_id, data_source_id=view.id, embedder=embedder
+    )
     print(f"  profiling: {profiled.detail}")
+    # Idempotent, so a rerun after a key is configured fills in what the first
+    # run could not — which is the whole point of the backfill being separate.
+    embedded = await cards.embed_cards(org_id, view.id, embedder=embedder)
+    print(f"  embedded {embedded} card(s)")
 
     async with org_session(org_id) as session:
         cards = (

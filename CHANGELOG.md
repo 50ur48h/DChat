@@ -45,6 +45,10 @@ under "Unreleased", only for changes a user would notice.
   question that has spent its cost allowance — the wording search still answers
   and says the other half did not run, instead of reporting that nothing has been
   written down.
+- Asking a question in ordinary words now finds the tables it is about — by
+  meaning as well as by wording. "Which day of the week is busiest?" shares no
+  word with any table description and used to find nothing at all, leaving the
+  agent with no tables to work from; it now finds the orders table.
 - Asking a question in ordinary words now finds the tables it is about. Searching
   the catalog used to require every word of the question to appear in a table's
   description, so a real question matched nothing at all.

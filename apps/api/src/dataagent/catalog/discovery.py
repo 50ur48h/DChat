@@ -47,6 +47,7 @@ from dataagent.db.models import (
     CatalogSnapshot,
     CatalogTable,
 )
+from dataagent.knowledge.embeddings import Embedder
 from dataagent.orgs.service import audit
 from dataagent.tenancy.session import org_session
 
@@ -167,12 +168,18 @@ async def discover(
     org_id: uuid.UUID,
     actor_user_id: uuid.UUID | None,
     data_source_id: uuid.UUID,
+    embedder: Embedder | None = None,
 ) -> DiscoveryOutcome:
     """Refresh one data source's catalog. Never raises for a database's sake.
 
     A source that cannot be reached, or whose credentials were never proven
     read-only, is an answer this returns rather than an exception a route has to
     translate.
+
+    ``embedder`` is passed on to `cards.embed_cards` (**B-018**) and is a
+    parameter rather than something resolved here for B-040's reason: a function
+    that reached for a spending credential on its own would be one no caller —
+    and no test — could stop.
     """
     view = await datasources.get_data_source(org_id, data_source_id)
 
@@ -209,8 +216,11 @@ async def discover(
     if outcome.changed:
         # A new snapshot's tables have no cards yet, and a catalog nobody can
         # search is half a catalog. Written here rather than left to the caller
-        # so there is no path that produces one without the other.
+        # so there is no path that produces one without the other — and since
+        # B-018 that applies to both halves of "searchable": the words and the
+        # vector. `embed_cards` is idempotent and a no-op without an embedder.
         await cards.refresh_cards(org_id, data_source_id)
+        await cards.embed_cards(org_id, data_source_id, embedder=embedder)
     return outcome
 
 
