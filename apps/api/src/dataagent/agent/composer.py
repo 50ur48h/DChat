@@ -81,6 +81,17 @@ def _source_phrase(state: ResearchState) -> str:
     return f"{', '.join(names[:-1])} and {names[-1]}"
 
 
+def _prose_definitions(state: ResearchState) -> tuple[str, ...]:
+    """Terms this run took from a document and nothing enforced (**D-033**).
+
+    A term qualifies when the run looked it up **and the documents answered**.
+    `state.prose_terms` is that second half: a lookup the corpus could not
+    explain left the model no worse informed than before, and caveating it would
+    be a warning about nothing — which is how a reader learns to skip warnings.
+    """
+    return tuple(sorted(set(state.prose_terms)))
+
+
 def limitations_for(
     state: ResearchState,
     verdict: CriticVerdict | None,
@@ -113,6 +124,27 @@ def limitations_for(
                 "A review judged the evidence insufficient to answer fully; what "
                 "is here is the part the queries do support."
             )
+
+    if unverified := _prose_definitions(state):
+        # **Prose informs the model; a structured definition binds it** (D-033).
+        # This run was shown what a term means and nothing checked that the SQL
+        # kept to it — which is not a hypothetical: given the definition of an
+        # *anchor order*, a live model wrote it into the statement and then
+        # reasoned its way back out of it two iterations later, answering 1,054
+        # where the document said 747 (**B-078**). The critic could not object,
+        # because a passage carries no filters to compare an AST against.
+        #
+        # So the answer says so. It names the terms rather than gesturing at
+        # "a document", because a reader who knows *which* definition was
+        # unenforced can go and check that one. The note disappears when an Admin
+        # blesses the passage into a definition — at which point the claim stops
+        # being unverifiable, which is the whole distinction.
+        terms = ", ".join(f"“{term}”" for term in unverified)
+        notes.append(
+            f"This answer relies on how your documents define {terms}. That "
+            "definition was read as prose, so nothing checked that the query "
+            "actually followed it — unlike a defined metric, which is enforced."
+        )
 
     thin = [
         reference

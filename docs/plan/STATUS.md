@@ -41,7 +41,14 @@ Current position: **Phases 0–5 and 7–9 signed off. Phase 6 merged, its gate
                   a green suite. See "Second data source" below. Two of them
                   are already closed: **WP8.4** (#55) fixed the capability check
                   the hub table defeated, and **B-056** with it.
-Next step:        **WP10.2b** (`p10.2b-semantic`), the Phase 10 **gate** PR —
+Next step:        **WP10.2c** (`p10.2c-semantic`) — the structured half, and
+                  **B-078 is its central criterion, not a side rule**
+                  (owner, 2026-08-18): the demo must show a run where a
+                  definition's filter is **required**, the model **drops**
+                  it, and the critic **catches** it. A run where the model
+                  happens to comply proves nothing — which is exactly what
+                  the anchor-order run did at iteration 2 before ceasing to
+                  comply at iteration 4. Then **WP10.2d**, the **gate** PR —
                   semantic definitions and verified queries, which owe
                   **B-059** *and* **B-070**: the layer must be able to *import*
                   definitions a database already carries, admin-reviewed with
@@ -58,8 +65,8 @@ Next step:        **WP10.2b** (`p10.2b-semantic`), the Phase 10 **gate** PR —
                   with it — it must show the agent **consulting a document
                   mid-run**, in the run's own trace, not the documents page
                   working.
-                  **In flight**: **WP10.2a** (`p10.2a-knowledge-in-the-loop`),
-                  open for review. **#67 and #68 are merged**; the rebase lesson
+                  **In flight**: **WP10.2b** (`p10.2b-semantic`), open for
+                  review. **#69 is merged.** **#67 and #68 are merged**; the rebase lesson
                   earned there is worth keeping — after a squash merge a plain
                   `git rebase` on a stacked branch replays commits already in
                   `main`, and `git rebase --onto origin/main <old-base> <branch>`
@@ -72,7 +79,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-18 by Claude Code (B-073 #67 and B-018 #68 merged; WP10.2a open for review)
+Last updated: 2026-08-18 by Claude Code (WP10.2a merged in #69; WP10.2b open for review)
 
 ---
 
@@ -1728,7 +1735,35 @@ unexplained.
       discarded it in the open — and nothing could object, because a passage
       retrieved as prose carries no machine-readable filters for a critic to
       check the statement against
-- [ ] WP10.2b Semantic definitions + verified queries + critic enforcement ← gate
+- [x] WP10.2b An answer grounded in prose says its definition was not checked
+      — **DECISIONS D-033**, the owner's principle stated as one on 2026-08-18
+      after **B-078**: *"prose informs the model, a structured definition binds
+      it."* A retrieved passage is evidence the agent may use; a semantic
+      definition with machine-readable filters is a constraint the critic
+      enforces. They are different objects with different guarantees and the
+      product must not blur them.
+      This is the **honest half**, and it ships first because it is true whether
+      or not the structured half exists yet: a run that took a definition from a
+      document now carries a limitation **naming the term** and saying nothing
+      checked that the query followed it. WP9.2's assembled kind — a fact the run
+      knows, not a hedge the model writes — and it names the term because a
+      reader who knows *which* definition went unenforced can check that one.
+      `state.prose_terms` is separate from `state.lookups` and the split is the
+      design: `lookups` counts attempts, because that is what bounds the cap and
+      refuses a repeat; `prose_terms` counts the ones the documents **answered**,
+      because a term the corpus could not explain left the model no worse
+      informed and caveating it would be a warning about nothing — which is how a
+      reader learns to skip warnings. Both halves are tested.
+      The limitation **disappears** when an Admin blesses that passage into a
+      definition (WP10.2c), because the claim stops being unverifiable. That is
+      the seam between the two halves, and it is why B-059's import path is not a
+      convenience: it is how a customer buys enforcement for definitions they
+      already wrote down.
+      3 new tests. **The plan is re-lettered** to match what ships: WP10.2c is
+      the structured half with B-078 as its **central criterion**, WP10.2d is the
+      import and the gate
+- [ ] WP10.2c Semantic definitions bind: the critic enforces them (B-078 central)
+- [ ] WP10.2d Import (B-059) + verified queries + admin UI ← gate
 - [ ] GATE: uploaded policy changes generated SQL; isolation test; sign-off
 
 ## Phase 11 — Charts + polish (M11)

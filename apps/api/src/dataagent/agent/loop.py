@@ -557,6 +557,11 @@ async def _look_up(
         bundle = bundle.with_definition(
             Definition(term=term, text=passage.text, source=passage.source)
         )
+    if passages:
+        # Recorded only when the documents answered, because this is what the
+        # answer's limitation is built from (**D-033**) and a term the corpus
+        # could not explain is not a definition anybody relied on.
+        state.prose_terms.append(term)
 
     await events.emit(
         "knowledge_consulted",

@@ -4,6 +4,53 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-033 — Prose informs the model; a structured definition binds it
+Date: 2026-08-18 · Phase: 10 · PR: WP10.2b · Owner's principle, stated as such
+Context: WP10.2a made the agent able to consult a document mid-run, and the live
+run that proved it also broke it. Asked what an *anchor order* was, the agent
+retrieved the policy — *"a completed order of more than 40 pounds placed on a
+weekday… neither is anything placed on a Saturday or a Sunday"* — wrote exactly
+that as SQL, and then over two further iterations reasoned its way **out** of the
+weekday clause and answered 1,054 where the document says 747. It discarded the
+definition in the open, with a rationale, and nothing in the system could object
+(**B-078**).
+Options: (a) treat retrieval as sufficient grounding and rely on the model to
+honour what it read; (b) make every definition structured before it may be used,
+so nothing rests on prose; (c) two kinds of grounding with two different
+strengths, and say which is which.
+Decision: **(c)**, in the owner's words on 2026-08-18: **"prose informs the
+model, a structured definition binds it."** A retrieved passage is *evidence the
+agent may use*. A semantic definition with machine-readable filters is a
+*constraint the critic enforces*. They are different objects with different
+guarantees and the product must not blur them.
+Three things follow, and each is a requirement rather than a nicety.
+**The Phase 10 gate's central criterion is the enforcement, not the compliance:**
+the demo must show a run where a definition's filter is *required*, the model
+*drops* it, and the critic *catches* it. A run where the model happens to comply
+demonstrates nothing about the constraint, which is precisely the trap the
+anchor-order run fell into — it complied at iteration 2 and stopped complying at
+iteration 4.
+**An answer grounded only in prose is unverifiable, and says so.** If the critic
+can enforce structured definitions alone, then a run that leaned on a retrieved
+passage carries a **limitation** in its answer stating that its definition was
+not machine-checked. That is WP9.2's assembled kind of limitation — a fact the
+run knows, not a hedge the model writes.
+**Blessing prose into structure is the path between them** (B-059's import,
+pointed at documents as well as at a customer's metadata tables): an Admin turns
+a passage into a definition, and the answer stops carrying the limitation because
+the claim stopped being unverifiable.
+Why not the others: **(a)** is what WP10.2a shipped and B-078 is the evidence
+against it. **(b)** would make the corpus useless until somebody structured all
+of it, which is the same mistake as a product that only accepts definitions
+retyped (B-059) — most organizations would be left with the honest half of
+nothing.
+Consequences: two grounding paths, two strengths, and a user-visible difference
+between them. The composer must be able to say *why* an answer is less certain
+than it looks, which means the limitation has to name the term rather than
+gesture at "a document". A definition that is imported and blessed removes the
+limitation, so the import path is not a convenience — it is how a customer buys
+enforcement for the definitions they already wrote down.
+
 ## D-032 — The planner asks for a definition, and a lookup costs an iteration rather than a call
 Date: 2026-08-18 · Phase: 10 · PR: WP10.2a · Owner's direction on the criterion
 Context: **B-075** — `loop.research` dispatches `run_sql` and nothing else, so
