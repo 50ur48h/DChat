@@ -42,13 +42,17 @@ Current position: **Phases 0–5 and 7–9 signed off. Phase 6 merged, its gate
                   are already closed: **WP8.4** (#55) fixed the capability check
                   the hub table defeated, and **B-056** with it.
 Next step:        **WP10.2d** (`p10.2d-import`), the Phase 10 **gate** PR —
-                  import (**B-059**), verified queries and the admin UI. It
-                  also owes **B-079 (P1)**, which WP10.2c's live run found:
-                  a critic block on the last permitted pass ships the answer
-                  with its objection invisible, and an answer carrying a
-                  sentence the platform knows to be false is what Phase 9
-                  was built to prevent. The old note, kept because the
-                  criterion still governs the gate:
+                  import (**B-059**), verified queries and the admin UI.
+                  **B-079 is a gate criterion, not a backlog item** (owner,
+                  2026-08-18) and its rule is **D-034**: *any critic finding
+                  strong enough to stop a run must reach the reader.* Its code
+                  is already on this branch — an unresolved block is now the
+                  answer's **first** limitation and caps its confidence — and
+                  what the gate still owes is the **demo**: a run the critic
+                  could not talk out of a bad draft, with the block first on the
+                  card. A gate that only walks the happy path proves the
+                  machinery and not the disclosure. The criteria that still
+                  govern it:
                   **B-078 is its central criterion, not a side rule**
                   (owner, 2026-08-18): the demo must show a run where a
                   definition's filter is **required**, the model **drops**
@@ -86,7 +90,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-18 by Claude Code (WP10.2b merged in #70; WP10.2c open for review)
+Last updated: 2026-08-18 by Claude Code (WP10.2c merged in #71; WP10.2d in progress — B-079 done, import next)
 
 ---
 

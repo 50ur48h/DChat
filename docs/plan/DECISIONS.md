@@ -4,6 +4,45 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-034 — A block that could not be acted on becomes the loudest thing the answer says
+Date: 2026-08-18 · Phase: 10 · PR: WP10.2d · Owner's rule, stated as one
+Context: WP10.2c's live run ended with the critic right and the reader none the
+wiser. The model computed a defined metric with `status = 'completed'` instead of
+the definition's `not in ('cancelled','refunded')`; the deterministic rule warned,
+the LLM half **blocked** — *"the query does not clearly exclude cancelled and
+refunded orders as required by the metric definition"* — the run took its one
+permitted re-entry (M9), came back with the same shape, and was blocked again.
+With no re-entry left the draft shipped, saying *"using completed orders and
+**explicitly excluding cancelled and refunded orders**"* — the precise
+overstatement the critic had just named. `composer.limitations_for` reads only
+`verdict.warnings`, so the finding strong enough to stop a run was the one thing
+the reader never saw (**B-079**).
+Options: (a) refuse outright when a block survives the last pass; (b) ship the
+draft and surface the block as the answer's first limitation; (c) leave it in the
+trace, where a curious reader can find it.
+Decision: **(b)**, as the owner's rule of 2026-08-18: **any critic finding strong
+enough to stop a run must reach the reader.** If a run ships despite a block, the
+block becomes the **loudest limitation on the answer**, not a silent trace entry.
+It goes **first**, ahead of the budget caveat, because a caveat about
+incompleteness and a finding that the answer may be *wrong* are not the same kind
+of doubt and the second one has to be read first.
+**An answer that overstates its own rigour is worse than one that admits doubt.**
+That is the whole of it. A hedged answer costs a reader some confidence; an
+answer carrying a confident sentence the platform has already judged false costs
+them the ability to tell the two apart, and it does so in the product's own voice.
+Why not the others: **(a)** throws away work that is often mostly right — the
+number was correct in the live case and only its description was overstated — and
+turns 4.5's "violations become warnings in V1" into a refusal engine, which is
+the false-block failure standing note 5 exists for, arriving by a different road.
+**(c)** is what shipped and is what B-079 is: a trace nobody reads is not a
+disclosure.
+Consequences: `limitations_for` takes the unresolved blocks first and in the
+critic's own words, so the sentence a reader sees is the one the critic wrote
+rather than a paraphrase. `confidence` is lowered when a block survives, because
+a draft the platform disputes cannot be `high`. And this makes the **Phase 10
+gate criterion** for WP10.2d, at the owner's direction: the demo shows a blocked
+answer whose block is the first thing on the card.
+
 ## D-033 — Prose informs the model; a structured definition binds it
 Date: 2026-08-18 · Phase: 10 · PR: WP10.2b · Owner's principle, stated as such
 Context: WP10.2a made the agent able to consult a document mid-run, and the live

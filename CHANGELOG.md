@@ -54,6 +54,10 @@ under "Unreleased", only for changes a user would notice.
   description, so a real question matched nothing at all.
 
 ### Added
+- When a review of an answer does not pass and the answer is shown anyway, the
+  review's objection is now the first thing listed beside it, in the reviewer's
+  own words, and the answer can no longer describe itself as highly confident.
+  An answer that overstates its own rigour is worse than one that admits doubt.
 - Metrics can be defined once and then enforced. A definition says what a metric
   means and which filters it requires; the agent is shown it, and the query it
   writes is checked against it — an answer computed without a required filter is

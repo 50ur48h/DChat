@@ -274,3 +274,86 @@ def test_a_term_with_no_definition_still_carries_it() -> None:
 
     assert any("anchor order" in note for note in notes)
     assert not any("net revenue" in note for note in notes)
+
+
+# ---------------------------------------------------------------------------
+# A block that could not be acted on reaches the reader (D-034, B-079)
+# ---------------------------------------------------------------------------
+
+
+def _blocked_verdict() -> critic.CriticVerdict:
+    return critic.CriticVerdict(
+        verdict="revise",
+        findings=(
+            critic.CriticFinding(
+                rule="checklist",
+                severity=critic.BLOCK,
+                detail="The query does not exclude cancelled and refunded orders.",
+            ),
+        ),
+        consulted_model=True,
+    )
+
+
+def test_an_unresolved_block_becomes_the_answers_first_limitation() -> None:
+    """**The gate criterion (D-034).**
+
+    A block that survives to the composer is unresolved by definition: the one
+    permitted re-entry has happened or was unavailable, and the answer is going
+    out regardless. It was silent before — `limitations_for` read only warnings —
+    which is how a live run shipped saying it had "explicitly excluded cancelled
+    and refunded orders" moments after the critic said it had not.
+    """
+    from dataagent.agent.composer import limitations_for
+
+    state = ResearchState(run_id=uuid.uuid4(), org_id=uuid.uuid4())
+
+    notes = limitations_for(state, _blocked_verdict(), caveat="the iteration ceiling was reached")
+
+    assert notes, "an unresolved block left no trace in the answer"
+    assert "did not pass" in notes[0]
+    assert "cancelled and refunded" in notes[0]
+
+
+def test_the_block_outranks_the_budget_caveat() -> None:
+    """Ordering is the substance here, not presentation. A ceiling says the
+    answer is *incomplete*; a block says it may be *wrong*. A reader who stops
+    after the first line must have read the second kind."""
+    from dataagent.agent.composer import limitations_for
+
+    state = ResearchState(run_id=uuid.uuid4(), org_id=uuid.uuid4())
+
+    notes = limitations_for(state, _blocked_verdict(), caveat="the iteration ceiling was reached")
+
+    block_at = next(i for i, note in enumerate(notes) if "did not pass" in note)
+    caveat_at = next(i for i, note in enumerate(notes) if "stopped before it was finished" in note)
+    assert block_at < caveat_at
+
+
+def test_a_passing_review_adds_no_such_note() -> None:
+    """The twin. A run the critic passed must not be made to sound disputed —
+    that would be the false warning that teaches readers to skip warnings."""
+    from dataagent.agent.composer import limitations_for
+
+    state = ResearchState(run_id=uuid.uuid4(), org_id=uuid.uuid4())
+    passed = critic.CriticVerdict(verdict="pass", findings=(), consulted_model=True)
+
+    assert not any("did not pass" in note for note in limitations_for(state, passed))
+
+
+def test_a_disputed_draft_cannot_call_itself_highly_confident() -> None:
+    """The model is the party whose work is in question, so its own `high` does
+    not survive a block. Capped rather than forced to `low`: a block is a reason
+    to doubt an answer, not a reason to assert it is wrong."""
+    from dataagent.agent.composer import assemble
+
+    state = ResearchState(run_id=uuid.uuid4(), org_id=uuid.uuid4())
+    draft = FinalizeIn(
+        answer="Net revenue was 1,234.", answered=True, supported_by=[], confidence="high"
+    )
+
+    disputed = assemble(draft, state, _blocked_verdict(), citations=())
+    accepted = assemble(draft, state, critic.CriticVerdict(verdict="pass"), citations=())
+
+    assert disputed.confidence == "medium"
+    assert accepted.confidence == "high"

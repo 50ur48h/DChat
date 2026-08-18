@@ -120,14 +120,32 @@ def limitations_for(
     """
     notes: list[str] = []
 
+    # **First, and ahead of the budget caveat** (D-034). This module used to take
+    # warnings only, on the reasoning that a block either sent the run round
+    # again or was already reflected in an answer saying it could not be
+    # established. A live run disproved both halves: the critic blocked twice,
+    # the run spent its one permitted re-entry (M9), and the draft shipped
+    # claiming to have done exactly what the critic said it had not — so the one
+    # finding strong enough to stop a run was the only one the reader never saw
+    # (**B-079**).
+    #
+    # A block that survives to here is by definition unresolved: re-entry has
+    # either happened or was not available, and the answer is going out anyway.
+    # It is louder than the budget caveat because the two are different doubts —
+    # a ceiling says the answer is *incomplete*, a block says it may be *wrong* —
+    # and it is quoted in the critic's own words rather than paraphrased, because
+    # the critic wrote the sentence for a reader.
+    if verdict is not None and verdict.blocked:
+        notes.extend(
+            f"A review of this answer did not pass, and it is shown anyway: {finding.detail}"
+            for finding in verdict.blocking
+        )
+
     if caveat:
         # The budget's own words. Already written for a person (`Exhaustion.reason`).
         notes.append(f"The investigation stopped before it was finished: {caveat}")
 
     if verdict is not None:
-        # Warnings only. A blocking finding either sent the run round again or is
-        # already reflected in an answer that says it could not be established;
-        # repeating it here would read as a second, unexplained doubt.
         notes.extend(finding.detail for finding in verdict.warnings)
         if verdict.verdict == "insufficient_evidence":
             notes.append(
@@ -193,8 +211,23 @@ def assemble(
     return ComposedAnswer(
         text=draft.answer,
         answered=draft.answered,
-        confidence=draft.confidence if draft.confidence in {"high", "medium", "low"} else "medium",
+        confidence=_confidence(draft, verdict),
         citations=citations,
         method=method_note(state),
         limitations=limitations_for(state, verdict, caveat=caveat),
     )
+
+
+def _confidence(draft: FinalizeIn, verdict: CriticVerdict | None) -> str:
+    """The model's own confidence, capped by what the review found (**D-034**).
+
+    A draft the platform has judged and disputed cannot be `high`, whatever the
+    model thinks of it — the model is the party whose work is in question. Capped
+    rather than forced to `low`, because a block is a reason to doubt the answer
+    and not a reason to assert it is wrong; `low` would be its own overstatement,
+    in the other direction.
+    """
+    stated = draft.confidence if draft.confidence in {"high", "medium", "low"} else "medium"
+    if verdict is not None and verdict.blocked and stated == "high":
+        return "medium"
+    return stated
