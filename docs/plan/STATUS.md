@@ -70,9 +70,48 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-19 by Claude Code (B-092 and B-093 built on the owner's choice — a card says which of a code column's values is typical, and an answer says which source it came from)
+Last updated: 2026-08-19 by Claude Code (B-092 and B-093 built on the owner's choice; #75, #76 and #77 merged, and this is the last of Phase 11's first four)
 
 ---
+
+## ⚠ Session end, 2026-08-19 — start here
+
+**Phase 11's first three items are merged**, in the order the owner set:
+
+| PR | What |
+|----|------|
+| **#75** | B-088, API half — edit, retire and version a definition (D-036, revision 0022) |
+| **#76** | B-090 — the environment guard, and the six variables it found on its first run |
+| **#77** | B-060 — reproduced and diagnosed; filed B-092 and B-093 |
+| **#78** | B-092 and B-093 — the two fixes the owner chose. **This one** |
+
+**What is left in Phase 11**, in order:
+
+1. **B-088's web half** — editing and retiring on the Definitions screen. #75
+   shipped the routes; nothing in the product calls them yet, so an Admin still
+   needs curl to correct a definition. B-088 stays `[ ]` until this lands.
+2. **WP11.1** — the chart tool, carrying B-048.
+3. **WP11.2** — polish and Playwright, the gate, carrying B-017, B-061, B-020.
+
+**Two things this session learned the hard way.**
+
+*The status guard keys a tracked item on its `B-###` and reads the last line
+carrying it*, so splitting B-088 into `B-088a [x]` and `B-088b [ ]` made B-088
+read as regressing from signed-off to open on any branch built from that one. A
+split is a way of sizing PRs, not a way of numbering work: **one backlog id is
+one checkbox**, and it stays open until every half of it has merged.
+
+*Four PRs touching STATUS, BACKLOG and CHANGELOG will conflict with each other* —
+every one of them edits the same three files, and each merge invalidates the
+next branch's copy. Rebasing a stacked branch after its base is **squash**-merged
+needs `git rebase --onto main <old-base>`: a plain rebase replays commits whose
+content is already on `main` under a different hash and conflicts with itself.
+
+**One operational step #78 asks for.** Rewriting a card is not a migration
+(revision 0013 settled why), so an existing catalog carries the old card text
+until its data source is profiled again — an existing demo shows the old
+`examples: A, B, C` line until then. The F&B warehouse has already been
+re-profiled locally; nothing else has.
 
 ## ⚠ Session end, 2026-08-18 — start here
 
