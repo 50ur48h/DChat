@@ -498,8 +498,7 @@ async def test_a_definition_from_another_organization_is_a_404(
 
     status, _ = await api.call(
         "POST",
-        f"/v1/orgs/{other_org}/data-sources/{source_id}/definitions/"
-        f"{proposed[0]['id']}/accept",
+        f"/v1/orgs/{other_org}/data-sources/{source_id}/definitions/{proposed[0]['id']}/accept",
         "dave",
         {"required_filters": []},
     )

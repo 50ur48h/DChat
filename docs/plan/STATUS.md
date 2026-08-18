@@ -1779,6 +1779,26 @@ unexplained.
       run: the critic blocked on the last permitted pass, the answer shipped
       anyway saying *"explicitly excluding cancelled and refunded orders"*, and
       the block was invisible because `limitations_for` reads only warnings
+- [ ] **B-083 (P1)** A definition bound the critic and never reached the model
+      — found while wiring verified queries into the same layer and asking what
+      else renders there. `runner` matched definitions, put them on the bundle
+      and handed them to the critic under a comment claiming *"the critic must
+      judge the same definitions the planner was shown"*; `_layers` never
+      referenced them, and `Definition.render()` — written for exactly this —
+      **was called by nothing**. So the rule blocked statements for omitting
+      filters the model could only have guessed. WP10.2c's seventeen tests
+      proved the rule fires and does not false-fire; **not one asked whether the
+      definition reached the prompt.** The enforcement was tested and the
+      communication never was. Now at **L3** behind `DefinitionFrame`, framed as
+      **authoritative** — the deliberate opposite of `KnowledgeFrame` — and not
+      a truncation candidate, since the critic enforces it whether or not the
+      budget left room to say so. Six tests, four of which fail with the layer
+      removed, checked by removing it.
+      **This changes what item 6's demo proves.** B-078 asks for a run where a
+      required filter is *dropped* and *caught*; with this defect the model
+      dropped it every time because it could not know, so the demo would have
+      passed for the wrong reason — proving a model is punished for not reading
+      minds rather than that a constraint binds a model that saw it.
 - [ ] **B-081 (P2)** Nothing guarded BACKLOG.md, and a row was silently merged
       into another — `scripts/check_backlog.sh`, in `hygiene` beside
       `check_status.sh` and in `make preflight`. Ids unique and contiguous from
