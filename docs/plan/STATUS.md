@@ -41,7 +41,10 @@ Current position: **Phases 0–5 and 7–9 signed off. Phase 6 merged, its gate
                   **WP8.4** (#55) fixed the capability check the hub table
                   defeated, and **B-056** with it; **B-059** is half closed, its
                   import service built and its live walk owed by the gate.
-Next step:        **Finish WP10.2d** on the existing branch `p10.2d-import`
+Next step:        **Sign off the Phase 10 gate, or don't.** #72 is ready for review
+                  and every item it owed is done. The one criterion not met live is
+                  **B-078**, accepted as covered-by-test on B-053's precedent.
+                  Previously: **Finish WP10.2d** on the existing branch `p10.2d-import`
                   (**draft #72**) — the Phase 10 **gate** PR. Two of its pieces
                   are built and green: **B-079/D-034** (an unresolved critic
                   block is the answer's first limitation and caps its
@@ -85,7 +88,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-18 by Claude Code (WP10.2d — six of seven gate items done and proved live; the critic-block demo is owed and is step 7 of the manual script)
+Last updated: 2026-08-18 by Claude Code (WP10.2d complete; #72 ready for review; B-078 accepted as covered-by-test; GATE box awaits the owner)
 
 ---
 
@@ -219,42 +222,49 @@ What is already on the branch, tested and green:
    than the changed number I had recorded. The two outcomes differ only in where
    the model scopes the filter across a question mixing revenue with units, and
    that ambiguity is filed as **B-089**.
-6. **A run the critic could not talk out of a bad draft**, with the block first
-   on the card (D-034) — **still owed, and it got harder for the right reason.**
-   B-078's criterion is a run where a required filter is *dropped* by the model
-   and *caught* by the critic. Three live attempts on the F&B source produced
-   three outcomes and none of them is that one:
+6. **A run the critic could not talk out of a bad draft** — **accepted as
+   covered by test, not demonstrated** (owner, 2026-08-18, the same disposition
+   B-053 has). Four live attempts against the F&B warehouse produced three
+   outcomes and none was B-078's criterion:
 
-   * asked the plain question, the model **complied** — it wrote
+   * the plain question — the model **complied**, writing
      `row_role <> 'parent_zero_qty'` into a CTE unprompted;
-   * asked to include every row explicitly — *"including the set lines… do not
-     filter any of them out"* — it **refused, naming the definition**:
-     *"The authoritative prep_quantity definition requires excluding fact_sale
-     rows where row_role is parent_zero_qty. The request to include every row …
-     cannot produce a compliant prep_quantity result."*
-   * and before any definition existed it answered **0.00 units** without a
-     caveat, which is the failure the whole phase is about.
+   * told explicitly to include every row, it **refused and named the rule** —
+     *"the authoritative prep_quantity definition requires excluding fact_sale
+     rows where row_role is parent_zero_qty"*;
+   * asked about an item whose every row that filter excludes, it **refused
+     honestly** rather than reporting the `0.00` it used to report as fact.
 
-   The middle one is worth keeping even though it is not the criterion: a
-   definition bound firmly enough that the agent **declined a direct instruction
-   to violate it, and said which definition and which rule**. That is a stronger
-   demonstration of binding than a critic catch, because it happened at planning
-   time rather than needing enforcement — but it is *compliance*, and the owner's
-   criterion is explicit that a run where the model complies proves nothing about
-   the constraint.
+   No blocking critic verdict was recorded on any run of the owner's walk.
 
-   **Compliance only became possible when B-083 was fixed.** Before that the
-   model never saw the definition, so it would have dropped the filter every
-   time and this criterion would have been met for the worst possible reason —
-   proving a model is punished for not reading minds. Getting harder is the
-   right direction.
+   **B-083 changed what this criterion can show, and that is the part worth
+   keeping.** Before it, a matched definition reached the critic and never the
+   model, so the model dropped required filters *every time* — the criterion
+   would have been met trivially and would have proved the opposite of its
+   intent: not that a constraint binds a model that saw it, but that a model is
+   punished for not reading minds. Now that the definition reaches the prompt,
+   **compliance is the correct behaviour**, and a drop-and-catch may not be
+   stageable against a competent model without rigging the run — which the owner
+   ruled out, on B-053's reasoning: provoking a failure in order to film it is
+   set dressing, not evidence.
 
-   The enforcement itself is proved deterministically —
-   `tests/agent/test_required_filters.py`, 23 tests including the block case and
-   its false-block twin. The **live** drop-and-catch is **step 7** of the manual
-   test script, for the owner, with both outcomes written down and the box left
-   unticked if the model complies again.
-7. **The manual test script**, and the gate box left unticked.
+   What stands instead: the rule is asserted **both ways** in
+   `tests/agent/test_required_filters.py` — it fires on a query that drops a
+   required filter, and stays silent on `status = 'completed'`, which honours
+   *"exclude cancelled orders"* without containing the word. It runs on every
+   answer, deterministically, and **D-034** guarantees that a block which does
+   stop a run becomes the answer's first limitation. Revisit if a weaker model
+   is ever configured for the planner role.
+
+7. **The manual test script**, and the gate box left unticked. **Done** —
+   `docs/plan/gate-10-manual-test.md`, eight steps, walked end to end by the
+   owner on 2026-08-18. Three of those walks died on the same silence and
+   **B-087** was built before sign-off at the owner's direction: a run now
+   records `definitions_available` beside `applied_definitions`, and the answer
+   card reads *"governed by prep_quantity"* or *"no definition matched this
+   question (18 defined here)"* — and stays silent when nothing is defined,
+   because a caveat on every answer is how people learn to stop reading
+   caveats.
 
 ### 1. Session ritual
 
@@ -1918,7 +1928,24 @@ unexplained.
       enforces a vocabulary the project does not use is one that gets
       switched off.
 - [ ] WP10.2d Import (B-059) + verified queries + admin UI ← gate
-- [ ] GATE: uploaded policy changes generated SQL; isolation test; sign-off
+- [ ] GATE: **an organization's own writing changed the SQL a model generated,
+      on a customer's warehouse** — `prep_quantity` imported from the customer's
+      `meta_metric`, accepted by an Admin with the row-role filter their own
+      `meta_gate` states in English and records as `enforced = 0`, after which
+      *"Ayam Penyet Set, 0.00 units sold"* became an honest refusal and
+      `row_role <> 'parent_zero_qty'` appeared in **4 of 4** executed queries;
+      the same claim shown a second way on the pizza fixture, where defining
+      `repeat_rate`'s denominator moved golden eval **#10** from FAIL to PASS by
+      changing `FROM customers LEFT JOIN orders` into `FROM orders GROUP BY
+      customer_id`; a document **consulted mid-run** (`knowledge_consulted`);
+      org isolation proved for `semantic_definitions` and `verified_queries` in
+      the rls_proof suite; a Reader offered no control and issuing no request.
+      **B-078's live drop-and-catch is accepted as covered-by-test rather than
+      demonstrated** (owner, 2026-08-18, B-053's disposition): four attempts gave
+      compliance and two honest refusals, and **B-083's fix is why** — before it
+      the model never saw the definition and dropped the filter every time, so
+      the criterion would have been met for the worst possible reason. User
+      sign-off
 
 ## Phase 11 — Charts + polish (M11)
 - [ ] WP11.1 Chart tool (validated Vega-Lite) + client renderer
