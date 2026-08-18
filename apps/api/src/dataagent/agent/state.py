@@ -166,6 +166,15 @@ class ResearchState(BaseModel):
     #: is the duplicate-query rule's failure wearing different clothes.
     lookups: list[str] = Field(default_factory=list[str])
 
+    #: Of those, the terms the documents actually had something to say about
+    #: (**D-033**). Separate from `lookups` because the two answer different
+    #: questions: `lookups` bounds the cap and refuses a repeat, and must
+    #: therefore count the ones that found nothing; this one drives the answer's
+    #: limitation, and a term the corpus could not explain left the model no
+    #: worse informed than it was — caveating it would be a warning about
+    #: nothing, which is how a reader learns to skip warnings.
+    prose_terms: list[str] = Field(default_factory=list[str])
+
     #: Set when a ceiling stopped the run, so the composed answer can say which.
     stopped_by: str | None = None
     #: How many consecutive iterations added nothing — 4.4's monotone-progress

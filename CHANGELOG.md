@@ -54,6 +54,10 @@ under "Unreleased", only for changes a user would notice.
   description, so a real question matched nothing at all.
 
 ### Added
+- An answer that relies on a definition read out of your documents now says so,
+  naming the term: the wording informed the agent, but nothing checked that the
+  query actually followed it. Defining that metric properly removes the caveat,
+  because then it is enforced.
 - The agent can now look a term up in your documents in the middle of answering.
   When a question turns on how your business defines something — net revenue, an
   active customer — it searches what you have written down, and the answer's

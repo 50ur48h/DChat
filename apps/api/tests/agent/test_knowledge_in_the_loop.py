@@ -373,6 +373,67 @@ async def test_a_lookup_that_finds_nothing_does_not_stop_the_run(
 
 
 # ---------------------------------------------------------------------------
+# Prose informs; it does not bind (D-033)
+# ---------------------------------------------------------------------------
+
+
+async def test_an_answer_resting_on_prose_says_its_definition_was_not_checked(
+    context: ToolContext, fake_llm: FakeLLM, wired: URL, store: LocalDocumentStore
+) -> None:
+    """**The owner's principle, made visible to the person reading the answer.**
+
+    A retrieved passage is evidence the agent may use; only a structured
+    definition is a constraint the critic enforces. B-078 is what happens when
+    that difference is invisible — a live model wrote the document's filter into
+    its SQL and then reasoned its way back out of it, answering 1,054 where the
+    document said 747, with nothing able to object.
+
+    So the answer carries it, and it **names the term**: a reader who knows which
+    definition went unenforced can check that one.
+    """
+    await _upload(context, store)
+    _script_lookup_then_answer(fake_llm)
+    run_id = await _ask(context, "What was net revenue last month?")
+
+    outcome = await _execute(context, run_id)
+
+    assert any("net revenue" in note for note in outcome.limitations), outcome.limitations
+    assert any("nothing checked" in note for note in outcome.limitations)
+
+
+async def test_a_run_that_consulted_nothing_carries_no_such_limitation(
+    context: ToolContext, fake_llm: FakeLLM, wired: URL
+) -> None:
+    """The other half, and the one that keeps the first honest. A caveat that
+    fires on a run which never read a document is a warning about nothing, and a
+    reader who meets two of those stops reading the third."""
+    fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql", times=1)
+    fake_llm.script(_reflect(done=True, statement="counted the shops"), role="plan", times=1)
+    fake_llm.script(_final(), role="compose")
+    fake_llm.script(CriticOut(verdict="pass", reasons=[]).model_dump_json(), role="critic")
+    run_id = await _ask(context, "How many shops are there?")
+
+    outcome = await _execute(context, run_id)
+
+    assert not any("read as prose" in note for note in outcome.limitations), outcome.limitations
+
+
+async def test_a_lookup_that_found_nothing_is_not_caveated_either(
+    context: ToolContext, fake_llm: FakeLLM, wired: URL
+) -> None:
+    """No document is uploaded, so the corpus answers nothing. The run is no
+    worse informed than it was and there is nothing for the reader to distrust —
+    `lookups` records the attempt for the cap, `prose_terms` does not, and the
+    two fields exist because they answer different questions."""
+    _script_lookup_then_answer(fake_llm, term="a term nobody wrote down")
+    run_id = await _ask(context, "What was net revenue last month?")
+
+    outcome = await _execute(context, run_id)
+
+    assert not any("read as prose" in note for note in outcome.limitations), outcome.limitations
+
+
+# ---------------------------------------------------------------------------
 # The tool list is honest
 # ---------------------------------------------------------------------------
 
