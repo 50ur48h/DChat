@@ -25,51 +25,32 @@ Current position: **Phases 0–5 and 7–10 signed off. Phase 6 merged, its gate
                   definition that bound the critic and never reached the model —
                   would have made the gate demo pass for the exact opposite of
                   its intended reason.
-Next step:        **Phase 11 — charts and polish**, not yet started (owner:
-                  *"don't continue with Phase 11 yet"*, 2026-08-18). It now opens
-                  with **B-088**, raised to **P1** and scheduled by the owner
-                  after hitting it mid-walk: an accepted definition cannot be
-                  edited, un-accepted, or re-accepted, and *"a semantic layer
-                  whose definitions are write-once will not survive real use."*
-                  Then WP11.1 (chart tool) and WP11.2 (polish + Playwright, the
-                  gate).
-                  Superseded: **Finish WP10.2d** on the branch `p10.2d-import`
-                  (**draft #72**) — the Phase 10 **gate** PR. Two of its pieces
-                  are built and green: **B-079/D-034** (an unresolved critic
-                  block is the answer's first limitation and caps its
-                  confidence) and **B-059's import service** (a customer's
-                  metric table becomes proposals, read through the DAL, with
-                  `accept` the moment prose becomes a constraint).
-                  **Six things remain, and the last two are the gate itself:**
-                  (1) **routes** for definitions and proposals — Admin-only,
-                  because an accepted definition constrains generated SQL — with
-                  every one added to the role matrix; (2) the **admin review
-                  UI**, following B-008 so a Reader sees no controls and an
-                  unknown role fails closed; (3) **verified queries**
-                  (`semantic/verified.py`, arch 5.4); (4) **B-070** —
-                  `repeat_rate`'s denominator, so golden eval **#10** stops
-                  depending on which defensible reading a model picks, which is
-                  the pizza fixture's before-and-after and needs no customer
-                  data; (5) the **live walk against the F&B source** — import
-                  its **18 metrics**, accept them as an Admin, and re-ask the
-                  question that answered **0 units**, because B-059's evidence
-                  has to be a live before-and-after rather than an assertion;
-                  (6) a **run the critic could not talk out of a bad draft**,
-                  with the block first on the card.
-                  **Two owner's criteria govern the demo and neither is
-                  optional.** **B-078**: the run must show a definition's filter
-                  being **required**, the model **dropping** it, and the critic
-                  **catching** it — a run where the model happens to comply
-                  proves nothing, which is exactly what the anchor-order run did
-                  at iteration 2 before ceasing to comply at iteration 4. And
-                  **D-034**: a gate that only walks the happy path proves the
-                  machinery and not the disclosure.
-                  The PR ends with a **manual test script** — numbered steps,
-                  what the user should see at each, including the failure case —
-                  and the **GATE box stays unticked** for the owner.
-                  **In flight**: **#72**, a **draft** on `p10.2d-import`, open so
-                  CI exercises it. **#67, #68, #69, #70 and #71 are merged** and
-                  their branches deleted.
+Next step:        **Phase 11, not yet started** (owner: *"don't start Phase 11"*,
+                  2026-08-18). It opens with **two P1s the owner scheduled**,
+                  both of them guards against a class of silence rather than
+                  features:
+                  **1. B-088 — an accepted definition cannot be edited.** No
+                  edit, no un-accept, re-accepting is a 404, and the only way
+                  back is deleting the row in `psql` and importing again. Hit
+                  during the gate walk. *"A semantic layer whose definitions are
+                  write-once will not survive real use."* Wants
+                  `PATCH .../definitions/{id}` for an **active** definition,
+                  validated exactly as `accept` is, Admin-only and audited —
+                  it changes what the platform enforces on generated SQL — plus
+                  a decision on whether an edit is **versioned**, which arch 5.4
+                  implies (*"validated… and versioned"*) and nothing does.
+                  **2. B-090 — nothing compares a developer's environment with
+                  the container's.** B-086 was one instance and the owner ruled
+                  the class deserves a guard rather than a note: `.env.example`
+                  documents 48 keys, compose references 46, and 12 are passed to
+                  nothing. Most of those twelve are legitimately host-only, which
+                  is why a diff is useless and the guard has to be a
+                  **declaration** — a `HOST_ONLY` list in `TENANT_TABLES`' idiom,
+                  in `hygiene`, with a `--selftest`.
+                  **Then WP11.1** (chart tool, carrying B-048: the chart lives
+                  inside the answer card and its spec opens the way the SQL
+                  does) **and WP11.2** (polish + Playwright, the gate, carrying
+                  B-017, B-061 and B-020).
 Merge policy: ASK
 Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  (owner, 2026-08-17), so `nightly-evals.yml` can run — keep its
@@ -77,9 +58,47 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-18 by Claude Code (**Phase 10 signed off** — #72 merged, gate ticked; B-088 raised to P1 and scheduled in Phase 11; Phase 11 not started)
+Last updated: 2026-08-18 by Claude Code (session end — Phase 10 signed off and merged; Phase 11 scheduled and **not started**; B-090 filed as its second P1)
 
 ---
+
+## ⚠ Session end, 2026-08-18 — start here
+
+**Phase 10 is signed off and merged. Phase 11 is scheduled and deliberately not
+started** (owner's instruction). `main` is at #73; every phase branch is
+deleted; nothing is in flight.
+
+**Do this first:** the ritual in plan §7.1 — `git fetch --all && git checkout
+main && git pull`, then `gh pr list`. Then read the **Next step** block at the
+top of this file, which names the two P1s Phase 11 opens with and why each is a
+guard rather than a feature.
+
+**Three things a new session will get wrong without being told.**
+
+1. **`make migrate` before anything runs.** Revision **0021**
+   (`verified_queries`) landed this phase, and a missing revision surfaces as a
+   CHECK violation mid-run rather than as a migration error.
+2. **`docker compose … restart web` after editing the web app**, and verify what
+   is *served* rather than what is on disk — the recipe is in CLAUDE.md. This
+   caught me twice in one session, once while proving a fix the owner was
+   waiting on. The container had the new bytes and Turbopack had not
+   recompiled them.
+3. **The environment the container gets is not the environment you have.** That
+   is B-090, unfixed. `EMBEDDINGS_*` was missing from compose for the whole
+   phase, so nothing embedded in the product while everything embedded on the
+   host — and no test could see it.
+
+**What the phase cost, and where the value came from.** Six defects were found
+by *running* the product rather than reading it or testing it, and none was
+reachable from a green suite: **B-083** (a definition bound the critic and never
+reached the model), **B-085** (an imported definition answered only to its key,
+so the import was inert), **B-086** (the container had no embedding model),
+**B-087** (the import screen could not carry the customer's names, and nothing
+said when a question matched none), plus B-073 and B-018 earlier in the phase.
+**B-083 is the one to remember**: it would have made the gate demo pass for the
+exact opposite of its intended reason, and seventeen tests written for that rule
+could not see it because they all tested enforcement and none tested
+communication.
 
 ## How Phase 10 was finished — the record, not a to-do list
 
@@ -385,11 +404,17 @@ looked like afterwards.
 
 ### 8. What is open, and what it means
 
-**P1** — **B-088** (an accepted definition cannot be edited — raised by the
-owner and scheduled to open Phase 11); **B-029** (a second real provider, the
-only thing that closes the Phase 6 gate). **Closed this phase**: B-059, B-079,
-B-083, B-085 — and **B-078 accepted** rather than done, covered by test and
-unstageable until the planner's model changes (standing note 5).
+**P1**, all four, checked against the file rather than remembered —
+**B-088** (an accepted definition cannot be edited) and **B-090** (nothing
+compares a developer's environment with the container's), both raised by the
+owner and scheduled to **open Phase 11**; **B-029** (a second real provider, the
+only thing that closes the Phase 6 gate, and it needs an Anthropic key);
+**B-060** (asked the same question twice, the agent chose different tables and
+answered two orders of magnitude apart — found in the F&B trial, **still open**
+and the oldest P1 here, unscheduled).
+**Closed this phase**: B-059, B-079, B-083, B-085 — and **B-078 accepted**
+rather than done, covered by test and unstageable until the planner's model
+changes (standing note 5).
 
 **P2** — **B-077** (`search_tables` and `describe_table` are advertised to the
 model and the loop cannot dispatch them — named in a test that fails if a third
