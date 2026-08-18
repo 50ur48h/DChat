@@ -1,97 +1,83 @@
 # STATUS — data-agent build
 
 Current position: **Phases 0–5 and 7–9 signed off. Phase 6 merged, its gate
-                  partially met and deliberately unticked. Phase 10 is half
-                  built: WP10.1 is complete and on `main` (#64 and #65, merged
-                  2026-08-17), **B-073 is merged (#67)**, **B-018 is open for
-                  review (#68)**, and WP10.2 — the gate — has not started.** An
-                  organization's own documents can now be uploaded, chunked,
-                  embedded, retrieved and consulted, tenant-isolated by RLS like
-                  every other tenant table — and since B-073 they are **actually
-                  embedded**, which nothing in the application had ever done: no
-                  code path built an embedder, so every upload stored text alone
-                  and the vector arm was dead in production. It is now a metered,
-                  run-charged, ceiling-checked spend like every other. And with
-                  **B-018** a **table card** is found by meaning too: golden eval
-                  **#14** passes live, where the same question used to retrieve
-                  nothing and hand the planner an empty catalog. What is missing
-                  is the half of Phase 10 that says what a *word* means, which is
-                  where both of the phase's P1s live — plus **B-075**, which says
-                  the agent cannot currently call the retrieval tool at all. The **Phase 9 gate
-                  was signed off on 2026-08-16** (#60): 20/20 golden evals, a
-                  seeded wrong-date draft caught deterministically with no model
-                  call, and an answer card showing its citation and its
-                  limitations. The **live** run is recorded at **12/20** and that
-                  number stands — five of the eight failures are one harness
-                  defect (**B-066**), two are the harness expecting the wrong
-                  thing, one is **B-018** — and that last one is **now fixed and
-                  green live** (#68). The **Phase 8 gate
-                  was signed off on 2026-08-16** (#52): the revenue-decline
-                  question answered **$938.28** in two research steps against a
-                  cap of eight, *"which menu items sell best?"* refused honestly
-                  with zero queries, and a mid-run refresh replayed the whole
-                  trace. A question is now investigated rather than answered in
-                  one shot, bounded by ceilings the controller enforces, refused
-                  deterministically when the schema cannot answer it, and visible
-                  step by step in a record that cannot be rewritten.
+                  partially met and deliberately unticked. Phase 10 is nearly
+                  built: WP10.1 (#64, #65), B-073 (#67), B-018 (#68), WP10.2a
+                  (#69), WP10.2b (#70) and WP10.2c (#71) are all on `main`, and
+                  WP10.2d — the gate — is a draft at #72 with six things left.**
+                  An organization's own writing now reaches the agent by two
+                  routes with two different strengths, which is the phase's whole
+                  argument. **Prose informs**: documents are uploaded, chunked,
+                  embedded and retrieved, and the agent can **ask** what a term
+                  means mid-run — `search_knowledge` was registered and
+                  unreachable until WP10.2a, so the corpus reached no run at all.
+                  **Structure binds**: a semantic definition carries
+                  machine-readable filters and the critic blocks a statement that
+                  ignores one. An answer resting only on prose says so, and stops
+                  saying so once an Admin blesses that passage into a definition
+                  (**D-033**). A critic finding strong enough to stop a run now
+                  reaches the reader rather than the trace alone (**D-034**).
+                  Card search is hybrid too, so golden eval **#14** passes live
+                  where the same question used to retrieve nothing.
+                  What is missing is the product surface for all of it — routes
+                  and an admin screen — and the gate's own evidence.
+                  The **Phase 9 gate was signed off on 2026-08-16** (#60): 20/20
+                  golden evals, a seeded wrong-date draft caught deterministically
+                  with no model call, and an answer card showing its citation and
+                  its limitations. The **live** run is recorded at **12/20** and
+                  that number stands — five of the eight failures were one harness
+                  defect (**B-066**, fixed), two were the harness expecting the
+                  wrong thing, and one was **B-018**, now fixed and green live.
+                  The **Phase 8 gate was signed off on 2026-08-16** (#52): the
+                  revenue-decline question answered **$938.28** in two research
+                  steps against a cap of eight, *"which menu items sell best?"*
+                  refused honestly with zero queries, and a mid-run refresh
+                  replayed the whole trace.
                   A **second, real data source** was loaded and tried on
                   2026-08-16 — an F&B operator's 112k-row warehouse, not a
                   fixture this project designed. It found seven defects
                   (**B-054**…**B-060**), four of them P1/P2 and none visible to
-                  a green suite. See "Second data source" below. Two of them
-                  are already closed: **WP8.4** (#55) fixed the capability check
-                  the hub table defeated, and **B-056** with it.
-Next step:        **WP10.2d** (`p10.2d-import`), the Phase 10 **gate** PR —
-                  import (**B-059**), verified queries and the admin UI.
-                  **B-079 is a gate criterion, not a backlog item** (owner,
-                  2026-08-18) and its rule is **D-034**: *any critic finding
-                  strong enough to stop a run must reach the reader.* Its code
-                  is already on this branch — an unresolved block is now the
-                  answer's **first** limitation and caps its confidence — and
-                  what the gate still owes is the **demo**: a run the critic
-                  could not talk out of a bad draft, with the block first on the
-                  card. A gate that only walks the happy path proves the
+                  a green suite. See "Second data source" below. Two are closed:
+                  **WP8.4** (#55) fixed the capability check the hub table
+                  defeated, and **B-056** with it; **B-059** is half closed, its
+                  import service built and its live walk owed by the gate.
+Next step:        **Finish WP10.2d** on the existing branch `p10.2d-import`
+                  (**draft #72**) — the Phase 10 **gate** PR. Two of its pieces
+                  are built and green: **B-079/D-034** (an unresolved critic
+                  block is the answer's first limitation and caps its
+                  confidence) and **B-059's import service** (a customer's
+                  metric table becomes proposals, read through the DAL, with
+                  `accept` the moment prose becomes a constraint).
+                  **Six things remain, and the last two are the gate itself:**
+                  (1) **routes** for definitions and proposals — Admin-only,
+                  because an accepted definition constrains generated SQL — with
+                  every one added to the role matrix; (2) the **admin review
+                  UI**, following B-008 so a Reader sees no controls and an
+                  unknown role fails closed; (3) **verified queries**
+                  (`semantic/verified.py`, arch 5.4); (4) **B-070** —
+                  `repeat_rate`'s denominator, so golden eval **#10** stops
+                  depending on which defensible reading a model picks, which is
+                  the pizza fixture's before-and-after and needs no customer
+                  data; (5) the **live walk against the F&B source** — import
+                  its **18 metrics**, accept them as an Admin, and re-ask the
+                  question that answered **0 units**, because B-059's evidence
+                  has to be a live before-and-after rather than an assertion;
+                  (6) a **run the critic could not talk out of a bad draft**,
+                  with the block first on the card.
+                  **Two owner's criteria govern the demo and neither is
+                  optional.** **B-078**: the run must show a definition's filter
+                  being **required**, the model **dropping** it, and the critic
+                  **catching** it — a run where the model happens to comply
+                  proves nothing, which is exactly what the anchor-order run did
+                  at iteration 2 before ceasing to comply at iteration 4. And
+                  **D-034**: a gate that only walks the happy path proves the
                   machinery and not the disclosure.
-                  **B-059's import service is also built** on that branch —
-                  proposals read through the DAL, provenance kept, an Admin's
-                  `accept` being where prose becomes a constraint. What the gate
-                  still needs beyond that: **routes and the admin review UI**,
-                  **verified queries**, **B-070** (`repeat_rate`'s denominator,
-                  the pizza fixture's before-and-after), and the **live walk
-                  against the F&B source** — importing its 18 metrics and
-                  re-asking the question that answered **0 units**, which is
-                  B-059's evidence and cannot be an assertion.
-                  The criteria that govern it:
-                  **B-078 is its central criterion, not a side rule**
-                  (owner, 2026-08-18): the demo must show a run where a
-                  definition's filter is **required**, the model **drops**
-                  it, and the critic **catches** it. A run where the model
-                  happens to comply proves nothing — which is exactly what
-                  the anchor-order run did at iteration 2 before ceasing to
-                  comply at iteration 4. Then **WP10.2d**, the **gate** PR —
-                  semantic definitions and verified queries, which owe
-                  **B-059** *and* **B-070**: the layer must be able to *import*
-                  definitions a database already carries, admin-reviewed with
-                  provenance, and must settle which of two defensible
-                  denominators a metric means. Its gate walks against the **F&B**
-                  source as well as the pizza one, and the phase has done its job
-                  when the question that answered **0 units** answers something
-                  else.
-                  **B-075 is no longer part of that WP — it is WP10.2a and is
-                  built** (open for review), on the owner's direction of
-                  2026-08-18 that it is a **gate criterion**: an agent told it can
-                  search documents but unable to dispatch the tool means Phase 10
-                  ships a feature the product cannot reach. The gate demo changed
-                  with it — it must show the agent **consulting a document
-                  mid-run**, in the run's own trace, not the documents page
-                  working.
-                  **In flight**: **WP10.2b** (`p10.2b-semantic`), open for
-                  review. **#69 is merged.** **#67 and #68 are merged**; the rebase lesson
-                  earned there is worth keeping — after a squash merge a plain
-                  `git rebase` on a stacked branch replays commits already in
-                  `main`, and `git rebase --onto origin/main <old-base> <branch>`
-                  is the fix. GitHub reported a conflict on #68 that was the
-                  deleted base branch rather than the content.
+                  The PR ends with a **manual test script** — numbered steps,
+                  what the user should see at each, including the failure case —
+                  and the **GATE box stays unticked** for the owner.
+                  **In flight**: **#72**, a **draft** on `p10.2d-import`, open so
+                  CI exercises it. **#67, #68, #69, #70 and #71 are merged** and
+                  their branches deleted.
 Merge policy: ASK
 Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  (owner, 2026-08-17), so `nightly-evals.yml` can run — keep its
@@ -99,259 +85,204 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-18 by Claude Code (WP10.2c merged in #71; WP10.2d in progress — B-079 done, import next)
+Last updated: 2026-08-18 by Claude Code (session end — five PRs merged; WP10.2d is a draft at #72, gate owes six things)
 
 ---
 
 ## ⚠ Session-end handoff — read this before starting anything
 
-**Four PRs merged this session: #62 (B-064), #63 (B-066), #64 (WP10.1a) and
-#65 (WP10.1b).** **Nothing is in flight** — no open PR, no unmerged branch,
-nothing local. `main` is at **29b028e** and every branch this session used has
-been deleted on the remote.
+**Five PRs merged this session: #67 (B-073), #68 (B-018), #69 (WP10.2a),
+#70 (WP10.2b) and #71 (WP10.2c).** One is **in flight**: **#72**, a **draft**
+on `p10.2d-import`, which is the Phase 10 **gate** branch and is not ready for
+review. `main` is at the WP10.2c merge and every other branch is deleted.
 
-> **Partly superseded on 2026-08-18.** The session after this one took **B-073**
-> (merged, #67) and **B-018** (open, #68) before WP10.2, at the owner's
-> direction. So section 2's *"B-018 is not closable"* and section 3's *"what
-> B-073 needs"* are both **done** — read them as the reasoning behind two closed
-> items rather than as work outstanding. Section 0 still stands: **WP10.2 is
-> next**, and it inherited a new P1 on the way, **B-075**. The header above is
-> the current position.
+### 0. Where to pick up: finish WP10.2d, the gate
 
-### 0. Where to pick up: WP10.2, the Phase 10 gate
+**Start here.** Branch `p10.2d-import` already exists and carries two of the
+gate's pieces — do not start a new one. It is a **gate PR**, so it ends with a
+manual test script (CLAUDE.md: numbered steps, what the user should see at each,
+including the failure case) and a sign-off; **do not tick the GATE box yourself.**
 
-**Start here.** Branch `p10.2-semantic`. It is the **gate PR** for Phase 10, so
-it ends with a manual test script (CLAUDE.md: numbered steps, what the user
-should see at each, including the failure case) and a sign-off — do not tick the
-GATE box yourself.
+What is already on the branch, tested and green:
 
-Read, in this order: plan §6 WP10.2, architecture Part 5.5 and 4.8, then the
-four things below that already know what this WP is for. Two backlog items are
-**not optional extras — they are what the WP is for**:
+* **B-079 / D-034** — an unresolved critic block is the answer's first
+  limitation and caps its confidence.
+* **B-059's import service** — `semantic/proposals.py`: a customer's metric table
+  becomes proposals, read through the DAL, `accept` is where an Admin adds the
+  filters that make a definition bind.
 
-* **B-059 (P1)** — the layer must be able to **import** definitions a database
-  already carries, admin-reviewed and with provenance kept, not only host ones
-  somebody retypes. The F&B operator arrived with 18 metrics, 8 open
-  data-quality questions and an assumptions table already written down, and
-  every one of them sits in the catalog as ordinary data. A product that only
-  accepts definitions retyped will mostly be given none.
-* **B-070 (P2)** — a metric must settle **which of two defensible denominators**
-  it means. `repeat_rate` is 7861/7985 (customers who ordered) in `truths.json`
-  and a live model computed 7861/8000 (all customers); both read the English
-  correctly. This one is on the **pizza fixture**, which is the more damning
-  place for it, and it gives WP10.2 a before-and-after that needs no customer
-  data.
+**What the gate still owes, in the order that makes sense:**
 
-The gate walks against the **F&B** source as well as the pizza one, and the
-phase has done its job when the question that answered **0 units** (B-059)
-answers something else. `make seed.fnb SQLITE=.SampleData/<file>.sqlite` rebuilds
-that source; see "Second data source" below and standing note 6.
-
-Also on Phase 10's account, and worth taking first or in the same WP:
-**B-073 with B-018** — see section 3.
-
-Everything else Phase 10 could reach is filed and none of it blocks: **B-054**
-(the profiler samples the first rows on disk), **B-055**, **B-058** (an
-undeclared but working join is refused), **B-067**.
+1. **Routes** for definitions and proposals — list, create, import, accept,
+   reject. Without them the import has no product surface and an Admin cannot
+   accept anything. Role: **Admin**, because an accepted definition constrains
+   generated SQL. Add all of them to `tests/auth/test_role_matrix.py`, which
+   fails if an org-scoped route has no entry.
+2. **The admin review UI** — the screen that shows a proposal, its provenance and
+   what it would create, and lets an Admin accept or reject each row. Follow
+   B-008: a Reader sees no controls, and an unknown role fails closed.
+3. **`semantic/verified.py`** — admin-blessed query patterns surfaced to the
+   planner as few-shot grounding (arch 5.4).
+4. **B-070** — define `repeat_rate` with its denominator, so golden eval **#10**
+   stops depending on which of two defensible readings a model picks. This is the
+   pizza fixture's before-and-after and needs no customer data.
+5. **The live walk against the F&B source** — `make seed.fnb SQLITE=…`, import its
+   **18 metrics** from `meta_metric`, accept them as an Admin, and re-ask the
+   question that answered **0 units**. B-059's evidence has to be a live
+   before-and-after rather than an assertion, and the phase has done its job when
+   that answer changes.
+6. **A run the critic could not talk out of a bad draft**, with the block first on
+   the card (D-034). A gate that only walks the happy path proves the machinery
+   and not the disclosure.
+7. **The manual test script**, and the gate box left unticked.
 
 ### 1. Session ritual
 
 `git fetch --all && git checkout main && git pull`, then `gh pr list` — which
-should be empty. `main` carries the whole of WP10.1: `knowledge_documents` and
-`knowledge_chunks` under RLS, chunking, embeddings metered into `usage_ledger`,
-ingest, hybrid retrieval, the `search_knowledge` tool, six documents routes and
-the documents page.
+should show **#72 as a draft**. Check out `p10.2d-import` rather than branching.
 
-One git lesson worth keeping, because it will recur the next time a branch is
-stacked: **after a squash merge, a plain `git rebase` tries to replay commits
-that are already in `main`**, since the squash gave `main` a different hash for
-the same content. #65 was stacked on #64 and needed
-`git rebase --onto origin/main <old-base> <branch>`.
+### 2. The four decisions this session added, and why they matter
 
-### 2. What WP10.1 left behind, and the one thing it could not close
+Read these before touching the semantic layer; the code will not make sense
+without them.
 
-The tool, its framing, the six routes, the role matrix and the documents page
-are all built and tested. What did **not** land, and the reason matters more
-than the entry: **B-018 was listed for WP10.1b and is not closable in it.**
-Reranking card search needs a *query* embedding computed inside `build_context`
-— the agent's own path — which is the same spending-capability question as
-**B-073**. Both `STATUS` and B-018's own backlog row now say so rather than
-carrying the old promise. Take B-073 and B-018 together; golden eval **#14**
-stays red live until they are done.
+* **D-031** — an embedding is a spend like any other, and a refused one
+  *degrades* the search rather than breaking it. The lexical arm still answers
+  and the result **says** the other one did not, because a search that quietly
+  halved itself reports *"nothing is written down about that"*, which reads as a
+  fact about the customer's documents and is not one.
+* **D-032** — the planner may ask for a term to be defined, and a lookup **costs
+  an iteration rather than a model call**. That detail is what leaves D-024's and
+  D-028's call arithmetic untouched.
+* **D-033** — **prose informs the model; a structured definition binds it.** A
+  retrieved passage is evidence the agent may use; a definition with
+  machine-readable filters is a constraint the critic enforces. An answer resting
+  only on prose carries a limitation saying so, and that limitation **goes away**
+  when an Admin blesses the passage into a definition. This is the spine of the
+  whole phase.
+* **D-034** — **any critic finding strong enough to stop a run must reach the
+  reader.** If a run ships despite a block, the block is the loudest limitation
+  on the answer. *An answer that overstates its own rigour is worse than one that
+  admits doubt.*
 
-### 3. What B-073 actually needs, since it now gates two things
+### 3. Running it found what the suite could not — five times
 
-`search_knowledge` runs on the **lexical arm alone** today: `retrieve.py` is
-hybrid and its vector arm is tested and works, but the *tool* calls it without an
-embedder. That was deliberate. An embedder on `ToolContext` is a **spending
-capability reaching the agent loop**, and every guard around spending is built
-for the chat path — **D-019**'s per-run cost ceiling reads `usage_ledger` rows
-for the run, and **B-040**'s test guard wraps `registry.get_provider`. Neither
-sees an embedding call made from inside a tool. Wiring it as a side effect of a
-retrieval feature would put unmetered-against-the-run spend into the loop.
+Every work package this session shipped a defect that no scripted test would have
+caught, and every one was found by running the thing against a real model. This
+is not a coincidence and it is the habit to keep.
 
-So B-073 wants: an embedder on `ToolContext`, the run's cost ceiling counting
-embedding tokens, the B-040 guard refusing a non-stub embedder exactly as it
-refuses a non-stub provider, and the trace saying which arm answered.
+* **WP10.2a**: a model that needs a definition says so by **refusing** —
+  `answerable` false, the term in `define` — and the loop checked `answerable`
+  first, turning the one state the feature exists for into a dead run. Every
+  scripted test passed because every script set `answerable` true.
+* **WP10.2a**: a duplicate lookup was refused correctly and **in silence**, so the
+  model asked again and hedged an answer it had already computed.
+* **WP10.2c**: the critic blocked twice, the answer shipped anyway claiming to
+  have done what the critic said it had not, and the block was invisible
+  (**B-079**, now fixed under D-034).
+* **B-073**: nothing in the application had ever *built* an embedder, so every
+  upload stored text alone — the vector arm was dead in production, not only in
+  the tool.
+* **B-073**: the query embedding bypassed the meter entirely, one layer below
+  where the defect had been noticed.
 
-### 4. Suite numbers, and two traps that cost time getting them
+A corollary worth remembering: **a demo must use a term the business invented.**
+Asked about *"net revenue"*, a live model never looked anything up — the `orders`
+card lists a `status` column whose examples include 'cancelled', so it inferred
+the exclusion. The lookup path only fires when a definition genuinely cannot be
+guessed, which is the case it exists for.
 
-**API: `1297 passed, 20 skipped`, exit code 0. Web: 92 tests.** This is the
-number for `main` at **29b028e** — measured twice on the API side, once for
-WP10.1a and again after WP10.1b registered a new tool (which changes the prompt
-every agent test sees), both from runs with nothing else touching the database.
-A new session that gets a different number should suspect the machine before the
-code, for the reason in the next paragraph.
+### 4. Local machine state a fresh clone will not have
 
-Getting there took three attempts and the two failed ones are worth recording.
-Each showed a single `ERROR` in a **different** test — `tests/llm/test_front_door.py`
-once, `tests/agent/test_context_selection.py` the next — and each of those files
-passes on its own. Both runs overlapped a second pytest process competing for
-the same temp-database machinery. **Run one suite at a time on this machine**:
-the per-test databases are created and dropped by name, and two runs racing over
-them is enough to break one.
+`.env` gained **`EMBEDDINGS_PROVIDER`, `EMBEDDINGS_MODEL`,
+`EMBEDDINGS_DIMENSIONS`** and a price for `text-embedding-3-small` in
+`LLM_PRICES` on 2026-08-18. WP10.1a had verified that model against the account
+and never written it in, so **nothing on this machine could embed** until then.
+The price is not optional: an unpriced model under `LLM_RUN_COST_LIMIT_USD` is
+**refused** (D-019), so omitting it does not make searches cheaper — it makes
+every capped run lose its vector arm, silently before D-031 and audibly after.
 
-Two traps worth carrying forward:
+Run `make migrate` before anything live: this session added revisions **0018**
+(card embeddings), **0019** (`knowledge_consulted`) and **0020**
+(`semantic_definitions`). A missing 0019 is what made the first WP10.2a live run
+fail with a CHECK violation — the event vocabulary is enforced by the database.
 
-* **A pipe hides pytest's exit code.** `uv run pytest … | tail -6` reports
-  *tail's* status, so a run with an error still exits 0. Redirect to a file and
-  read `$?`, or read the summary line — never trust `echo $?` through a pipe.
-* **`tail -4` can cut the summary line itself**, leaving only the `ERROR` row
-  visible and no count. That is how the first one looked worse than it was.
+### 5. CI: a job could hang for six hours, and one did
 
-### 5. The live evals were 12/20; B-066 is fixed and the taxonomy was wrong
+On #71 the `mssql` job's ODBC install sat on `azure.archive.ubuntu.com` for **32
+minutes** with nothing above it: GitHub's default job timeout is **360 minutes**.
+Fixed for that job (`timeout-minutes` on the job and the step, apt retries with a
+15-second timeout in `install-odbc.sh`, which the Docker image runs too). **The
+class is not closed** — no other job in the workflow has a timeout, and the next
+hang will be somewhere else. That is **B-080**.
 
-`make evals` is 20/20 in CI and on any developer machine, and stays 20/20. The
-**live** run — real models, 223,685 tokens — was 12/20, and the taxonomy always
-mattered more than the number. **B-066 is now closed**, and re-running the
-affected cases live corrected two lines of that taxonomy:
+The job only runs when the `connectors` path filter fires, which a `dal/` change
+does. Expect it on any PR touching the validator, and expect it to be slow even
+when healthy.
 
-* **Five were one harness defect** (**B-066**): `expect.value_of` named the
-  column the *scripted* SQL used, and a real model aliases its output as it
-  likes. Fixed: `match_value` tries the named column, then a 1x1 result, then a
-  cell of a single row — and a fallback runs **only when the named column is
-  absent**, so nothing can rescue a wrong number sitting in the right column.
-* **#4 was never an aliasing failure.** The model answered *"Northgate"* rather
-  than `3`, which is the **better** answer — an internal key reaching a reader is
-  itself a defect (B-061, B-020). `truth_any` now lets one fact have two right
-  spellings.
-* **#10 is not a harness problem at all** — it is **B-070**. *"What proportion of
-  customers ordered more than once?"* has two defensible denominators (7861/7985
-  or 7861/8000), the model picked the other one, and nothing in the system says
-  which is authoritative. That is the semantic layer's job and it gives **WP10.2
-  a before-and-after on the pizza fixture**, not only on the customer's (B-059).
-* **Two were the harness expecting the wrong thing**, and now say so with
-  `may_refuse`: **#19** refused because the data ends 2026-07-31 — D-027's last
-  clause working exactly as written — and **#17** refused *"how are we doing?"*
-  as too vague. A refusal must still say **why**; silence is not honesty.
-* **#14 is real and already has an id**: it was never shown the `orders` card,
-  because search is lexical and nothing embeds (**B-018**). *WP10.1 was expected
-  to close it and will not* — reranking card search needs a **query** embedding
-  inside `build_context`, which is the agent's own path, so B-018 is blocked
-  behind **B-073**. Found by building it; see handoff 2a.
+### 6. A backlog row was lost, and nothing in the repo noticed
 
-**The harness now has its own tests** — 21 of them, no database, no model, no
-dollar. Its absence is why B-066 existed: the harness had only ever been
-exercised by running it, in the one mode where the defect could not appear.
+Filing **B-080** prepended its row to **B-076**'s and dropped the newline between
+them. Every character of B-076 survived — but it no longer began a line, so
+`grep '^| B-076'` found nothing, and a later edit to B-076's own text landed
+inside what read as B-080's cell. It was caught by an id audit at the end of the
+session, by hand, and not by anything in the repository.
 
-### 6. `nightly-evals.yml` can now run — the key is a repository secret
+BACKLOG.md is **append-only, never renumbered, never deleted** (plan §1.5) and it
+is the only record of why things were *not* done. **B-019** built precisely this
+guard for STATUS.md after #24 gutted it; the same argument transfers and the
+guard was never written. That is **B-081**. Until it exists, after editing
+BACKLOG run:
 
-The owner added `OPENAI_API_KEY` to the repository on **2026-08-17**, so the
-workflow's first step no longer refuses. It has still **never executed**, and the
-prerequisite for reading its number is now met: **B-066 is fixed**, so a nightly
-result is about the model rather than about the harness. Before that it would
-have said more about the harness than the product — five of the eight live
-failures were that one defect.
+```sh
+grep -o '^| B-[0-9]\{3\} ' docs/plan/BACKLOG.md | tr -d '| ' | sort | uniq -d   # duplicates
+```
 
-Two of the twenty are still expected to fail live, and both are known and filed:
-**#10** is **B-070** (a metric with two defensible denominators) and **#14** is
-**B-018** (card search is lexical, so the `orders` card is never shown). A first
-nightly that reports 18/20 is the suite working, not a regression.
+and check the highest id equals the row count — the gap check alone would have
+caught this in the commit that caused it.
 
-Keep the token cap tight. The local run spent **223,685 tokens** for twenty
-questions and the two multi-step ones were half of it, so `EVALS_TOKEN_BUDGET` is
-the control that matters — it is checked **before** each question, which is what
-makes it a ceiling rather than a report.
+The deeper lesson is one this file already records and I repeated anyway: **a
+patch script that reports success without asserting its edit landed will lie to
+you.** Mine asserted the anchor was *present*; it never checked what the file
+looked like afterwards.
 
-### 7. A false block is the critic's characteristic failure
+### 7. Two traps still worth carrying
 
-Standing note 5 above says it and this is the second place it is written, because
-it cost three defects in one session. The rule: **every new critic rule ships
-with two tests — one proving it fires, one proving it does not fire on a
-legitimate question near it.** Golden eval #18 is the first test that caught a
-false block before a human did, which is the whole argument for the eval suite.
+* **`pytest tests/a tests/b` fails to collect** — every `conftest.py` is the
+  module `conftest`, so two suites' helpers collide (**B-074**). It bit again
+  this session. CI runs the whole suite and is unaffected; narrow to **one**
+  directory, or run everything.
+* **After a squash merge, a plain `git rebase` replays commits already in
+  `main`.** #68 needed
+  `git rebase --onto origin/main <old-base> <branch>`, as #65 did before it. The
+  conflict GitHub reported on #68 was the deleted base branch, not the content.
 
-### 8. Run the thing you just changed
+### 8. What is open, and what it means
 
-Four times this session a `\n` inside a shell heredoc became a real newline and
-broke what it was writing — a string literal, twice; a `make` recipe once, which
-took **every CI job** down with `Makefile:120: missing separator`. The lesson is
-not "use the Edit tool", though that helps. It is that `make help` printed
-nothing when the broken target went in, and that was read as quiet rather than as
-broken. **Adding a make target and not running `make` is the same omission as
-shipping a page and never loading it.**
+**P1** — **B-059** (import: service built, routes/UI/live walk owed),
+**B-078**'s remainder and **B-079**'s demo, both folded into the gate;
+**B-029** (a second real provider, the only thing that closes the Phase 6 gate).
 
-`make preflight` now exists and runs what CI runs, in CI's order. Every lint
-recipe passes `--no-cache`, because a warm ruff cache twice reported a clean tree
-that CI then failed on.
+**P2** — **B-077** (`search_tables` and `describe_table` are advertised to the
+model and the loop cannot dispatch them — named in a test that fails if a third
+joins them), **B-081** (nothing guards BACKLOG.md; a row was lost this session),
+**B-070** (`repeat_rate`'s denominator — gate work now), **B-069**,
+**B-067**, **B-065**, **B-058**, **B-054**, **B-052**, **B-038**, **B-035**,
+**B-003**, **B-048**, **B-028**.
 
-### 9. Two databases, and only one is a fixture
+**P3 worth remembering** — **B-076** (a call too cheap to round to a millionth of
+a dollar records **zero**, so a thousand tiny embeddings are invisible to the
+ceiling; the owner's fix is to **meter in tokens, not rounded dollars**),
+**B-080** (the CI timeout sweep), **B-071** (no vector index yet, deliberately —
+the entry asks for a measurement rather than an opinion), **B-072**, **B-074**,
+**B-061** with **B-020**, **B-062**.
 
-`Demo` is the pizza generator, whose numbers `truths.json` and every eval depend
-on — do not touch it. `F&B demo` is a real operator's warehouse loaded from a
-SQLite file under `.SampleData/`, which is **gitignored and never committed**.
-Rebuild with `make seed.fnb SQLITE=…`. Test against **both**: seven defects came
-out of the second one in an afternoon that six phases against the first never
-surfaced.
+### 9. Suite numbers
 
-**Scan DDL for literals, not just tables for rows.** A ported view definition is
-schema by its extension and *content* by what is inside it; two of that
-customer's views were `UNION ALL` blocks reproducing their own data-quality
-findings verbatim, and a scan of row values did not catch it. CLAUDE.md carries
-the rule.
-
-### 10. What is open, and what it means
-
-**P1** — **B-059**: the customer's own semantic layer is invisible; WP10.2 owes an
-*import* path, not only an authoring UI. **B-060**: the same question twice chose
-two tables and answered RM 642,930 and RM 4,707. **B-029**: a second real
-provider, the only thing that closes the Phase 6 gate.
-
-**P2** — **B-073** (`search_knowledge` is lexical-only until an embedder can
-reach the agent loop safely, and it **gates B-018** too — see handoff 2a),
-**B-070** (a metric with two defensible denominators, and nothing
-saying which is authoritative — WP10.2's before-and-after on the pizza fixture),
-**B-069** (`make agent.smoke` on the host cannot resolve a compose service name,
-so the gate question fails as a `gaierror` dressed up as "the query failed" —
-found running B-064's own evidence), **B-067** (a follow-up sees the previous
-answer's prose, never the SQL behind it), **B-065** (a refusal should name
-the database it looked in — the owner asked the F&B source an orders question and
-the refusal read as a broken product), **B-057**'s siblings **B-058** (an
-undeclared but working join is refused) and **B-054** (the profiler samples the
-first rows on disk), **B-052**, **B-038**, **B-035**, **B-003**, **B-048**.
-
-**P3 worth remembering** — **B-071** (no vector index yet, deliberately; the
-entry asks for a measurement rather than an opinion), **B-072** (two object
-stores duplicating the *safety* half — converge in WP12.2), **B-074** (a
-pre-existing conftest name collision: `pytest tests/runs tests/agent` fails to
-collect, CI is unaffected). **B-061** with **B-020**: internal keys and the wrong
-currency symbol reach the reader. **B-062**: no way to ask a question as of a
-past date. **B-049**, **B-050**, **B-046/047**.
-
-### 11. Habits this session earned
-
-- **Run the phase's own deliverable before asking anyone to walk a gate.** It
-  found B-041/042/043, B-051, B-052, and this session `make evals.setup` failing
-  on a clean machine and a failing eval hiding the critic's reason — both found
-  by running the documented command rather than reading it.
-- **Verify a CI job locally before pushing it.** The whole `evals` path was run
-  against an empty database first, which found two things a push-and-watch cycle
-  would have found slowly: `org_memberships` has no surrogate id, and the secrets
-  key must be shared across steps.
-- **A test that passes first time deserves suspicion.** Tamper with it and watch
-  it fail. Three web tests and three critic tests were confirmed that way.
-- **jsdom is not evidence for anything timing-dependent** — `apps/web/e2e/` exists
-  because a regression test once passed against the broken code.
+**API: `1363 passed, 20 skipped`. Web: 92 tests.** `make preflight` clean on
+`p10.2d-import`. Run one suite at a time on this machine — the per-test databases
+are created and dropped by name, and two pytest processes racing over them is
+enough to break one.
 
 ## Standing notes for a new session
 
