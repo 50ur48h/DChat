@@ -14,8 +14,17 @@ set -eu
 
 export DEBIAN_FRONTEND=noninteractive
 
-apt-get update
-apt-get install --no-install-recommends -y ca-certificates curl gnupg
+# **A mirror that stops answering must not hang the build.** apt's defaults wait
+# a long time and retry patiently, which is right for a laptop on hotel wifi and
+# wrong for CI: on #71 an `apt-get update` against azure.archive.ubuntu.com sat
+# for 32 minutes without failing. Three retries with a 15-second timeout turns a
+# flaky mirror into a slow success and a dead one into a prompt failure.
+APT_OPTIONS="-o Acquire::Retries=3 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15"
+
+# shellcheck disable=SC2086 # word splitting is what passes these as flags
+apt-get $APT_OPTIONS update
+# shellcheck disable=SC2086
+apt-get $APT_OPTIONS install --no-install-recommends -y ca-certificates curl gnupg
 
 # --batch --yes --no-tty: on a CI runner there is no controlling terminal, and
 # gpg fails with "cannot open /dev/tty" rather than reading from the pipe it was
@@ -45,10 +54,12 @@ esac
 echo "deb [signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/${repository}/prod ${VERSION_CODENAME} main" \
 	>/etc/apt/sources.list.d/mssql-release.list
 
-apt-get update
+# shellcheck disable=SC2086
+apt-get $APT_OPTIONS update
 # ACCEPT_EULA is Microsoft's licence prompt for this driver; unattended installs
 # have no other way to answer it.
-ACCEPT_EULA=Y apt-get install --no-install-recommends -y msodbcsql18 unixodbc
+# shellcheck disable=SC2086
+ACCEPT_EULA=Y apt-get $APT_OPTIONS install --no-install-recommends -y msodbcsql18 unixodbc
 
 # The tools that fetched the key are not wanted in a running image. Skipped on a
 # CI runner, where removing curl from under the rest of the job would be rude.

@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
 
 from dataagent.agent import composer, critic
@@ -72,6 +72,7 @@ from dataagent.knowledge import embeddings
 from dataagent.llm.base import LLMError
 from dataagent.runs import service as runs
 from dataagent.runs.events import EventWriter
+from dataagent.semantic import definitions as semantic
 from dataagent.tenancy.session import org_session
 
 __all__ = ["RunOutcome", "execute_run", "relevant_pairs"]
@@ -237,6 +238,15 @@ def relevant_pairs[PairT: CapabilityGap | CapabilityChasm](
     return tuple(sorted(touching, key=rank)[:CAPABILITY_NOTE_LIMIT])
 
 
+def source_of(context: ToolContext) -> uuid.UUID:
+    """The run's data source. `ToolContext` allows none because a tool may run
+    without one; `execute_run` requires one, so this narrows rather than
+    defends."""
+    if context.data_source_id is None:  # pragma: no cover - execute_run requires it
+        raise ValueError("a run cannot be executed without a data source")
+    return context.data_source_id
+
+
 async def _investigate(
     *,
     context: ToolContext,
@@ -270,6 +280,17 @@ async def _investigate(
         actor_user_id=context.actor_user_id,
         settings=settings,
     )
+    # **What this organization means by the words in the question** (D-033,
+    # WP10.2c). Matched by name and synonym, narrowly: a definition applied to a
+    # question it is not about becomes a critic rule enforcing a filter the
+    # answer never needed, which is a false block.
+    applied = semantic.matching(
+        await semantic.definitions_for(context.org_id, source_of(context)), state.question
+    )
+    if applied:
+        bundle = replace(bundle, definitions_applied=applied)
+        state.applied_definitions = [definition.name for definition in applied]
+
     state.phase = "context"
     state.table_names = list(bundle.table_names)
     state.as_of = bundle.as_of.isoformat()
@@ -304,11 +325,7 @@ async def _investigate(
     # statement, because being told is not the same as being bound.
     from dataagent.dal.policy import source_policy
 
-    # `ToolContext` allows no data source because a tool may run without one;
-    # `execute_run` requires one, so this narrows rather than defends.
-    source_id = context.data_source_id
-    if source_id is None:  # pragma: no cover - execute_run takes it as required
-        raise ValueError("a run cannot be executed without a data source")
+    source_id = source_of(context)
 
     graph = await load_join_graph(context.org_id, source_id)
     policy = await source_policy(context.org_id, source_id)
@@ -467,6 +484,11 @@ async def _validate(
         statements=await critic.statements_for(context.org_id, state.execution_ids()),
         previews=outcome.previews,
         dialect=(await source_policy_for(context)).dialect,
+        # The definitions this question matched, so the deterministic half can
+        # check that the statement honoured them (D-033). Loaded once, on the
+        # bundle, rather than re-read here: the critic must judge the same
+        # definitions the planner was shown.
+        definitions=bundle.definitions_applied,
     )
     deterministic = critic.check(draft, evidence)
 

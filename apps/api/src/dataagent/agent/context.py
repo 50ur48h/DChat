@@ -61,6 +61,7 @@ from dataagent.catalog.search import CardHit
 from dataagent.config import Settings
 from dataagent.knowledge.embeddings import Embedder
 from dataagent.llm.base import Message, estimate_tokens
+from dataagent.semantic.definitions import Definition as SemanticDefinition
 
 __all__ = [
     "HISTORY_TURNS",
@@ -345,6 +346,12 @@ class ContextBundle:
     org_instructions: str | None = None
     agent_instructions: str | None = None
     skills: tuple[str, ...] = ()
+    #: Semantic definitions this question matched (**D-033**, WP10.2c),
+    #: rendered at **L3**. Above L4 because a definition is the platform's
+    #: own object — validated against the catalog, blessed by an Admin, and
+    #: enforced by the critic — rather than a customer's untrusted prose; a
+    #: retrieved *passage* is the L4 kind and stays there.
+    definitions_applied: tuple[SemanticDefinition, ...] = ()
     token_budget: int = DEFAULT_TOKEN_BUDGET
     #: The date this run treats as "today" (**D-027**, B-005). Every relative
     #: period in the question — *last month*, *recently*, *year to date* — is

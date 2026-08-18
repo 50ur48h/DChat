@@ -175,6 +175,12 @@ class ResearchState(BaseModel):
     #: nothing, which is how a reader learns to skip warnings.
     prose_terms: list[str] = Field(default_factory=list[str])
 
+    #: Semantic definitions this question matched and the critic therefore
+    #: enforces (**D-033**, WP10.2c). On the state so the trace and the
+    #: answer's limitations can tell an enforced definition from a passage the
+    #: run merely read — which is the entire distinction the layer exists for.
+    applied_definitions: list[str] = Field(default_factory=list[str])
+
     #: Set when a ceiling stopped the run, so the composed answer can say which.
     stopped_by: str | None = None
     #: How many consecutive iterations added nothing — 4.4's monotone-progress
