@@ -375,6 +375,7 @@ async def research(
                     row_count=result.data.row_count,
                     summary=summary,
                     ok=True,
+                    tables=list(result.data.tables),
                 )
             )
             await events.emit(

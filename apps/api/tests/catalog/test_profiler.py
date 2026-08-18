@@ -561,12 +561,19 @@ async def test_a_card_labels_every_figure_it_cannot_stand_behind(
 
     A figure a card states **as a fact about the column** must come from the
     engine. A figure that can only come from the sample is allowed only when the
-    card *says so* — `distinct in sample` and `examples:` both do, and both are
-    honest because a sampled example really is an example.
+    card *says so* — the distinct count and the value list both do, and both are
+    honest because a sampled value really is a sampled value.
 
     The failure this pins is the middle case: a sample-derived number presented
     bare, as `range 2020-01-01 to 2021-02-02` was. Whoever adds the next figure
     has to choose a side, and this test is where that choice is recorded.
+
+    **B-092 made the saying-so stronger rather than weaker.** The line now names
+    how far the profile looked and says the rows it read are the table's first,
+    because "in sample" was true and uninformative: five values found in five
+    thousand rows of a fifty-thousand-row table is a much weaker claim than five
+    found in five thousand of five thousand, and the card stated both the same
+    way.
     """
     org_id, user_id, source_id = await _discovered(migrated_database, isolated_customer_database)
 
@@ -584,8 +591,10 @@ async def test_a_card_labels_every_figure_it_cannot_stand_behind(
 
     for line in card.splitlines():
         if "distinct" in line:
-            assert "in sample" in line, "a sampled count says it is a sampled count"
+            assert "in the first" in line and "rows" in line, (
+                "a sampled count says how far the profile looked"
+            )
         if "2021-02-02" in line:
-            assert "examples:" in line, (
-                "a value only the sample saw may appear as an example and as nothing else"
+            assert "commonest in the rows read" in line and "the table's first" in line, (
+                "a value only the sample saw appears as a sampled value and as nothing else"
             )

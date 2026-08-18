@@ -102,6 +102,51 @@ def _prose_definitions(state: ResearchState) -> tuple[str, ...]:
     return tuple(sorted({term for term in state.prose_terms if term.lower() not in enforced}))
 
 
+def _and_list(names: tuple[str, ...]) -> str:
+    """`a`, `a and b`, `a, b and c`. Qualified names, because two schemas can
+    hold a table of the same name and this sentence is about which one."""
+    if len(names) == 1:
+        return names[0]
+    return f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+#: How many alternatives one note will name. A question that retrieved six fact
+#: tables did not have six answers; it had a retrieval that was broad, and a
+#: sentence listing all of them is one nobody finishes reading.
+MAX_NAMED_ALTERNATIVES = 2
+
+
+def _unused_sources(state: ResearchState) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """The sources this answer read, and the ones it could have read and did not.
+
+    **B-093, and it exists because of B-060.** Asked which raw ingredients cost
+    the most, the agent was handed a purchase ledger *and* a stock-movement
+    table, used one, and said nothing — and the two disagree by more than a
+    factor of a hundred depending on which filter you believe. The failure was
+    never the SQL, which ran and was cited correctly. It was that a genuinely
+    ambiguous choice was made silently, so the trace showed *what* was chosen and
+    never that a choice existed.
+
+    Both halves come from the run's own record: `candidate_sources` is what
+    context offered that had figures to aggregate, and each execution carries the
+    tables the **validator** resolved, so this compares what was read against
+    what was available rather than against what the model said it read.
+
+    Empty when the question had one source, when nothing was read, and when
+    everything offered was used — which is most runs. A note on every answer is
+    a note nobody reads.
+    """
+    candidates = tuple(dict.fromkeys(state.candidate_sources))
+    if len(candidates) < 2:
+        return (), ()
+    read = {table for reference in state.executions if reference.ok for table in reference.tables}
+    used = tuple(name for name in candidates if name in read)
+    unused = tuple(name for name in candidates if name not in read)
+    if not used or not unused:
+        return (), ()
+    return used, unused
+
+
 def limitations_for(
     state: ResearchState,
     verdict: CriticVerdict | None,
@@ -172,6 +217,24 @@ def limitations_for(
             f"This answer relies on how your documents define {terms}. That "
             "definition was read as prose, so nothing checked that the query "
             "actually followed it — unlike a defined metric, which is enforced."
+        )
+
+    used, unused = _unused_sources(state)
+    if used:
+        # **Stated, not judged.** The claim is only that a choice existed and
+        # what it was between — not that the other source would disagree, which
+        # this run has no way to know without running it. That is the honest
+        # sentence, and it is the one missing from every reproduction of B-060.
+        named = list(unused[:MAX_NAMED_ALTERNATIVES])
+        if len(unused) > MAX_NAMED_ALTERNATIVES:
+            # Joined as a list item rather than appended as a clause: "a and b,
+            # and others" reads as an afterthought, "a, b and others" as a list.
+            named.append("others")
+        notes.append(
+            f"This answer reads {_and_list(used)}. The question also matched "
+            f"{_and_list(tuple(named))} — tables with figures it could have been "
+            "answered from, and not read here. A different source can give a "
+            "different number."
         )
 
     thin = [

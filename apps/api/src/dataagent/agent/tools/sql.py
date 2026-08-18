@@ -73,6 +73,13 @@ class RunSqlOut(BaseModel):
         description="Columns whose values were obscured by policy before you saw them.",
     )
     duration_ms: int | None = None
+    tables: list[str] = Field(
+        default_factory=list[str],
+        description=(
+            "The tables this statement read, as the validator resolved them "
+            "against the catalog — not as the model spelled them (B-093)."
+        ),
+    )
 
 
 async def _run_sql(context: ToolContext, params: BaseModel) -> BaseModel:
@@ -111,6 +118,10 @@ async def _run_sql(context: ToolContext, params: BaseModel) -> BaseModel:
         truncated=execution.truncated or len(frame.rows) > PREVIEW_ROWS,
         masked_columns=list(frame.masked_columns),
         duration_ms=execution.duration_ms,
+        # From the validator rather than from the SQL text: it resolved every
+        # name against the catalog, so this is what was *read*, whatever alias
+        # or casing the model wrote (B-093).
+        tables=[str(table) for table in execution.validated.tables],
     )
 
 

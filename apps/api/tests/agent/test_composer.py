@@ -47,6 +47,104 @@ def _draft(*, answered: bool = True, confidence: str = "high") -> FinalizeIn:
 # ---------------------------------------------------------------------------
 
 
+def _sourced(*, read: list[str], candidates: list[str], ok: bool = True) -> ResearchState:
+    """A run that was offered `candidates` and read `read`."""
+    state = _state(
+        ExecutionRef(execution_id="e1", row_count=3, ok=ok, summary="a row", tables=read)
+    )
+    state.candidate_sources = candidates
+    return state
+
+
+def test_an_answer_says_which_source_it_came_from_when_another_was_available() -> None:
+    """**B-093, and the reason it exists is B-060.** Asked which raw ingredients
+    cost the most, the agent was handed a purchase ledger *and* a stock-movement
+    table, used one, and said nothing — while the two disagree by more than a
+    factor of a hundred depending on which filter you believe. The SQL was fine
+    and cited correctly; what was missing is that a choice existed.
+    """
+    notes = limitations_for(
+        _sourced(
+            read=["public.fact_purchase"],
+            candidates=["public.fact_purchase", "public.fact_stock_move"],
+        ),
+        CriticVerdict(verdict="pass"),
+    )
+
+    assert len(notes) == 1
+    assert "public.fact_purchase" in notes[0]
+    assert "public.fact_stock_move" in notes[0]
+    assert "A different source can give a different number" in notes[0]
+
+
+def test_the_note_states_the_choice_and_does_not_judge_it() -> None:
+    """The run has no way to know the other source would disagree without
+    running it, so the sentence claims only that an alternative existed."""
+    notes = limitations_for(
+        _sourced(read=["public.a"], candidates=["public.a", "public.b"]),
+        CriticVerdict(verdict="pass"),
+    )
+
+    assert "wrong" not in notes[0] and "incorrect" not in notes[0]
+    assert "could have been answered from" in notes[0]
+
+
+def test_a_question_with_one_source_says_nothing() -> None:
+    """Most runs. A note on every answer is a note nobody reads — which is the
+    same argument the clean-run test above makes."""
+    assert (
+        limitations_for(
+            _sourced(read=["public.orders"], candidates=["public.orders"]),
+            CriticVerdict(verdict="pass"),
+        )
+        == ()
+    )
+
+
+def test_reading_every_source_offered_says_nothing() -> None:
+    """Nothing was passed over, so there is no choice to disclose."""
+    assert (
+        limitations_for(
+            _sourced(read=["public.a", "public.b"], candidates=["public.a", "public.b"]),
+            CriticVerdict(verdict="pass"),
+        )
+        == ()
+    )
+
+
+def test_a_dimension_the_answer_did_not_read_is_not_an_alternative() -> None:
+    """`candidate_sources` holds only tables with figures to aggregate, so a
+    dimension table that was retrieved and not read never reaches this. Asserted
+    here because the alternative — every unused table named — would put a
+    warning on every answer in the product."""
+    state = _sourced(read=["public.fact_purchase"], candidates=["public.fact_purchase"])
+    state.table_names = ["public.fact_purchase", "public.dim_ingredient"]
+
+    assert limitations_for(state, CriticVerdict(verdict="pass")) == ()
+
+
+def test_a_run_that_read_nothing_makes_no_claim_about_sources() -> None:
+    """A refused query read no table, so there is no "this answer reads X" to
+    write and nothing to compare it against."""
+    state = _sourced(read=[], candidates=["public.a", "public.b"], ok=False)
+
+    notes = limitations_for(state, CriticVerdict(verdict="pass"))
+
+    assert not any("could have been answered from" in note for note in notes)
+
+
+def test_only_two_alternatives_are_named() -> None:
+    """A broad retrieval is a broad retrieval, not five competing answers, and a
+    sentence listing all of them is one nobody finishes."""
+    notes = limitations_for(
+        _sourced(read=["public.a"], candidates=["public.a", "public.b", "public.c", "public.d"]),
+        CriticVerdict(verdict="pass"),
+    )
+
+    assert "and others" in notes[0]
+    assert "public.d" not in notes[0]
+
+
 def test_a_clean_run_has_nothing_to_add() -> None:
     """The common case, and a good one. A component that always finds something
     to say teaches people to stop reading what it says."""

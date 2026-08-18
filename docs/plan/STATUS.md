@@ -70,7 +70,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-19 by Claude Code (B-060 reproduced live and diagnosed — three causes, filed as B-092 and B-093, no fix in this PR; B-088's API half and B-090 merged)
+Last updated: 2026-08-19 by Claude Code (B-092 and B-093 built on the owner's choice — a card says which of a code column's values is typical, and an answer says which source it came from)
 
 ---
 
@@ -2020,9 +2020,22 @@ unexplained.
       to define the metric, which the semantic layer supports and B-088's API
       half now makes correctable; or asking the user, which is a product
       decision the V1 plan does not carry.
-      **Chosen on 2026-08-18: B-092 and B-093**, with the critic rule and
-      leaving it to a definition declined. They are built in the PR that follows
-      this one
+      **The owner chose B-092 and B-093** (2026-08-18), and declined the critic
+      rule and leaving it to a definition. Both are built:
+- [x] **B-092 (P1)** A card described an undocumented code column as an unranked
+      list of examples from the head of the table. The counts were measured,
+      stored and dropped one line before use. Now each value carries its share
+      and the line says how far the profile looked and that the rows were the
+      table's first — on the warehouse B-060 came from, `move_type` went from
+      `examples: DO, PI, UC, CN, GR` to `DO 78%, PI 17%, UC 4%, CN 0.2%,
+      GR 0.1%`. No migration: 0013 settled that a migration must not import
+      application code to regenerate prose, and this is not an exact string
+      transformation. A profile run rebuilds existing cards
+- [x] **B-093 (P1)** An answer now names the source it read and the comparable
+      ones it did not, when the question matched more than one. It **states the
+      choice and does not judge it**: the run cannot know the other source would
+      disagree without running it. Silent when one source was offered, when all
+      were read, and when nothing was read
 - [x] **B-090 (P1)** Nothing compared a developer's environment with the
       container's. `scripts/check_env.sh` now does, as a **declaration** rather
       than a diff — every key that stays on the host is named with its reason,
