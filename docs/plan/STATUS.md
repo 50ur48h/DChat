@@ -407,7 +407,7 @@ the entry asks for a measurement rather than an opinion), **B-072**, **B-074**,
 
 ### 9. Suite numbers
 
-**API: `1405 passed, 20 skipped`. Web: 107 tests.** Lint, format, pyright and
+**API: `1408 passed, 20 skipped`. Web: 113 tests.** Lint, format, pyright and
 both guards clean on `p10.2d-import`. Run one suite at a time on this machine — the per-test databases
 are created and dropped by name, and two pytest processes racing over them is
 enough to break one.

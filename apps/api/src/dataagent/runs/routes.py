@@ -153,6 +153,23 @@ class RunOut(BaseModel):
             "common case."
         ),
     )
+    definitions_applied: list[str] = Field(
+        default_factory=list[str],
+        description=(
+            "The semantic definitions that governed this answer — the ones whose "
+            "required filters the critic enforced against the SQL."
+        ),
+    )
+    definitions_available: int = Field(
+        default=0,
+        description=(
+            "How many active definitions this data source had when the question was "
+            "asked. Read together with `definitions_applied`: empty beside 0 means "
+            "nothing has been defined, empty beside a positive number means the "
+            "question named none of them — which is a fact about the wording, not "
+            "about the data, and is otherwise invisible."
+        ),
+    )
 
 
 class ExecutionOut(BaseModel):
@@ -395,6 +412,8 @@ async def get_run(
         cost_estimate=view.cost_estimate,
         model_usage=view.model_usage,
         limitations=view.limitations,
+        definitions_applied=view.definitions_applied,
+        definitions_available=view.definitions_available,
     )
 
 

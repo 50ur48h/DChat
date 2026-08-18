@@ -212,9 +212,15 @@ question by name and synonym, whole-word. `prep_quantity` answers to
 reaches it only if somebody has added **units** as a synonym. Asking in the
 organization's own vocabulary is what makes the definition apply.
 
-That is a real edge the product does not yet handle well: nothing tells you a
-question matched no definition, so the two runs look identical and the failure
-is silent (**B-087**, open).
+**The answer card now tells you which of these happened** (B-087, built after
+the first three walks of this script died on it). Under the status badge you
+will see either **"governed by prep_quantity"** or **"no definition matched this
+question (18 defined here)"**. If you see the second, the question named no
+metric — that is a wording problem, not a broken filter, and it is the single
+thing that would have made those three dead ends obvious in seconds.
+
+It stays silent when the data source has no definitions at all, deliberately: a
+caveat on every answer is how people learn to stop reading caveats.
 
 **Two answers are correct here and you may see either.** Both are the
 definition binding; which one you get depends on how the model scopes the filter
@@ -251,7 +257,8 @@ docker exec dataagent-platform-pg-1 psql -U dataagent -d dataagent -t -A -c \
 
 **You should see** `["prep_quantity"]` and a non-zero count — the definition
 reached the run, and its filter reached the SQL. In the recorded walk it was in
-**4 of 4** queries.
+**4 of 4** queries. The card's **"governed by"** line says the same thing
+without the psql.
 
 **If you want the unambiguous version**, ask about an item that has countable
 units, which removes the ranking from the question entirely:

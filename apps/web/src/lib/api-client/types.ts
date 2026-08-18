@@ -330,6 +330,18 @@ export interface Run {
    * the common case and a good one.
    */
   limitations: string[];
+  /**
+   * Which semantic definitions governed this answer, and how many there were to
+   * match (B-087).
+   *
+   * They mean nothing apart. Empty beside `0` is an organization that has
+   * defined nothing; empty beside `18` is a question that named none of them —
+   * a fact about the wording rather than the data, and otherwise invisible.
+   * Three gate walks read the second as a broken feature because nothing said
+   * which had happened.
+   */
+  definitions_applied?: string[];
+  definitions_available?: number;
   started_at: string | null;
   finished_at: string | null;
   failure_reason: string | null;
@@ -652,6 +664,11 @@ function isFinding(value: unknown): value is Finding {
   );
 }
 
+/** A field an older run simply does not have. Absent reads as "nothing to say". */
+function isOptionalStringArray(value: unknown): value is string[] | undefined {
+  return value === undefined || (Array.isArray(value) && value.every((e) => typeof e === "string"));
+}
+
 export function isRun(value: unknown): value is Run {
   return (
     isRecord(value) &&
@@ -665,7 +682,9 @@ export function isRun(value: unknown): value is Run {
     value.findings.every(isFinding) &&
     (value.limitations === undefined ||
       (Array.isArray(value.limitations) &&
-        value.limitations.every((note) => typeof note === "string")))
+        value.limitations.every((note) => typeof note === "string"))) &&
+    isOptionalStringArray(value.definitions_applied) &&
+    (value.definitions_available === undefined || typeof value.definitions_available === "number")
   );
 }
 

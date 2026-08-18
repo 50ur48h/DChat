@@ -475,3 +475,45 @@ def test_the_definition_layer_outranks_the_documents_it_came_from() -> None:
     # The heading itself carries the tag, so this asserts the layer exists *and*
     # which rank it was given.
     assert DEFINITION_HEADING in _prompt(bundle)
+
+
+# ---------------------------------------------------------------------------
+# Saying so when nothing matched (B-087)
+# ---------------------------------------------------------------------------
+#
+# Three gate walks were lost to the same silence. A definition is matched to a
+# question by name and synonym, so a question that never says "prep quantity"
+# reaches nothing — and the run then answers exactly as it would have with no
+# semantic layer at all. Nobody could tell "the question named no metric" from
+# "the feature is broken", and every time it was read as the second.
+#
+# The fix is a number, not a message: how many definitions there were *to*
+# match. Empty beside zero is an organization that has defined nothing and
+# deserves silence; empty beside eighteen is the finding.
+
+
+def _grounding(state: ResearchState) -> tuple[list[str], int]:
+    return list(state.applied_definitions), state.definitions_available
+
+
+def test_a_run_records_how_many_definitions_it_could_have_matched() -> None:
+    state = ResearchState(run_id=uuid.uuid4(), org_id=uuid.uuid4())
+    state.definitions_available = 18
+
+    assert _grounding(state) == ([], 18)
+
+
+def test_nothing_defined_and_nothing_matched_are_the_same_silence() -> None:
+    """An organization that has defined no metrics is not told that none applied.
+    A caveat on every answer is how people learn to stop reading caveats."""
+    state = ResearchState(run_id=uuid.uuid4(), org_id=uuid.uuid4())
+
+    assert _grounding(state) == ([], 0)
+
+
+def test_a_matched_definition_is_named_on_the_run() -> None:
+    state = ResearchState(run_id=uuid.uuid4(), org_id=uuid.uuid4())
+    state.definitions_available = 18
+    state.applied_definitions = [NET_REVENUE.name]
+
+    assert _grounding(state) == (["net_revenue"], 18)

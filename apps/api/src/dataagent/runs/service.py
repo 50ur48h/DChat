@@ -225,6 +225,14 @@ class RunView:
     #: What this answer does not establish. Rendered beside the answer, never
     #: instead of it, and empty is both the common case and a good one.
     limitations: list[str] = field(default_factory=list[str])
+    #: Which semantic definitions governed this answer, and how many there were
+    #: to match (**B-087**). Both, because they mean nothing apart: an empty list
+    #: beside `0` is an organization that has defined nothing, and an empty list
+    #: beside `18` is a question that named none of them — and for three gate
+    #: walks in a row those two were indistinguishable, so a naming problem read
+    #: as a broken feature every time.
+    definitions_applied: list[str] = field(default_factory=list[str])
+    definitions_available: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -639,6 +647,7 @@ async def _run_view(session: AsyncSession, run: AgentRun) -> RunView:
         .scalars()
         .all()
     )
+    grounding = _grounding(run.state)
     return RunView(
         id=run.id,
         conversation_id=run.conversation_id,
@@ -661,7 +670,31 @@ async def _run_view(session: AsyncSession, run: AgentRun) -> RunView:
         cost_estimate=run.cost_estimate,
         model_usage=dict(run.model_usage),
         limitations=[str(note) for note in run.limitations],
+        # Read off the run's own persisted state rather than recomputed: what
+        # matters is what governed *this* run, and re-matching now would answer
+        # with today's definitions about yesterday's answer.
+        definitions_applied=grounding[0],
+        definitions_available=grounding[1],
     )
+
+
+def _grounding(state: object) -> tuple[list[str], int]:
+    """The definitions a run applied, and how many it could have (**B-087**).
+
+    Defensive about shape because `state` is a JSON column written by a model
+    of the loop that has changed before and will again: a run recorded before
+    this field existed must render as "nothing to say", never as an error on a
+    page whose whole job is explaining what happened.
+    """
+    if not isinstance(state, dict):
+        return [], 0
+    stored = cast("dict[str, object]", state)
+    applied = stored.get("applied_definitions")
+    available = stored.get("definitions_available")
+    names = (
+        [str(name) for name in cast("list[object]", applied)] if isinstance(applied, list) else []
+    )
+    return names, available if isinstance(available, int) else 0
 
 
 async def get_run(
