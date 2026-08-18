@@ -133,18 +133,13 @@ First, read the sentence above the buttons **before touching anything**:
 
 and the button says **Accept as prose**.
 
-Now, on that card, set **Also called** to:
+**Also called** is prefilled with what the import found — for this metric,
+*"Prep quantity"*. Leave it alone; step 6 asks for the metric by that name, so
+nothing needs adding. (The field is there because an imported metric answers
+only to its key and its own label, which is rarely how anyone asks — see B-085.
+It is not needed for this walk.)
 
-```
-units, units sold
-```
-
-*This is what makes step 6 work.* The definition has to answer to a word the
-question contains, and the question asks about **units**. The field is prefilled
-with whatever the import found, so with the Names column mapped you are adding
-to real synonyms rather than supplying the only ones.
-
-Then fill the filter editor on the same card:
+Fill the filter editor on the card:
 
 | Field | Value |
 |---|---|
@@ -167,8 +162,7 @@ reads "Accept as prose", the filter did not stage: check that Table, Column and
 Values are all filled and press **Add filter** again.
 
 **You should see** the card leave the queue and appear under **In force** with a
-green **enforced** badge, its filter listed, and *"Also called: units, units
-sold"*.
+green **enforced** badge and its filter listed.
 
 **Check before moving on.** Under **In force**, the badge must be green
 **enforced** and not grey **prose only**. A grey badge means no filter was
@@ -206,14 +200,21 @@ English, as **G_ROWROLE**, marked `enforced = 0`.
 
 ### 6. The same question, with the definition binding — **the after**
 
-Ask **the same question as step 5**, word for word:
+Ask, against the same source:
 
-> Which item brings in the most sales revenue, and how many units of it did we sell?
+> Which item brings in the most sales revenue, and **what is the prep quantity
+> for it**?
 
-It reaches the definition now because you gave it the synonym **units** in
-step 4. (The original script asked a differently-worded question here to force
-the match; with the Names column and Also called filled, the same question works
-both times, which is the comparison worth having.)
+**The wording is load-bearing and the reason is worth understanding, because it
+is a limitation of the product and not a trick.** A definition is matched to a
+question by name and synonym, whole-word. `prep_quantity` answers to
+*"prep quantity"* and nothing else, so step 5's phrasing — *"how many units"* —
+reaches it only if somebody has added **units** as a synonym. Asking in the
+organization's own vocabulary is what makes the definition apply.
+
+That is a real edge the product does not yet handle well: nothing tells you a
+question matched no definition, so the two runs look identical and the failure
+is silent (**B-087**, open).
 
 **You should see** an answer naming a **different item** with **real unit
 numbers**. The equivalent run recorded during development answered:
