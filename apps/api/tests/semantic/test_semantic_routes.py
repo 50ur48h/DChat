@@ -507,6 +507,338 @@ async def test_a_definition_from_another_organization_is_a_404(
 
 
 # ---------------------------------------------------------------------------
+# Correcting one, which used to require psql (B-088)
+# ---------------------------------------------------------------------------
+
+
+async def _active_definition(api: Api, org_id: str, source_id: str) -> dict[str, Any]:
+    """One definition in force, written by hand and binding nothing yet."""
+    _, created = await api.call(
+        "POST",
+        f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions",
+        "alice",
+        {
+            "name": "listed value",
+            "description": "What everything we list is worth.",
+            "synonyms": ["stock value"],
+        },
+    )
+    return dict(created)
+
+
+async def test_an_admin_gives_an_active_definition_the_filter_it_should_have_had(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """**B-088, the whole of it.** The likeliest moment to get a filter wrong is
+    the first time you write one, which is exactly when this product used to lock
+    you out: no edit, no un-accept, and re-accepting a 404. The only way back was
+    deleting the row in psql."""
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+    definition = await _active_definition(api, org_id, source_id)
+    assert definition["binds"] is False
+
+    status, edited = await api.call(
+        "PATCH",
+        f"{base}/{definition['id']}",
+        "alice",
+        {
+            "required_filters": [
+                {"table": "products", "column": "price", "op": "gt", "values": ["0"]}
+            ]
+        },
+    )
+
+    assert status == 200
+    assert edited["binds"] is True
+    assert edited["version"] == 2
+
+    _, active = await api.call("GET", base, "alice")
+    assert active[0]["required_filters"][0]["column"] == "price"
+    # The rest of the definition is untouched: an Admin fixing a filter did not
+    # have to resend a description, which is where a description loses a sentence.
+    assert active[0]["description"] == definition["description"]
+    assert active[0]["synonyms"] == definition["synonyms"]
+
+
+async def test_an_edit_is_validated_exactly_as_acceptance_is(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """And the definition is left exactly as it was.
+
+    A correction is not more trustworthy than the original, so it meets the same
+    catalog check — and a refused edit must not half-apply, because a definition
+    that is active with a filter matching nothing is the worst of both states.
+    """
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+    definition = await _active_definition(api, org_id, source_id)
+
+    status, body = await api.call(
+        "PATCH",
+        f"{base}/{definition['id']}",
+        "alice",
+        {
+            "description": "Corrected.",
+            "required_filters": [
+                {"table": "products", "column": "invented", "op": "eq", "values": ["1"]}
+            ],
+        },
+    )
+
+    assert status == 400
+    assert "invented" in body["detail"]
+
+    _, active = await api.call("GET", base, "alice")
+    assert active[0]["description"] == definition["description"]
+    assert active[0]["version"] == 1
+
+
+async def test_an_empty_filter_list_stops_the_enforcement_and_keeps_the_prose(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """The other direction, and the one that matters most in practice: a filter
+    that turned out to be wrong has to be removable through the product, or the
+    answer to a false block is once again the database."""
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+    definition = await _active_definition(api, org_id, source_id)
+    await api.call(
+        "PATCH",
+        f"{base}/{definition['id']}",
+        "alice",
+        {
+            "required_filters": [
+                {"table": "products", "column": "price", "op": "gt", "values": ["0"]}
+            ]
+        },
+    )
+
+    status, unbound = await api.call(
+        "PATCH", f"{base}/{definition['id']}", "alice", {"required_filters": []}
+    )
+
+    assert status == 200
+    assert unbound["binds"] is False
+    assert unbound["required_filters"] == []
+    assert unbound["description"] == definition["description"]
+
+
+async def test_omitting_a_field_leaves_it_alone_and_null_clears_the_formula(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """The one place where absent and null differ, asserted because it is the
+    one place a partial update can silently lose something."""
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+    _, created = await api.call(
+        "POST",
+        base,
+        "alice",
+        {
+            "name": "listed value",
+            "description": "What everything we list is worth.",
+            "expression": "sum(products.price)",
+            "synonyms": ["stock value"],
+        },
+    )
+
+    _, kept = await api.call(
+        "PATCH", f"{base}/{created['id']}", "alice", {"description": "Worth, at list price."}
+    )
+    assert kept["expression"] == "sum(products.price)"
+    assert kept["synonyms"] == ["stock value"]
+
+    _, cleared = await api.call("PATCH", f"{base}/{created['id']}", "alice", {"expression": None})
+    assert cleared["expression"] is None
+    assert cleared["description"] == "Worth, at list price."
+
+
+async def test_editing_a_proposal_is_a_404(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """A proposal is accepted, not edited — and `accept` already takes the
+    filters and synonyms. Two routes into the same act would eventually disagree
+    about which one validates."""
+    await _metric_table(isolated_customer_database)
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+    _, proposed = await api.call("POST", f"{base}/import", "alice", _import_body())
+
+    status, _ = await api.call(
+        "PATCH", f"{base}/{proposed[0]['id']}", "alice", {"description": "Rewritten."}
+    )
+
+    assert status == 404
+
+
+async def test_retiring_a_definition_stops_it_binding_without_forgetting_it(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+    definition = await _active_definition(api, org_id, source_id)
+
+    status, _ = await api.call("DELETE", f"{base}/{definition['id']}", "alice")
+
+    assert status == 204
+    _, active = await api.call("GET", base, "alice")
+    assert active == []
+
+    # Retiring it twice is a 404: it is no longer in force, and a second call
+    # must not read as success. Editing it afterwards is a 404 for the same
+    # reason — history is not edited.
+    status, _ = await api.call("DELETE", f"{base}/{definition['id']}", "alice")
+    assert status == 404
+    status, _ = await api.call(
+        "PATCH", f"{base}/{definition['id']}", "alice", {"description": "Rewritten."}
+    )
+    assert status == 404
+
+
+async def test_a_definitions_history_says_what_it_required_at_each_version(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """**Why versioning is part of B-088 rather than a later nicety.** A
+    definition binds, so *"what did this metric require when that answer was
+    written"* is a question about whether an answer was right. An overwrite makes
+    it unanswerable, and the moment editing ships is the moment unrecorded edits
+    start accumulating (D-036)."""
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+    definition = await _active_definition(api, org_id, source_id)
+    await api.call(
+        "PATCH",
+        f"{base}/{definition['id']}",
+        "alice",
+        {
+            "required_filters": [
+                {"table": "products", "column": "price", "op": "gt", "values": ["0"]}
+            ]
+        },
+    )
+    await api.call("DELETE", f"{base}/{definition['id']}", "alice")
+
+    status, history = await api.call("GET", f"{base}/{definition['id']}/versions", "alice")
+
+    assert status == 200
+    assert [item["version"] for item in history] == [1, 2, 3]
+    assert [item["change"] for item in history] == ["created", "updated", "retired"]
+    # Version 1 bound nothing; version 2 is where it started to.
+    assert history[0]["required_filters"] == []
+    assert history[1]["required_filters"][0]["column"] == "price"
+    assert history[2]["status"] == "retired"
+    assert all(item["changed_by"] for item in history), "a version says who made it"
+
+
+async def test_an_edit_that_changes_nothing_writes_no_version(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """A version that says the same as the one before it is noise in the only
+    history anybody consults under suspicion."""
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+    definition = await _active_definition(api, org_id, source_id)
+
+    status, unchanged = await api.call(
+        "PATCH", f"{base}/{definition['id']}", "alice", {"description": definition["description"]}
+    )
+
+    assert status == 200
+    assert unchanged["version"] == 1
+    _, history = await api.call("GET", f"{base}/{definition['id']}/versions", "alice")
+    assert [item["version"] for item in history] == [1]
+
+
+async def test_an_accepted_proposal_starts_its_history_where_it_took_effect(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """A proposal is not a version: it binds nothing while it waits, and
+    numbering sentences an Admin has not agreed to would make version 1 mean two
+    different things."""
+    await _metric_table(isolated_customer_database)
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+    _, proposed = await api.call("POST", f"{base}/import", "alice", _import_body())
+    definition_id = proposed[0]["id"]
+
+    _, before = await api.call("GET", f"{base}/{definition_id}/versions", "alice")
+    assert before == []
+
+    await api.call("POST", f"{base}/{definition_id}/accept", "alice", {"required_filters": []})
+
+    _, history = await api.call("GET", f"{base}/{definition_id}/versions", "alice")
+    assert [(item["version"], item["change"]) for item in history] == [(1, "accepted")]
+
+
+async def test_every_decision_about_a_definition_lands_in_the_audit_log(
+    api: Api,
+    app_database: URL,
+    isolated_customer_database: CustomerDatabase,
+) -> None:
+    """An edit changes what the platform enforces on generated SQL, so it is
+    Admin work that has to be answerable for — and a trail recording edits but
+    not the acceptance that preceded them is half a trail.
+
+    Asserted on ``audit_log`` rather than on a mock, because that row is what an
+    auditor would look for."""
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+    definition = await _active_definition(api, org_id, source_id)
+    await api.call(
+        "PATCH", f"{base}/{definition['id']}", "alice", {"description": "Worth, at list price."}
+    )
+    await api.call("DELETE", f"{base}/{definition['id']}", "alice")
+
+    engine = create_async_engine(app_database)
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(
+                text("SELECT set_config('app.org_id', :org, false)"), {"org": org_id}
+            )
+            rows = (
+                await connection.execute(
+                    text("SELECT action, details FROM audit_log WHERE object_id = :id ORDER BY id"),
+                    {"id": definition["id"]},
+                )
+            ).fetchall()
+    finally:
+        await engine.dispose()
+
+    assert [row[0] for row in rows] == [
+        "semantic.definition_created",
+        "semantic.definition_updated",
+        "semantic.definition_retired",
+    ]
+    updated = next(row[1] for row in rows if row[0] == "semantic.definition_updated")
+    # Which fields moved and which version to read — not the values. The version
+    # row holds the content, and copying a customer's own literals into a second
+    # table would widen where they live for no gain.
+    assert updated["changed"] == ["description"]
+    assert updated["version"] == 2
+
+
+async def test_a_definition_in_another_organization_cannot_be_edited(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """Not a filtered view of somebody else's definition — an absent one."""
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    definition = await _active_definition(api, org_id, source_id)
+
+    _, other = await api.call("POST", "/v1/orgs", "dave", {"name": "Globex"})
+    other_org = str(other["org_id"])
+
+    status, _ = await api.call(
+        "PATCH",
+        f"/v1/orgs/{other_org}/data-sources/{source_id}/definitions/{definition['id']}",
+        "dave",
+        {"description": "Ours now."},
+    )
+
+    assert status == 404
+
+
+# ---------------------------------------------------------------------------
 # Verified queries: approved examples, judged but never run
 # ---------------------------------------------------------------------------
 

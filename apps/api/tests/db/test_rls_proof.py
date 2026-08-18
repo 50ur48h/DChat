@@ -71,6 +71,7 @@ class SeededOrgs:
     b_conversation: uuid.UUID
     b_run: uuid.UUID
     b_document: uuid.UUID
+    b_definition: uuid.UUID
 
 
 async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
@@ -317,20 +318,37 @@ async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
                         "text": f"{name} counts revenue net of cancelled orders.",
                     },
                 )
+                definition_id = (
+                    await connection.execute(
+                        text(
+                            "INSERT INTO semantic_definitions "
+                            "(org_id, data_source_id, name, description, required_filters) VALUES "
+                            "(:org, :ds, 'net_revenue', :description, CAST(:filters AS jsonb)) "
+                            "RETURNING id"
+                        ),
+                        {
+                            "org": org_id,
+                            "ds": data_source_id,
+                            "description": f"{name} excludes cancelled orders from revenue.",
+                            "filters": (
+                                '[{"table": "orders", "column": "status", '
+                                '"op": "not_in", "values": ["cancelled"]}]'
+                            ),
+                        },
+                    )
+                ).scalar_one()
                 await connection.execute(
                     text(
-                        "INSERT INTO semantic_definitions "
-                        "(org_id, data_source_id, name, description, required_filters) VALUES "
-                        "(:org, :ds, 'net_revenue', :description, CAST(:filters AS jsonb))"
+                        "INSERT INTO semantic_definition_versions "
+                        "(org_id, definition_id, version, name, kind, description, "
+                        " status, change) VALUES "
+                        "(:org, :definition, 1, 'net_revenue', 'metric', :description, "
+                        " 'active', 'created')"
                     ),
                     {
                         "org": org_id,
-                        "ds": data_source_id,
+                        "definition": definition_id,
                         "description": f"{name} excludes cancelled orders from revenue.",
-                        "filters": (
-                            '[{"table": "orders", "column": "status", '
-                            '"op": "not_in", "values": ["cancelled"]}]'
-                        ),
                     },
                 )
                 await connection.execute(
@@ -354,6 +372,7 @@ async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
                         conversation=conversation_id,
                         run=run_id,
                         document=document_id,
+                        definition=definition_id,
                     )
     finally:
         await engine.dispose()
@@ -368,6 +387,7 @@ async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
         b_conversation=catalog["conversation"],
         b_run=catalog["run"],
         b_document=catalog["document"],
+        b_definition=catalog["definition"],
     )
 
 
@@ -483,6 +503,15 @@ def _forged_insert(table: str, seeded: SeededOrgs) -> str:
             "INSERT INTO semantic_definitions "
             "(org_id, data_source_id, name, description) VALUES "
             f"('{other_org}', '{seeded.b_data_source}', 'forged_metric', 'forged')"
+        ),
+        # Version 2, because `(definition_id, version)` is unique: a forged row
+        # colliding on that constraint would be refused before the policy was
+        # consulted, and the test would pass having proved nothing.
+        "semantic_definition_versions": (
+            "INSERT INTO semantic_definition_versions "
+            "(org_id, definition_id, version, name, kind, description, status, change) VALUES "
+            f"('{other_org}', '{seeded.b_definition}', 2, 'net_revenue', 'metric', "
+            "'forged', 'active', 'updated')"
         ),
         # A different question from the seeded one, because
         # `(data_source_id, question)` is unique — a forged row colliding on
@@ -828,5 +857,46 @@ async def test_agent_events_is_append_only_for_the_api_role(
     for forbidden in (
         "UPDATE agent_events SET payload = '{\"tampered\": true}'::jsonb",
         "DELETE FROM agent_events",
+    ):
+        await _expect_failure(app_database, forbidden, org_id=seeded.a, match="permission denied")
+
+
+async def test_definition_versions_are_append_only_for_the_api_role(
+    app_database: URL, migrated_database: URL
+) -> None:
+    """A history the application can rewrite is not a history (**B-088**).
+
+    ``semantic_definition_versions`` exists to answer *"what did this metric
+    require when that answer was written"*, and a definition binds — its filters
+    are enforced against the AST of generated SQL. So it carries the same grant
+    lock ``audit_log`` and ``agent_events`` do: the application role may append
+    and may never rewrite. Revision 0002's ALTER DEFAULT PRIVILEGES grants all
+    four verbs on later tables, so 0022 revokes rather than merely declining to
+    grant — and this is what proves the revoke landed.
+    """
+    seeded = await _seed_two_orgs(migrated_database)
+
+    connection = await _connect(app_database, seeded.a)
+    try:
+        definition_id = (
+            await connection.execute(text("SELECT id FROM semantic_definitions LIMIT 1"))
+        ).scalar_one()
+        await connection.execute(
+            text(
+                "INSERT INTO semantic_definition_versions "
+                "(org_id, definition_id, version, name, kind, description, status, change) "
+                "VALUES (:org, :definition, 2, 'net_revenue', 'metric', 'corrected', "
+                "'active', 'updated')"
+            ),
+            {"org": seeded.a, "definition": definition_id},
+        )
+        await connection.commit()
+    finally:
+        await connection.close()
+        await connection.engine.dispose()
+
+    for forbidden in (
+        "UPDATE semantic_definition_versions SET description = 'rewritten'",
+        "DELETE FROM semantic_definition_versions",
     ):
         await _expect_failure(app_database, forbidden, org_id=seeded.a, match="permission denied")

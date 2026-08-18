@@ -25,8 +25,18 @@ Current position: **Phases 0–5 and 7–10 signed off. Phase 6 merged, its gate
                   definition that bound the critic and never reached the model —
                   would have made the gate demo pass for the exact opposite of
                   its intended reason.
-Next step:        **Phase 11, not yet started** (owner: *"don't start Phase 11"*,
-                  2026-08-18). It opens with **two P1s the owner scheduled**,
+Next step:        **Phase 11 is under way.** **B-088's API half is built** —
+                  the edit route: `PATCH`, `DELETE` (retire) and
+                  `GET .../versions`, validated as `accept` is, Admin-only,
+                  audited, and **versioned** (D-036, migration 0022) because a
+                  definition binds and an overwrite makes *"what did it require
+                  when that answer was written"* unanswerable. Next: the same
+                  on the Definitions screen, then **B-090**, then
+                  **B-060** — which the owner asked to be *reproduced and
+                  explained before anything is built*, since it is about answer
+                  stability rather than a missing feature.
+                  The original scheduling note follows. It opened with **two P1s
+                  the owner scheduled**,
                   both of them guards against a class of silence rather than
                   features:
                   **1. B-088 — an accepted definition cannot be edited.** No
@@ -58,15 +68,16 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-18 by Claude Code (session end — Phase 10 signed off and merged; Phase 11 scheduled and **not started**; B-090 filed as its second P1)
+Last updated: 2026-08-18 by Claude Code (B-088, API half: definitions can be corrected, retired and read back version by version — D-036, migration 0022)
 
 ---
 
 ## ⚠ Session end, 2026-08-18 — start here
 
-**Phase 10 is signed off and merged. Phase 11 is scheduled and deliberately not
-started** (owner's instruction). `main` is at #73; every phase branch is
-deleted; nothing is in flight.
+**Phase 10 is signed off and merged. Phase 11 has since started** on the owner's
+instruction of 2026-08-18, in the order they set: **B-088, then B-090, then
+B-060, then WP11.1.** The paragraphs below were written when nothing was in
+flight and are kept because their three warnings are still the three warnings.
 
 **Do this first:** the ritual in plan §7.1 — `git fetch --all && git checkout
 main && git pull`, then `gh pr list`. Then read the **Next step** block at the
@@ -75,9 +86,10 @@ guard rather than a feature.
 
 **Three things a new session will get wrong without being told.**
 
-1. **`make migrate` before anything runs.** Revision **0021**
-   (`verified_queries`) landed this phase, and a missing revision surfaces as a
-   CHECK violation mid-run rather than as a migration error.
+1. **`make migrate` before anything runs.** Revision **0022**
+   (`semantic_definition_versions`, B-088) is the head as of this line, and a
+   missing revision surfaces as a CHECK violation mid-run rather than as a
+   migration error.
 2. **`docker compose … restart web` after editing the web app**, and verify what
    is *served* rather than what is on disk — the recipe is in CLAUDE.md. This
    caught me twice in one session, once while proving a fix the owner was
@@ -1987,18 +1999,29 @@ unexplained.
       here by the owner on 2026-08-18**, having hit it mid-walk: *"a semantic
       layer whose definitions are write-once will not survive real use."* The
       likeliest moment to get a filter wrong is the first time you write one,
-      which is exactly when the product locks you out; the only way back today
-      is deleting the row in `psql` and importing again. Wants
-      `PATCH .../definitions/{id}` for an **active** definition —
-      `required_filters`, `synonyms`, `description` — validated against the
-      catalog exactly as `accept` is, Admin-only, and **audited**, because it
-      changes what the platform enforces on generated SQL. Retiring an active
-      definition has the same shape and the same absence, so it belongs in the
-      same route or a sibling. Decide at the same time whether an edit is
-      **versioned** rather than overwriting: arch 5.4 says definitions are
-      *"validated against the catalog at save time and versioned"*, nothing
-      versions anything yet, and a run that cited a definition last month cannot
-      show what it said at the time
+      which is exactly when the product locked you out; the only way back was
+      deleting the row in `psql` and importing again.
+      **Split in two, because the whole of it is past §1.1's size target. The
+      item stays open until both halves are merged.**
+      **The API half is built and is this PR.** `PATCH .../definitions/{id}`
+      edits an **active** definition's `description`, `expression`, `synonyms`
+      and `required_filters`; `DELETE` retires one; `GET .../versions` says what
+      it has said. Validated against the catalog exactly as `accept` is,
+      Admin-only by the role matrix, and **audited** — all five decisions now
+      write an `audit_log` row, not only the two this item named. Versioning was
+      **decided rather than deferred** (**D-036**, migration 0022): a definition
+      binds, so *"what did it require when that answer was written"* is a
+      question about whether an answer was right, and the day editing ships is
+      the day every overwrite starts costing one. `semantic_definition_versions`
+      is append-only in the database — 0022 revokes UPDATE and DELETE from
+      `dataagent_app`, and `rls_proof` proves it.
+      **The web half is next**: editing and retiring on the Definitions screen,
+      so the fix is reachable without curl. The API is what the gate walk
+      needed; the screen is what makes it a product
+- [ ] B-091 (P2) a run records the definitions that governed it by **name**, so
+      a citation cannot be resolved to the version in force at the time. Harmless
+      while definitions were write-once; B-088's API half is what ends that.
+      Filed with the versioning that makes it fixable
 - [ ] WP11.1 Chart tool (validated Vega-Lite) + client renderer
       — carries **B-048** (owner, at the Phase 7 sign-off): the chart belongs
       **inside the answer card**, and its spec must be openable the way the SQL

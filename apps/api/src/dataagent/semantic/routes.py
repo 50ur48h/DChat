@@ -1,8 +1,8 @@
 """Semantic layer routes (architecture Part 10.2, plan WP10.2d).
 
-Five verbs, and **every one of them is Admin**. That is the unusual part of this
-module and the part worth defending, because nothing else in the product locks
-its *read* side to one role.
+**Every verb here is Admin**, the read side included. That is the unusual part of
+this module and the part worth defending, because nothing else in the product
+locks its *read* side to one role.
 
 An accepted definition **constrains generated SQL**. By D-033 a structured
 definition does not merely inform the model, it binds it: `required_filters`
@@ -30,6 +30,17 @@ and `accept` takes a body — the filters — that `reject` has no meaning for. 
 single status PATCH would also make the interesting one, accepting *with*
 filters, look like a routine update.
 
+**PATCH is for an active definition's content, and `DELETE` retires it**
+(**B-088**). Until they existed a definition was write-once — no edit, no
+un-accept, re-accepting a 404 — and the only way to correct a filter was to
+delete the row in psql and import again. The two verbs are separate for the same
+reason accept and reject are: changing what a metric requires and taking it out
+of force are different decisions, and the second one is not a field. Both are
+validated exactly as `accept` is, both are audited, and both append to the
+definition's history, because an edit changes what the platform enforces on
+generated SQL and *"what did this require when that answer was written"* has to
+stay answerable (D-036).
+
 Errors are mapped so that a mistake an Admin can fix says so. A filter naming a
 column this database does not have is a **400** carrying the column's name, not
 a 500 and not a silent success that fails during somebody's run later — which
@@ -39,6 +50,7 @@ is the whole reason `validate` runs at the door.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
@@ -53,7 +65,13 @@ from dataagent.datasources.service import NotFoundError
 from dataagent.semantic import definitions as definitions_service
 from dataagent.semantic import proposals as proposals_service
 from dataagent.semantic import verified as verified_service
-from dataagent.semantic.definitions import FILTER_OPERATORS, Definition, DefinitionError
+from dataagent.semantic.definitions import (
+    FILTER_OPERATORS,
+    KEEP,
+    Definition,
+    DefinitionError,
+    Version,
+)
 from dataagent.semantic.proposals import ColumnMapping, Proposal
 from dataagent.semantic.verified import VerifiedQuery, VerifiedQueryError
 
@@ -96,6 +114,13 @@ class DefinitionOut(BaseModel):
             "and an answer resting on it says so."
         )
     )
+    version: int = Field(
+        default=1,
+        description=(
+            "Which state of this definition is in force. Bumped by every edit, "
+            "and the key into its history (B-088)."
+        ),
+    )
 
     @classmethod
     def of(cls, definition: Definition) -> DefinitionOut:
@@ -113,6 +138,7 @@ class DefinitionOut(BaseModel):
             ],
             synonyms=list(definition.synonyms),
             binds=bool(definition.required_filters),
+            version=definition.version,
         )
 
 
@@ -197,6 +223,77 @@ class AcceptIn(BaseModel):
             "name is a metric nobody gets (B-085)."
         ),
     )
+
+
+class UpdateDefinitionIn(BaseModel):
+    """A correction to an active definition (**B-088**).
+
+    **Every field is optional and omission means "leave it alone."** A partial
+    update is the shape this needs: an Admin fixing a filter should not have to
+    resend a description they did not touch, because the resend is where the
+    description quietly loses a sentence.
+
+    `name` is absent on purpose. It is what a question is matched against and
+    what a run's trace recorded, so renaming would silently change which
+    questions the definition answers and orphan every citation of it. What people
+    call the metric is `synonyms`, which is what the matcher actually reads.
+    """
+
+    description: str | None = Field(default=None, min_length=1, max_length=4000)
+    expression: str | None = Field(
+        default=None,
+        max_length=4000,
+        description=(
+            "Send null to clear the formula. Omitting the field keeps it — the "
+            "one place here where null and absent differ."
+        ),
+    )
+    synonyms: list[str] | None = Field(
+        default=None, description="A list replaces what is there; omit to keep it."
+    )
+    required_filters: list[RequiredFilterModel] | None = Field(
+        default=None,
+        description=(
+            "A list replaces what is enforced. An empty list is a real request — "
+            "stop enforcing this and keep the prose — and an Admin has to be able "
+            "to make it, since the alternative way to undo a wrong filter is psql."
+        ),
+    )
+
+
+class VersionOut(BaseModel):
+    """One state a definition has been in force in (**B-088**, arch 5.4)."""
+
+    version: int
+    change: str = Field(description=" | ".join(("created", "accepted", "updated", "retired")))
+    name: str
+    description: str
+    expression: str | None = None
+    required_filters: list[RequiredFilterModel] = Field(default_factory=list[RequiredFilterModel])
+    synonyms: list[str] = Field(default_factory=list[str])
+    status: str
+    changed_by: uuid.UUID | None = None
+    changed_at: datetime
+
+    @classmethod
+    def of(cls, version: Version) -> VersionOut:
+        return cls(
+            version=version.version,
+            change=version.change,
+            name=version.name,
+            description=version.description,
+            expression=version.expression,
+            required_filters=[
+                RequiredFilterModel(
+                    table=item.table, column=item.column, op=item.op, values=list(item.values)
+                )
+                for item in version.required_filters
+            ],
+            synonyms=list(version.synonyms),
+            status=version.status,
+            changed_by=version.changed_by,
+            changed_at=version.changed_at,
+        )
 
 
 class VerifiedQueryOut(BaseModel):
@@ -479,6 +576,105 @@ async def accept_proposal(
     return DefinitionOut.of(definition)
 
 
+@router.patch(
+    "/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}",
+    response_model=DefinitionOut,
+    summary="Correct an active definition",
+)
+async def update_definition(
+    body: UpdateDefinitionIn,
+    context: Annotated[RequestContext, Depends(require_admin)],
+    data_source_id: DataSourceId,
+    definition_id: DefinitionId,
+) -> DefinitionOut:
+    """**B-088.** The route that makes an Admin's decision revisable.
+
+    Validated exactly as `accept` is — the same catalog check, the same 400
+    naming the column — because an edit changes what the platform enforces on
+    generated SQL and there is no reason a correction should be trusted more
+    than the original. A refused edit changes nothing: the definition is left as
+    it was rather than half-applied.
+
+    **Omitted is not empty**, and the distinction is load-bearing. A field left
+    out keeps its value; a list replaces one. `expression: null` clears the
+    formula, which is the one place where null and absent differ, and it differs
+    because a metric with no formula is a real thing to say.
+
+    Only an **active** definition is editable. A proposal is accepted, not
+    edited, and the accept route already takes the filters and synonyms; a
+    retired one is history and editing history is the thing this design refuses.
+    Both are a 404 for the same reason: there is no active definition there.
+    """
+    sent = body.model_fields_set
+    try:
+        definition = await definitions_service.update(
+            org_id=context.org_id,
+            definition_id=definition_id,
+            description=body.description,
+            # The sentinel, so "clear the formula" and "do not touch it" are two
+            # requests rather than one. Every other field reads absence off
+            # `None` because none of them has a meaningful null.
+            expression=body.expression if "expression" in sent else KEEP,
+            synonyms=body.synonyms,
+            required_filters=(
+                None if body.required_filters is None else _filters(body.required_filters)
+            ),
+            actor_user_id=context.user_id,
+        )
+    except DefinitionError as error:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
+    except LookupError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such definition") from error
+    except (NotFoundError, NoCatalogError) as error:
+        raise _no_such_source(error) from error
+    return DefinitionOut.of(definition)
+
+
+@router.delete(
+    "/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Take a definition out of force",
+)
+async def retire_definition(
+    context: Annotated[RequestContext, Depends(require_admin)],
+    data_source_id: DataSourceId,
+    definition_id: DefinitionId,
+) -> None:
+    """Retired rather than deleted, like everything else in this layer.
+
+    The metric stops binding and stops reaching the prompt immediately; what it
+    said is kept, so an answer checked against it last month is still
+    explainable this month. Retiring it twice is a 404 — it is no longer in
+    force, and a second call must not read as success.
+    """
+    try:
+        await definitions_service.retire(
+            org_id=context.org_id, definition_id=definition_id, actor_user_id=context.user_id
+        )
+    except LookupError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such definition") from error
+
+
+@router.get(
+    "/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}/versions",
+    response_model=list[VersionOut],
+    summary="Everything this definition has said",
+)
+async def list_definition_versions(
+    context: Annotated[RequestContext, Depends(require_admin)],
+    data_source_id: DataSourceId,
+    definition_id: DefinitionId,
+) -> list[VersionOut]:
+    """Oldest first, because it reads as a life rather than as a feed.
+
+    An empty list is a real answer rather than a missing one: a definition
+    written before revision 0022 has no recorded history, and saying so plainly
+    beats implying one exists.
+    """
+    found = await definitions_service.versions_for(context.org_id, definition_id)
+    return [VersionOut.of(version) for version in found]
+
+
 @router.post(
     "/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}/reject",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -493,6 +689,8 @@ async def reject_proposal(
     answerable — and so a second import of the same table does not silently
     re-propose what an Admin has already turned down."""
     try:
-        await proposals_service.reject(org_id=context.org_id, definition_id=definition_id)
+        await proposals_service.reject(
+            org_id=context.org_id, definition_id=definition_id, actor_user_id=context.user_id
+        )
     except LookupError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such proposal") from error
