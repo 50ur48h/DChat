@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from conftest import DIMENSIONS, StubEmbedder, TwoOrgs, unit
 from dataagent.knowledge.ingest import DocumentView, ingest_document, reindex_document
-from dataagent.knowledge.retrieve import search_knowledge
+from dataagent.knowledge.retrieve import Passage, search_knowledge
 from dataagent.knowledge.store import LocalDocumentStore
 
 POLICY = b"""\
@@ -43,6 +43,18 @@ RECIPES = b"""\
 
 Prove the dough for twelve hours before shaping it.
 """
+
+
+async def _passages(**kwargs: object) -> list[Passage]:
+    """Just the passages, for the tests that are about what was found.
+
+    ``search_knowledge`` returns a `Retrieval` since B-073, because *how much of
+    the search ran* is a separate fact from *what it found*. Most tests here are
+    about the second, so they say so; the ones about the first call the real
+    function and read `arms` and `degraded`.
+    """
+    found = await search_knowledge(**kwargs)  # pyright: ignore[reportArgumentType]
+    return list(found.passages)
 
 
 async def _ingest(
@@ -83,8 +95,8 @@ async def test_two_organizations_asking_the_same_question_get_zero_cross_hits(
     await _ingest(orgs.a, store, POLICY, "Alpha revenue policy", embedder=embedder)
     await _ingest(orgs.b, store, POLICY, "Beta revenue policy", embedder=embedder)
 
-    a_hits = await search_knowledge(org_id=orgs.a, query="revenue", embedder=embedder)
-    b_hits = await search_knowledge(org_id=orgs.b, query="revenue", embedder=embedder)
+    a_hits = await _passages(org_id=orgs.a, query="revenue", embedder=embedder)
+    b_hits = await _passages(org_id=orgs.b, query="revenue", embedder=embedder)
 
     assert a_hits, "the organization's own document was not found"
     assert b_hits, "the organization's own document was not found"
@@ -107,7 +119,7 @@ async def test_an_organization_with_no_documents_finds_nothing(
     embedder = StubEmbedder(vector_for={"revenue": unit(0)})
     await _ingest(orgs.a, store, POLICY, "Alpha revenue policy", embedder=embedder)
 
-    assert await search_knowledge(org_id=orgs.b, query="revenue", embedder=embedder) == []
+    assert await _passages(org_id=orgs.b, query="revenue", embedder=embedder) == []
 
 
 @pytest.mark.rls_proof
@@ -164,7 +176,7 @@ async def test_text_is_searchable_before_it_is_embedded(
     with no embedding key gets — and what the backfill later finishes."""
     view = await _ingest(orgs.a, store, POLICY, "Revenue policy", embedder=None)
 
-    hits = await search_knowledge(org_id=orgs.a, query="cancelled orders")
+    hits = await _passages(org_id=orgs.a, query="cancelled orders")
 
     assert view.status == "indexed"
     assert view.embedded_count == 0
@@ -188,7 +200,7 @@ async def test_an_embedding_failure_keeps_the_text_and_says_what_happened(
     assert view.failure_reason is not None
     assert "not embedded" in view.failure_reason
     assert view.chunk_count > 0, "the text was thrown away"
-    assert await search_knowledge(org_id=orgs.a, query="cancelled orders"), (
+    assert await _passages(org_id=orgs.a, query="cancelled orders"), (
         "the stored text should still be findable"
     )
 
@@ -253,7 +265,7 @@ async def test_a_passage_can_name_where_it_came_from(
     of unknown origin arriving inside a prompt."""
     await _ingest(orgs.a, store, POLICY, "Revenue policy")
 
-    hits = await search_knowledge(org_id=orgs.a, query="cancelled refunded orders")
+    hits = await _passages(org_id=orgs.a, query="cancelled refunded orders")
 
     assert hits
     best = hits[0]
@@ -270,7 +282,7 @@ async def test_the_vector_arm_finds_what_the_words_do_not(
     embedder = StubEmbedder(vector_for={"cancelled": unit(0), "takings": unit(0)})
     await _ingest(orgs.a, store, POLICY, "Revenue policy", embedder=embedder)
 
-    hits = await search_knowledge(org_id=orgs.a, query="takings", embedder=embedder)
+    hits = await _passages(org_id=orgs.a, query="takings", embedder=embedder)
 
     assert hits, "nothing was found for a query sharing no words with the document"
     assert any(hit.found_by in {"vector", "both"} for hit in hits)
@@ -284,7 +296,7 @@ async def test_a_query_nobody_can_answer_returns_nothing_rather_than_anything(
     text into a prompt as though it were relevant."""
     await _ingest(orgs.a, store, RECIPES, "Kitchen handbook")
 
-    assert await search_knowledge(org_id=orgs.a, query="quarterly depreciation") == []
+    assert await _passages(org_id=orgs.a, query="quarterly depreciation") == []
 
 
 async def test_an_empty_query_costs_no_provider_call(
@@ -292,7 +304,7 @@ async def test_an_empty_query_costs_no_provider_call(
 ) -> None:
     embedder = StubEmbedder()
 
-    assert await search_knowledge(org_id=orgs.a, query="   ", embedder=embedder) == []
+    assert await _passages(org_id=orgs.a, query="   ", embedder=embedder) == []
     assert embedder.calls == 0
 
 
@@ -308,7 +320,7 @@ async def test_one_document_cannot_fill_the_whole_result(
     await _ingest(orgs.a, store, b"# Long policy\n\n" + sections, "Long policy")
     await _ingest(orgs.a, store, POLICY, "Short policy")
 
-    hits = await search_knowledge(org_id=orgs.a, query="cancelled orders excluded", limit=5)
+    hits = await _passages(org_id=orgs.a, query="cancelled orders excluded", limit=5)
 
     from collections import Counter
 
@@ -322,9 +334,7 @@ async def test_a_search_can_be_narrowed_to_one_document(
     await _ingest(orgs.a, store, POLICY, "Revenue policy")
     handbook = await _ingest(orgs.a, store, RECIPES, "Kitchen handbook")
 
-    hits = await search_knowledge(
-        org_id=orgs.a, query="dough orders revenue", document_id=handbook.id
-    )
+    hits = await _passages(org_id=orgs.a, query="dough orders revenue", document_id=handbook.id)
 
     assert hits
     assert {hit.document_id for hit in hits} == {handbook.id}

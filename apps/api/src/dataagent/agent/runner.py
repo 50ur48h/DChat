@@ -68,6 +68,7 @@ from dataagent.agent.tools.finalize import FINALIZE, FinalizeIn
 from dataagent.agent.tools.registry import ToolRegistry, default_registry
 from dataagent.config import Settings
 from dataagent.dal.policy import SourcePolicy
+from dataagent.knowledge import embeddings
 from dataagent.llm.base import LLMError
 from dataagent.runs import service as runs
 from dataagent.runs.events import EventWriter
@@ -161,6 +162,16 @@ async def execute_run(
         actor_user_id=actor_user_id,
         data_source_id=data_source_id,
         as_of=as_of,
+        # Resolved once for the run rather than per tool call, and from the
+        # settings this run was given rather than from the process — the same
+        # reason `execute_run` takes settings at all. None is an ordinary answer
+        # (no embedding model configured) and costs the run its vector arm, not
+        # its search (**B-073**). Called through the module rather than imported
+        # by name, which is what lets the test guard wrap the one door an
+        # embedder comes out of — the same reason `llm/service.py` says
+        # `registry.get_provider` rather than importing the function.
+        embedder=embeddings.get_embedder(settings),
+        settings=settings,
     )
 
     await runs.transition(org_id=org_id, run_id=run_id, status="running")

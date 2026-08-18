@@ -28,6 +28,9 @@ from typing import Protocol
 
 from pydantic import BaseModel
 
+from dataagent.config import Settings
+from dataagent.knowledge.embeddings import Embedder
+
 __all__ = [
     "RESULT_FRAME",
     "Tool",
@@ -99,6 +102,21 @@ class ToolContext:
     #: as an argument to `build_context` alone because a tool may one day need it
     #: too, and a second source of "now" is how this defect returns.
     as_of: date | None = None
+    #: How this run turns words into vectors, or None when the deployment has no
+    #: embedding model (**B-073**). It is here rather than resolved inside the
+    #: tool for the reason this whole class exists: a tool that could reach a
+    #: spending credential by any other route would be one no ceiling could see.
+    #: Everything it costs is charged to `run_id`, so D-019's cap counts an
+    #: embedding call exactly as it counts a chat call, and a run cannot spend
+    #: past its ceiling by spending somewhere the ceiling was not looking.
+    embedder: Embedder | None = None
+    #: The configuration this run was given, or None for the process default.
+    #: Here for the same reason `loop.research` and `plan_query` take it: a run
+    #: started by the eval harness must be bounded by the harness's ceiling
+    #: rather than by whatever the developer's `.env` happens to say, and a tool
+    #: that reads `get_settings()` for itself is a tool no caller can pin
+    #: (**B-032**).
+    settings: Settings | None = None
 
 
 @dataclass(frozen=True, slots=True)

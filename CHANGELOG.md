@@ -37,6 +37,14 @@ under "Unreleased", only for changes a user would notice.
   knowing its address.
 
 ### Fixed
+- Searching an organization's documents now really does look for meaning and not
+  only wording: nothing had ever been embedded, because no part of the
+  application built an embedder. Uploading fills it in, and re-indexing fills it
+  in for anything uploaded before.
+- When the search by meaning cannot run — no embedding model configured, or a
+  question that has spent its cost allowance — the wording search still answers
+  and says the other half did not run, instead of reporting that nothing has been
+  written down.
 - Asking a question in ordinary words now finds the tables it is about. Searching
   the catalog used to require every word of the question to appear in a table's
   description, so a real question matched nothing at all.

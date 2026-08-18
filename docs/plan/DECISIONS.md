@@ -4,6 +4,41 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-031 — An embedding is a spend like any other, and a refused one degrades the search
+Date: 2026-08-17 · Phase: 10 · PR: B-073
+Context: WP10.1 built hybrid retrieval and then called it from the agent's tool
+**without an embedder**, because putting one on `ToolContext` puts a spending
+capability inside the loop and neither guard around spending could see it:
+**D-019**'s per-run ceiling reads `usage_ledger` rows *for the run*, and the
+query embedding was charged to no run at all; **B-040**'s test guard wraps
+`registry.get_provider`, and an embedder does not come out of there. Retrieval
+therefore ran on its lexical arm alone (**B-073**), and the question this PR had
+to answer first is what should happen when the ceiling *does* see an embedding
+call and refuses it.
+Options: (a) let the tool fail, as a chat call does when the ceiling stops it;
+(b) run the lexical arm and return its passages silently; (c) run the lexical arm
+and **say** the other one did not.
+Decision: **(c)**, plus two structural halves — `embed_texts` takes a `run_id` and
+checks D-019's ceiling before **each batch**, so an embedding is metered and
+capped exactly as a completion is; and `get_embedder` becomes the one door an
+embedder comes out of, wrapped by the B-040 guard in the same fixture and with
+the same message as the provider door.
+Why not the others: **(a)** contradicts 8.5, which calls budget exhaustion *not a
+failure*, and it trades a working half of retrieval for consistency — the lexical
+arm has already been paid for and still answers. **(b)** is the worse failure of
+the two: a search that quietly halved itself returns *"nothing is written down
+about that"*, which reads as a fact about the customer's documents and invites a
+model to stop looking and answer from its own knowledge. `Retrieval.degraded`
+exists so the two cannot be confused, and the tool puts the degradation **before**
+the "nothing found" sentence for that reason.
+Consequences: **an unpriced embedding model under a ceiling is refused**, which is
+D-019's existing rule arriving through a new door — so `LLM_PRICES` must name the
+embedding model or every capped run silently loses its vector arm (`.env.example`
+says so). `search_knowledge` now returns a `Retrieval` rather than a list, because
+*how much of the search ran* is a separate fact from *what it found*. A search
+with no run — a person on the documents page — is uncapped, which is the same
+hole `llm/budget.py` already states plainly and which B-025's org quotas close.
+
 ## D-030 — PDF text comes from pypdf, not pymupdf: the license decides it
 Date: 2026-08-17 · Phase: 10 · PR: WP10.1a
 Context: architecture 5.5 names the extraction stack as *"pymupdf, python-docx,

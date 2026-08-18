@@ -46,6 +46,14 @@ class StubEmbedder:
     seen: list[str] = field(default_factory=list[str])
     calls: int = 0
     fail_with: Exception | None = None
+    #: Declares itself, which is what the B-040 guard reads (B-073). A stub that
+    #: had to be recognised by its type would stop being recognised the moment
+    #: somebody wrote a second one.
+    is_stub: bool = True
+    #: What `embed_texts` files this spend under. Named `stub-embedding` so a
+    #: ledger row from a test is obvious on sight, and matching what `embed`
+    #: reports so the two halves of one call cannot disagree.
+    model: str = "stub-embedding"
 
     async def embed(self, texts: Sequence[str]) -> EmbeddingBatch:
         self.calls += 1
@@ -63,7 +71,7 @@ class StubEmbedder:
         return EmbeddingBatch(
             vectors=tuple(vectors),
             usage=Usage(input_tokens=len(texts), output_tokens=0),
-            model="stub-embedding",
+            model=self.model,
         )
 
     async def aclose(self) -> None:

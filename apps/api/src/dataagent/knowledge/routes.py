@@ -35,7 +35,8 @@ from dataagent.auth.context import RequestContext
 from dataagent.auth.guards import require_contributor, require_member
 from dataagent.config import get_settings
 from dataagent.db.models import KnowledgeDocument
-from dataagent.knowledge import ingest
+from dataagent.knowledge import embeddings, ingest
+from dataagent.knowledge.embeddings import Embedder
 from dataagent.knowledge.extract import SUPPORTED_MIME
 from dataagent.knowledge.retrieve import search_knowledge
 from dataagent.knowledge.store import DocumentStore, LocalDocumentStore
@@ -55,6 +56,21 @@ MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 def document_store() -> DocumentStore:
     """The store this deployment uses. One line to change in Phase 12 (B-072)."""
     return LocalDocumentStore(get_settings().artifacts_path / "documents")
+
+
+def document_embedder() -> Embedder | None:
+    """The embedder these routes ingest and search with, or None (**B-073**).
+
+    A function rather than a call at each site, for the same reason
+    ``document_store`` is one: it is the seam a test replaces, and there is
+    exactly one of it. None means this deployment configured no embedding model,
+    which costs documents their vectors and leaves them lexically searchable —
+    a state `embedded_count` reports rather than hides.
+
+    Called through the module, not imported by name: that is what lets the test
+    guard wrap the single door an embedder comes out of (B-040, B-073).
+    """
+    return embeddings.get_embedder()
 
 
 class DocumentOut(BaseModel):
@@ -103,6 +119,23 @@ class PassageOut(BaseModel):
     found_by: str = Field(description="vector | lexical | both")
 
 
+class SearchOut(BaseModel):
+    """What a search found, and how much of the search ran (**B-073**).
+
+    The envelope exists for the second field. A person looking at an empty
+    result needs to know whether their documents do not cover the question or
+    whether the half of the search that reads meaning was skipped, and a bare
+    list of passages cannot tell them.
+    """
+
+    passages: list[PassageOut]
+    arms: list[str] = Field(description="Which arms ran: vector, lexical, or both.")
+    degraded: str | None = Field(
+        default=None,
+        description="Why the search by meaning did not run, when it did not.",
+    )
+
+
 @router.post(
     "/orgs/{org_id}/documents",
     response_model=DocumentOut,
@@ -134,6 +167,7 @@ async def upload_document(
         mime=file.content_type or "application/octet-stream",
         filename=file.filename,
         store=document_store(),
+        embedder=document_embedder(),
         actor_user_id=context.user_id,
     )
     # **201 even for a failed ingest, and deliberately.** The document row exists,
@@ -170,6 +204,11 @@ async def reindex(
             org_id=context.org_id,
             document_id=document_id,
             store=document_store(),
+            # This is also the backfill (**B-018**'s shape, applied to
+            # documents): a corpus uploaded before a key was configured becomes
+            # searchable by meaning by being re-indexed, and `unembedded_chunks`
+            # is the work list that says which documents need it.
+            embedder=document_embedder(),
             actor_user_id=context.user_id,
         )
     except LookupError:
@@ -205,7 +244,7 @@ async def remove_document(
 
 @router.get(
     "/orgs/{org_id}/documents/search",
-    response_model=list[PassageOut],
+    response_model=SearchOut,
     summary="Search the organization's documents",
 )
 async def search(
@@ -213,25 +252,40 @@ async def search(
     q: Annotated[str, Query(min_length=1, max_length=400)],
     limit: Annotated[int, Query(ge=1, le=20)] = 5,
     context: RequestContext = Depends(require_member),
-) -> list[PassageOut]:
+) -> SearchOut:
     """The same retrieval the agent uses, for a person who wants to see it.
 
     Worth having beyond the UI: when an answer leans on a document, "what would
     the agent have found for this question" is the first thing anyone debugging
     it wants, and reproducing it by hand from the tables is not the same query.
+
+    **No ``run_id``, and that is not an omission.** D-019's ceiling bounds one
+    investigation's spend; a person typing in a search box is not a run and has
+    no ledger to accumulate against. What bounds this is the same thing that
+    bounds any request — one query, one embedding, one round trip.
     """
-    passages = await search_knowledge(org_id=context.org_id, query=q, limit=limit)
-    return [
-        PassageOut(
-            chunk_id=passage.chunk_id,
-            document_id=passage.document_id,
-            document_title=passage.document_title,
-            source=passage.citation,
-            text=passage.text,
-            found_by=passage.found_by,
-        )
-        for passage in passages
-    ]
+    found = await search_knowledge(
+        org_id=context.org_id,
+        query=q,
+        limit=limit,
+        embedder=document_embedder(),
+        actor_user_id=context.user_id,
+    )
+    return SearchOut(
+        passages=[
+            PassageOut(
+                chunk_id=passage.chunk_id,
+                document_id=passage.document_id,
+                document_title=passage.document_title,
+                source=passage.citation,
+                text=passage.text,
+                found_by=passage.found_by,
+            )
+            for passage in found.passages
+        ],
+        arms=list(found.arms),
+        degraded=found.degraded,
+    )
 
 
 @router.get(

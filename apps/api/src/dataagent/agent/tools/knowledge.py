@@ -26,6 +26,14 @@ that were not already true, no amount of wrapping would make this safe.
 document and which heading it came from is text of unknown origin arriving inside
 a prompt — and 5.5's claim that retrieved material is safe to *show* rests
 entirely on being able to name where it came from.
+
+**The search is hybrid from here, and it says when it was not** (**B-073**).
+The embedder comes off `ToolContext`, so the query embedding is charged to this
+run and checked against its ceiling like any other spend. When there is no
+embedder, or the ceiling refuses one, the lexical arm still answers and the
+result *says* only the wording was searched — because "nothing is written down
+about that" and "the half of the search that would have found it did not run"
+are different answers, and only one of them should stop a model looking.
 """
 
 from __future__ import annotations
@@ -73,6 +81,15 @@ class SearchKnowledgeIn(BaseModel):
     limit: int = Field(default=DEFAULT_LIMIT, ge=1, le=MAX_LIMIT)
 
 
+#: What the model is told when the corpus genuinely has nothing. Deliberately
+#: firm: the failure this tool makes possible is a model inventing a definition
+#: from thin air and reporting it as the organization's own.
+NOTHING_FOUND = (
+    "No document in this organization mentions that. Nothing has been written "
+    "down about it, so do not infer a definition — say what you could not find."
+)
+
+
 class PassageOut(BaseModel):
     """One extract, and enough to attribute it."""
 
@@ -82,6 +99,10 @@ class PassageOut(BaseModel):
     source: str
     document: str
     headings: list[str]
+    #: Which arm of the hybrid search found it: `vector`, `lexical`, or `both`.
+    #: In the model's envelope as well as the trace because a passage both arms
+    #: agreed on is the strongest signal this retrieval can offer.
+    found_by: str = "both"
 
 
 class SearchKnowledgeOut(BaseModel):
@@ -101,22 +122,26 @@ async def _search_knowledge(context: ToolContext, params: BaseModel) -> BaseMode
         else SearchKnowledgeIn.model_validate(params)
     )
 
-    # No embedder here yet, so this is the lexical arm alone. Wiring the
-    # configured provider through `ToolContext` is what makes it hybrid, and it
-    # is deliberately a separate change: an embedder on the tool context is a
-    # spending capability reaching the agent loop, and that deserves its own
-    # review rather than arriving inside a retrieval feature (**B-073**).
-    passages = await search_knowledge(org_id=context.org_id, query=args.query, limit=args.limit)
+    # Hybrid when the run has an embedder, and charged to the run either way
+    # (**B-073**): `run_id` is what puts the query embedding under D-019's
+    # ceiling, and `actor_user_id` is what puts it on the right person's line of
+    # the ledger.
+    found = await search_knowledge(
+        org_id=context.org_id,
+        query=args.query,
+        limit=args.limit,
+        embedder=context.embedder,
+        run_id=context.run_id,
+        actor_user_id=context.actor_user_id,
+        settings=context.settings,
+    )
 
-    if not passages:
-        return SearchKnowledgeOut(
-            passages=[],
-            note=(
-                "No document in this organization mentions that. Nothing has been "
-                "written down about it, so do not infer a definition — say what you "
-                "could not find."
-            ),
-        )
+    if not found.passages:
+        # A degraded search that found nothing says *both* things, in that
+        # order. "Nothing is written down" is an invitation to stop looking, and
+        # it is only honest when the whole search actually ran.
+        note = NOTHING_FOUND if found.degraded is None else f"{found.degraded} {NOTHING_FOUND}"
+        return SearchKnowledgeOut(passages=[], note=note)
 
     return SearchKnowledgeOut(
         passages=[
@@ -125,9 +150,11 @@ async def _search_knowledge(context: ToolContext, params: BaseModel) -> BaseMode
                 source=passage.citation,
                 document=passage.document_title,
                 headings=list(passage.headings),
+                found_by=passage.found_by,
             )
-            for passage in passages
-        ]
+            for passage in found.passages
+        ],
+        note=found.degraded or "",
     )
 
 

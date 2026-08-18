@@ -16,10 +16,12 @@ retrieval quietly returns nonsense, and nothing about the ingest looks wrong.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable, Iterator
 from typing import Any
 
 import httpx
 import pytest
+from pydantic import SecretStr
 
 from dataagent.knowledge.embeddings import (
     EmbeddingError,
@@ -236,3 +238,77 @@ def test_the_configured_width_and_the_column_are_checked_against_each_other() ->
         check_dimensions(_settings(embeddings_dimensions=1024))
 
     assert "1024" in str(caught.value) and "1536" in str(caught.value)
+
+
+# ---------------------------------------------------------------------------
+# The one door an embedder comes out of (B-073)
+# ---------------------------------------------------------------------------
+#
+# These take the `embedder_factory` fixture — the real `get_embedder`, not the
+# guarded one the session installs — because what they are about is what the
+# *product* answers. Nothing here reaches a network: building a client is not
+# calling one, and no test below embeds anything.
+
+
+@pytest.fixture(autouse=True)
+def forget_built_embedders() -> Iterator[None]:
+    """No built instance survives a test, in either direction.
+
+    The factory caches, so one test's embedder would otherwise answer another
+    test's call — and an instance built from one set of settings answering
+    against another is the cross-test coupling that makes a suite stop meaning
+    what it says.
+    """
+    from dataagent.knowledge.embeddings import reset_embedder
+
+    reset_embedder()
+    yield
+    reset_embedder()
+
+
+def test_a_deployment_with_no_embedding_model_gets_no_embedder(
+    embedder_factory: Callable[..., Any],
+) -> None:
+    """None is an answer, not a failure. Retrieval degrades to lexical, which is
+    what `knowledge_chunks.embedding` being nullable is for — raising here would
+    turn an optional capability into a boot requirement."""
+    assert embedder_factory(_settings(embeddings_model=None)) is None
+
+
+def test_a_deployment_with_no_key_gets_no_embedder(
+    embedder_factory: Callable[..., Any],
+) -> None:
+    """The same answer for the other half of the configuration. A model id with
+    no key behind it cannot embed anything, and finding that out at the first
+    upload rather than here would fail a document instead of a search."""
+    assert embedder_factory(_settings(openai_api_key=None)) is None
+
+
+def test_a_configured_deployment_gets_one_embedder_that_admits_it_is_real(
+    embedder_factory: Callable[..., Any],
+) -> None:
+    """`is_stub` is the bit the B-040 guard reads, so it is asserted here rather
+    than assumed: a real client that failed to declare itself would be waved
+    through by the guard that exists to stop exactly this object."""
+    configured = _settings(openai_api_key=SecretStr("test-key"))
+
+    embedder = embedder_factory(configured)
+
+    assert embedder is not None
+    assert embedder.is_stub is False
+    # One instance, not one per call: it holds a connection pool, and rebuilding
+    # it per search would be a TLS handshake per question.
+    assert embedder_factory(configured) is embedder
+
+
+def test_a_width_that_disagrees_with_the_column_is_refused_at_the_door(
+    embedder_factory: Callable[..., Any],
+) -> None:
+    """Before the first vector rather than at the insert that would reject it.
+    A constraint error names a column; this names both numbers and the model."""
+    with pytest.raises(EmbeddingError) as caught:
+        embedder_factory(
+            _settings(openai_api_key=SecretStr("test-key"), embeddings_dimensions=1024)
+        )
+
+    assert "1024" in str(caught.value)

@@ -29,6 +29,7 @@ from dataagent.auth.jwt_validator import TokenValidator
 from dataagent.auth.principal import Principal, TokenError
 from dataagent.config import Settings
 from dataagent.db import engine as engine_module
+from dataagent.knowledge import routes as knowledge_routes
 from dataagent.main import create_app
 from dataagent.secrets.local import LocalSecretsProvider
 from dataagent.tenancy import session as session_module
@@ -212,6 +213,14 @@ async def matrix_app(
         "_session_factory",
         lambda: async_sessionmaker(app_engine, expire_on_commit=False, autoflush=False),
     )
+    # The upload probe posts a real file through a real ingest, and since B-073
+    # that route asks for the configured embedder — which on a developer machine
+    # is a live one, so every run of this file would embed a probe document at
+    # the owner's expense. This file is about **who may call what**; embedding
+    # is proved where it belongs, in `tests/knowledge`. Without the seam the
+    # B-040 guard would refuse and the probe would record `deny(500)`, turning
+    # an authorization matrix into a report about configuration.
+    monkeypatch.setattr(knowledge_routes, "document_embedder", lambda: None)
 
     org_id = uuid.uuid4()
     data_source_id = uuid.uuid4()
