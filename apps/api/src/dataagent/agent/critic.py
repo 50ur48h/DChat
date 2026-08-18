@@ -49,6 +49,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from dataagent.agent.context import HistoryTurn, history_block
 from dataagent.agent.state import ResearchState
 from dataagent.agent.tools.finalize import FinalizeIn
+from dataagent.semantic.definitions import Definition as SemanticDefinition
+from dataagent.semantic.definitions import RequiredFilter
 
 __all__ = [
     "BLOCK",
@@ -317,6 +319,11 @@ class Evidence:
     #: deliberately ignore it and still read the current question alone, because
     #: every one of them is an arithmetic check on words the user just typed.
     history: tuple[HistoryTurn, ...] = ()
+    #: The definitions this question matched (**D-033**, WP10.2c). Loaded by the
+    #: caller from `semantic_definitions`, like `statements`, so the critic opens
+    #: no session — and empty for the overwhelming majority of runs, because most
+    #: questions are about rows rather than about a defined measure.
+    definitions: tuple[SemanticDefinition, ...] = ()
 
 
 def check(draft: FinalizeIn, evidence: Evidence) -> tuple[CriticFinding, ...]:
@@ -502,18 +509,101 @@ def _refusal_is_not_an_answer(draft: FinalizeIn, evidence: Evidence) -> list[Cri
 
 
 def _required_filters(draft: FinalizeIn, evidence: Evidence) -> list[CriticFinding]:
-    """Filters a semantic definition demands are present in the SQL.
+    """The filters a semantic definition demands are present in the SQL (D-033).
 
-    **A hook, and deliberately inert.** `semantic_definitions` arrives in Phase 10
-    (WP10.2) and has no store today (**B-038**), so there is nothing to enforce
-    and this returns nothing. It exists so that wiring the definitions in is a
-    change to one function rather than a new check threaded through the caller —
-    and so the seam is visible rather than remembered.
+    **This is the rule that makes a definition bind.** *Prose informs the model;
+    a structured definition binds it* — and this function is the whole of the
+    second half. Without it a definition is a paragraph the model may follow, and
+    **B-078** is what that looked like: given the right definition, a live model
+    wrote it into its statement and then reasoned its way back out two iterations
+    later, answering 1,054 where the document said 747, with nothing able to
+    object.
 
-    Do not mistake the hook for the feature: until Phase 10, an organization's
-    rule that "revenue excludes cancelled orders" is enforced by nothing here.
+    **Two strengths, and the split is what keeps the strong one safe.**
+
+    *Blocks* when the statement does not constrain the column **at all**. A
+    metric defined as excluding cancelled orders cannot have been computed by a
+    query that never mentions `status`; that is not a judgement about SQL style,
+    it is arithmetic, and it is the failure worth stopping a run for.
+
+    *Warns* when the column is constrained but none of the definition's own
+    values appear. `status = 'completed'` is that shape and is very likely
+    correct, so blocking it would be a **false block** — the failure standing
+    note 5 calls this component's characteristic one, and the reason `capability`
+    spent a whole WP undoing its own. A warning travels into the answer as a
+    limitation, which is exactly the right weight for "this may be a different
+    reading of the metric".
+
+    Silent when the draft cites nothing, when no definition matched the question,
+    and when a statement does not touch the definition's table — a run that never
+    used the metric cannot have misused it.
     """
-    _ = draft, evidence
+    if not evidence.definitions or not draft.supported_by:
+        return []
+
+    findings: list[CriticFinding] = []
+    for definition in evidence.definitions:
+        for item in definition.required_filters:
+            findings += _one_filter(definition, item, draft, evidence)
+    return findings
+
+
+def _one_filter(
+    definition: SemanticDefinition,
+    item: RequiredFilter,
+    draft: FinalizeIn,
+    evidence: Evidence,
+) -> list[CriticFinding]:
+    """One required filter, against every statement the answer rests on."""
+    from dataagent.dal.validator import filtered_columns, literals_in, tables_named
+
+    unconstrained: list[str] = []
+    unmatched: list[str] = []
+    for execution_id in draft.supported_by:
+        statement = evidence.statements.get(execution_id)
+        if not statement:
+            # A citation that resolves to no statement is already a finding of
+            # its own (`_citations_resolve`). Reporting it twice, in two
+            # vocabularies, would read as two problems.
+            continue
+        if item.table.lower() not in {
+            name.lower() for name in tables_named(statement, dialect=evidence.dialect)
+        }:
+            continue
+        if item.column.lower() not in filtered_columns(statement, dialect=evidence.dialect):
+            unconstrained.append(execution_id)
+        elif item.values and not (
+            {value.lower() for value in item.values}
+            & literals_in(statement, dialect=evidence.dialect)
+        ):
+            unmatched.append(execution_id)
+
+    if unconstrained:
+        return [
+            CriticFinding(
+                rule="required_filter_missing",
+                severity=BLOCK,
+                detail=(
+                    f"“{definition.name}” is defined here as requiring "
+                    f"{item.describe()}, and the query behind this answer does not "
+                    f"filter on {item.qualified} at all. The number is for a "
+                    "different population than the one the metric names."
+                ),
+            )
+        ]
+    if unmatched:
+        return [
+            CriticFinding(
+                rule="required_filter_differs",
+                severity=WARN,
+                detail=(
+                    f"“{definition.name}” is defined here as requiring "
+                    f"{item.describe()}. The query filters on {item.qualified} but "
+                    "not on those values, so it may be a different reading of the "
+                    "metric."
+                ),
+            )
+        ]
     return []
 
 

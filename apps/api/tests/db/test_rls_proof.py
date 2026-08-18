@@ -317,6 +317,22 @@ async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
                         "text": f"{name} counts revenue net of cancelled orders.",
                     },
                 )
+                await connection.execute(
+                    text(
+                        "INSERT INTO semantic_definitions "
+                        "(org_id, data_source_id, name, description, required_filters) VALUES "
+                        "(:org, :ds, 'net_revenue', :description, CAST(:filters AS jsonb))"
+                    ),
+                    {
+                        "org": org_id,
+                        "ds": data_source_id,
+                        "description": f"{name} excludes cancelled orders from revenue.",
+                        "filters": (
+                            '[{"table": "orders", "column": "status", '
+                            '"op": "not_in", "values": ["cancelled"]}]'
+                        ),
+                    },
+                )
                 if org_id == org_b:
                     catalog.update(
                         data_source=data_source_id,
@@ -446,6 +462,15 @@ def _forged_insert(table: str, seeded: SeededOrgs) -> str:
         "knowledge_chunks": (
             "INSERT INTO knowledge_chunks (org_id, document_id, seq, text) VALUES "
             f"('{other_org}', '{seeded.b_document}', 1, 'forged')"
+        ),
+        # A different name from the seeded one, because `(data_source_id, name)`
+        # is unique: a forged row colliding on that constraint would be refused
+        # before the policy was ever consulted, and the test would pass having
+        # proved nothing — the same trap the chunk above sidesteps with `seq`.
+        "semantic_definitions": (
+            "INSERT INTO semantic_definitions "
+            "(org_id, data_source_id, name, description) VALUES "
+            f"('{other_org}', '{seeded.b_data_source}', 'forged_metric', 'forged')"
         ),
     }
     return statements[table]

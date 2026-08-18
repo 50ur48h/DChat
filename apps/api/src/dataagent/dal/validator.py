@@ -73,6 +73,8 @@ __all__ = [
     "TableRef",
     "Validated",
     "date_literals",
+    "filtered_columns",
+    "literals_in",
     "tables_named",
     "validate",
 ]
@@ -436,6 +438,65 @@ def tables_named(sql: str, *, dialect: str) -> tuple[str, ...]:
         }
         return tuple(sorted(found))
     return ()
+
+
+def filtered_columns(sql: str, *, dialect: str) -> frozenset[str]:
+    """Columns this statement constrains, lowercased and unqualified.
+
+    Added for WP10.2c's critic rule, which asks whether a statement honoured a
+    semantic definition's required filters. It answers one narrow question — *is
+    this column constrained anywhere?* — over every predicate in the tree:
+    `WHERE`, `HAVING`, a join's `ON`, and the same inside a CTE or a subquery,
+    because a filter applied in a CTE is applied.
+
+    **Narrow on purpose, and the narrowness is the safety property.** It does not
+    check the operator and it does not check the values. A definition saying
+    *"revenue excludes cancelled orders"* is honoured by `status <> 'cancelled'`,
+    by `status NOT IN ('cancelled','refunded')` and by `status = 'completed'`,
+    and a check that insisted on one spelling would refuse the other two — a
+    **false block**, which `capability.py` and standing note 5 both call worse
+    than no check at all. What it catches is the statement that does not
+    constrain the column *at all*, which is certainly wrong and is exactly the
+    failure B-078 recorded.
+
+    Like `tables_named`, this grants nothing, authorises nothing and returns
+    **nothing** for input it cannot parse: it runs over SQL the DAL has already
+    validated and executed, and inventing a finding out of a parse failure would
+    be a critic reporting its own confusion as the answer's problem.
+    """
+    with suppress(PolicyViolation, RecursionError, SqlglotError):
+        _refuse_if_too_complex(sql, dialect)
+        parsed = sqlglot.parse_one(sql, read=dialect)
+        found: set[str] = set()
+        for predicate in (
+            *parsed.find_all(exp.Where),
+            *parsed.find_all(exp.Having),
+            *parsed.find_all(exp.Join),
+            # A qualifying predicate can also sit in a window's `QUALIFY`; it is
+            # rare and it is still a filter.
+            *parsed.find_all(exp.Qualify),
+        ):
+            found |= {
+                column.name.lower() for column in predicate.find_all(exp.Column) if column.name
+            }
+        return frozenset(found)
+    return frozenset()
+
+
+def literals_in(sql: str, *, dialect: str) -> frozenset[str]:
+    """Every literal the statement contains, as text.
+
+    For the weaker half of the same rule: when a column *is* constrained, whether
+    the definition's own values appear at all. A statement filtering `status` but
+    mentioning neither 'cancelled' nor 'refunded' is doing something the
+    definition did not describe — which is worth a **warning**, and is not worth
+    a block, because `status = 'completed'` is that shape and is correct.
+    """
+    with suppress(PolicyViolation, RecursionError, SqlglotError):
+        _refuse_if_too_complex(sql, dialect)
+        parsed = sqlglot.parse_one(sql, read=dialect)
+        return frozenset(str(item.this).lower() for item in parsed.find_all(exp.Literal))
+    return frozenset()
 
 
 #: A bare ISO date. Deliberately strict: a string that merely contains digits

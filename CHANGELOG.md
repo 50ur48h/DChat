@@ -54,6 +54,10 @@ under "Unreleased", only for changes a user would notice.
   description, so a real question matched nothing at all.
 
 ### Added
+- Metrics can be defined once and then enforced. A definition says what a metric
+  means and which filters it requires; the agent is shown it, and the query it
+  writes is checked against it — an answer computed without a required filter is
+  stopped rather than explained away.
 - An answer that relies on a definition read out of your documents now says so,
   naming the term: the wording informed the agent, but nothing checked that the
   query actually followed it. Defining that metric properly removes the caveat,

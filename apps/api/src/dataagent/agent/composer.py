@@ -84,12 +84,22 @@ def _source_phrase(state: ResearchState) -> str:
 def _prose_definitions(state: ResearchState) -> tuple[str, ...]:
     """Terms this run took from a document and nothing enforced (**D-033**).
 
-    A term qualifies when the run looked it up **and the documents answered**.
-    `state.prose_terms` is that second half: a lookup the corpus could not
-    explain left the model no worse informed than before, and caveating it would
-    be a warning about nothing — which is how a reader learns to skip warnings.
+    A term qualifies when the run looked it up, **the documents answered**, and
+    **no semantic definition covers it**. All three matter.
+
+    `state.prose_terms` is the second: a lookup the corpus could not explain left
+    the model no worse informed than before, and caveating it would be a warning
+    about nothing — which is how a reader learns to skip warnings.
+
+    `state.applied_definitions` is the third, and it is D-033's seam made
+    visible. A term with a definition **is** enforced — the critic checks the
+    statement against its filters — so saying otherwise would be a false warning
+    about the one case the layer actually handles. This is what "the limitation
+    goes away when an Admin blesses the passage into a definition" means in code.
     """
-    return tuple(sorted(set(state.prose_terms)))
+    enforced = {name.lower().replace("_", " ") for name in state.applied_definitions}
+    enforced |= {name.lower() for name in state.applied_definitions}
+    return tuple(sorted({term for term in state.prose_terms if term.lower() not in enforced}))
 
 
 def limitations_for(

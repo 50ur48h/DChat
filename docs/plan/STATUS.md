@@ -41,7 +41,14 @@ Current position: **Phases 0–5 and 7–9 signed off. Phase 6 merged, its gate
                   a green suite. See "Second data source" below. Two of them
                   are already closed: **WP8.4** (#55) fixed the capability check
                   the hub table defeated, and **B-056** with it.
-Next step:        **WP10.2c** (`p10.2c-semantic`) — the structured half, and
+Next step:        **WP10.2d** (`p10.2d-import`), the Phase 10 **gate** PR —
+                  import (**B-059**), verified queries and the admin UI. It
+                  also owes **B-079 (P1)**, which WP10.2c's live run found:
+                  a critic block on the last permitted pass ships the answer
+                  with its objection invisible, and an answer carrying a
+                  sentence the platform knows to be false is what Phase 9
+                  was built to prevent. The old note, kept because the
+                  criterion still governs the gate:
                   **B-078 is its central criterion, not a side rule**
                   (owner, 2026-08-18): the demo must show a run where a
                   definition's filter is **required**, the model **drops**
@@ -79,7 +86,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-18 by Claude Code (WP10.2a merged in #69; WP10.2b open for review)
+Last updated: 2026-08-18 by Claude Code (WP10.2b merged in #70; WP10.2c open for review)
 
 ---
 
@@ -1762,7 +1769,45 @@ unexplained.
       3 new tests. **The plan is re-lettered** to match what ships: WP10.2c is
       the structured half with B-078 as its **central criterion**, WP10.2d is the
       import and the gate
-- [ ] WP10.2c Semantic definitions bind: the critic enforces them (B-078 central)
+- [x] WP10.2c Semantic definitions bind: the critic enforces them
+      — **D-033's other half, and B-078 is its central criterion** rather than a
+      side rule (owner, 2026-08-18): the demo has to show a run where a
+      definition's filter is **required**, the model **drops** it, and the critic
+      **catches** it. A run where the model happens to comply proves nothing.
+      Revision **0020** adds `semantic_definitions` — the seventh tenant table,
+      so a policy, a `TENANT_TABLES` line and the rls_proof seed/forge pair, with
+      the forged row using a *different name* because `(data_source_id, name)` is
+      unique and a collision would be refused before the policy was consulted.
+      Scoped to a **data source**, not an organization: a definition names
+      columns and columns belong to a database.
+      **The two halves of a definition do different jobs.** `description` and
+      `expression` are prose for the prompt; `required_filters` is structure for
+      the critic. Rendered at **L3**, above L4, because a definition is the
+      platform's own object — validated against the catalog, enforced — while a
+      retrieved passage is a customer's untrusted prose and stays at L4.
+      **The rule has two strengths and the split is what keeps the strong one
+      safe.** It **blocks** when the statement does not constrain the column at
+      all, which is arithmetic rather than taste. It **warns** when the column is
+      constrained but the definition's values are absent — `status = 'completed'`
+      is that shape and is very likely correct, so blocking it would be the false
+      block standing note 5 exists for. Six false-block twins, including a filter
+      applied inside a CTE and a query that never touches the table.
+      **The seam closes**: a term with a definition stops carrying WP10.2b's
+      *"read as prose"* limitation, because now something checks it.
+      13 new tests; tampering `filtered_columns` to claim every column is
+      constrained fails the two criterion tests.
+      **Verified live** on 2026-08-18. The seeded draft — the criterion — was
+      caught: *"'net_revenue' is defined here as requiring orders.status none of
+      cancelled, refunded, and the query behind this answer does not filter on
+      orders.status at all."* And the **real** run was better evidence than
+      expected: asked for net revenue, the model wrote `status = 'completed'`,
+      the deterministic rule **warned** exactly as designed, and the **LLM half
+      blocked independently** — *"the query does not clearly exclude cancelled
+      and refunded orders as required by the metric definition"* — which is the
+      definition reaching L3 and being used. Raised **B-079 (P1)** from the same
+      run: the critic blocked on the last permitted pass, the answer shipped
+      anyway saying *"explicitly excluding cancelled and refunded orders"*, and
+      the block was invisible because `limitations_for` reads only warnings
 - [ ] WP10.2d Import (B-059) + verified queries + admin UI ← gate
 - [ ] GATE: uploaded policy changes generated SQL; isolation test; sign-off
 

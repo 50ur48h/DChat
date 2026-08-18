@@ -21,6 +21,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Computed,
+    DateTime,
     ForeignKey,
     Identity,
     Index,
@@ -47,6 +48,8 @@ __all__ = [
     "CONFIDENCE_LEVELS",
     "DATA_SOURCE_ENGINES",
     "DATA_SOURCE_STATUSES",
+    "DEFINITION_KINDS",
+    "DEFINITION_STATUSES",
     "DOCUMENT_STATUSES",
     "EMBEDDING_DIMENSIONS",
     "EVENT_TYPES",
@@ -85,6 +88,7 @@ __all__ = [
     "QueryExecution",
     "ResultArtifact",
     "SecurityEvent",
+    "SemanticDefinition",
     "UsageLedger",
     "User",
 ]
@@ -153,6 +157,16 @@ EMBEDDING_DIMENSIONS = 1536
 #: two steps that reach outside the process, so they are the two that fail, and a
 #: document silently holding no chunks looks exactly like one nobody uploaded.
 DOCUMENT_STATUSES: tuple[str, ...] = ("pending", "indexed", "failed")
+
+#: Architecture 5.4's two kinds (revision 0020). A metric is something you
+#: aggregate; a dimension is something you group by.
+DEFINITION_KINDS: tuple[str, ...] = ("metric", "dimension")
+
+#: An imported definition constrains generated SQL, so it is a privileged
+#: object and arrives as a **proposal** an Admin blesses (B-059, WP10.2d).
+#: `retired` rather than deletion, so a run that cited one can still explain
+#: itself.
+DEFINITION_STATUSES: tuple[str, ...] = ("proposed", "active", "retired")
 
 
 class Organization(Base):
@@ -1182,6 +1196,80 @@ class KnowledgeChunk(Base):
 #: WP1.2 builds the RLS policies from this map and WP1.3's proof suite asserts
 #: every entry is covered, so a new tenant table cannot be added without
 #: isolation and without a test that proves it.
+
+
+class SemanticDefinition(Base):
+    """What a metric means here, in a form a check can read (arch 5.4, D-033).
+
+    Two halves and they do different jobs. ``description`` and ``expression`` are
+    **prose for the prompt** — what makes a model use the metric correctly in the
+    first place. ``required_filters`` is **structure for the critic** — what
+    catches it when it does not. B-078 is why they are separate: a definition the
+    model only *read* was one it reasoned its way back out of two iterations
+    later, and nothing could object because a paragraph carries no filters to
+    compare a statement against.
+
+    Scoped to a **data source**, because a definition names columns and columns
+    belong to a database. One organization's two warehouses can each have a
+    `net_revenue` and they are not the same metric.
+    """
+
+    __tablename__ = "semantic_definitions"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ({})".format(", ".join(f"'{k}'" for k in DEFINITION_KINDS)), name="kind_valid"
+        ),
+        CheckConstraint(
+            "status IN ({})".format(", ".join(f"'{s}'" for s in DEFINITION_STATUSES)),
+            name="status_valid",
+        ),
+        UniqueConstraint(
+            "data_source_id", "name", name="uq_semantic_definitions_data_source_id_name"
+        ),
+        Index("ix_semantic_definitions_org_id_data_source_id", "org_id", "data_source_id"),
+    )
+
+    id: Mapped[UuidPk]
+    org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    data_source_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=False
+    )
+    #: Lowercased by the service: "Net Revenue" and "net_revenue" are one metric,
+    #: and a catalog of near-duplicates is worse than no catalog.
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'metric'"))
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    #: `sum(orders.total_amount)`. Rendered into the prompt, **not** parsed and
+    #: not enforced — claiming to check an expression nothing compares would be
+    #: worse than saying plainly that only the filters bind.
+    expression: Mapped[str | None] = mapped_column(Text)
+    #: `[{"table": …, "column": …, "op": …, "values": [...]}]`, the half the
+    #: critic can act on.
+    required_filters: Mapped[list[dict[str, object]]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    #: The words a person might use. Matching the bare name alone would miss
+    #: every question a human actually types.
+    synonyms: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    #: Where it came from, when it was not typed (B-059, WP10.2d), so drift in
+    #: the customer's own table is visible rather than silently stale.
+    provenance: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'active'"))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[CreatedAt]
+    #: Bumped by the service on every edit. There is no `UpdatedAt`
+    #: annotation in `db/base.py` because this is the first table that
+    #: needs one — a definition is edited, unlike almost everything else
+    #: here, which is appended.
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()"), nullable=False
+    )
+
+
 TENANT_TABLES: dict[str, str] = {
     "organizations": "id",
     "org_memberships": "org_id",
@@ -1203,4 +1291,5 @@ TENANT_TABLES: dict[str, str] = {
     "findings": "org_id",
     "knowledge_documents": "org_id",
     "knowledge_chunks": "org_id",
+    "semantic_definitions": "org_id",
 }
