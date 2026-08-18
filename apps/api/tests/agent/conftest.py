@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import pytest
 from sqlalchemy import URL, text
@@ -26,6 +27,7 @@ from dataagent.catalog import cards, discovery
 from dataagent.dal import policy as dal_policy
 from dataagent.datasources import service as datasource_service
 from dataagent.db import engine as engine_module
+from dataagent.knowledge.store import LocalDocumentStore
 from dataagent.runs import service as runs
 from dataagent.secrets.local import LocalSecretsProvider
 from dataagent.tenancy import session as session_module
@@ -126,3 +128,14 @@ async def context(
         actor_user_id=user_id,
         data_source_id=source.id,
     )
+
+
+@pytest.fixture
+def store(tmp_path: Path) -> LocalDocumentStore:
+    """Somewhere for a test's documents to live, thrown away with the test.
+
+    Here rather than in `tests/knowledge` because since **B-075** the agent suite
+    needs a corpus too: a run can look a term up mid-loop, and proving that needs
+    a real document in a real organization.
+    """
+    return LocalDocumentStore(tmp_path / "docs")

@@ -4,6 +4,52 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-032 — The planner asks for a definition, and a lookup costs an iteration rather than a call
+Date: 2026-08-18 · Phase: 10 · PR: WP10.2a · Owner's direction on the criterion
+Context: **B-075** — `loop.research` dispatches `run_sql` and nothing else, so
+`search_knowledge` is registered, described in every prompt, and unreachable. The
+backlog entry left two shapes open: **(a)** retrieve knowledge into the context
+deterministically, as architecture 4.4's *Context* stage describes, or **(b)** let
+the agent choose to look something up, as 4.4's *Execute* stage describes. The
+entry recommended (a) as the smaller change.
+Options: (a) context-stage retrieval keyed on the question's words; (b) the
+planner may request a lookup and the loop dispatches the tool; (c) neither —
+deregister `search_knowledge` so the prompt stops advertising it.
+Decision: **(b)**, on the owner's direction of 2026-08-18: *"an agent that's told
+it can search documents but can't dispatch the tool means Phase 10 ships a
+feature the product can't reach"*, and the gate demo must show the agent
+**consulting a document mid-run**. `Plan` gains an optional request for a term to
+be defined; when it is set the loop calls `search_knowledge`, puts the passages in
+front of the next plan, and records both in the trace.
+**A lookup consumes an iteration rather than adding a model call to one.** That is
+the load-bearing detail: an iteration that looks something up costs one plan call
+and no reflect (nothing ran to reflect on), so it is *cheaper* than an ordinary
+iteration and **D-024's and D-028's arithmetic is untouched** — the worst case
+this build can spend is unchanged. Bounded further by a per-run cap on lookups
+and by refusing a lookup already made, which is the duplicate-query hash's shape
+applied to a second kind of repetition.
+Why not the others: **(a)** answers a different question. It retrieves on the
+agent's behalf, keyed on the words of the question, so a definition is found only
+when the question happens to name it — and the trace shows a retrieval the agent
+did not choose, which is not what *"the agent consulted a document"* means. It
+remains the right mechanism for **semantic definitions** in WP10.2b, which are
+structured objects matched by entity rather than prose matched by meaning; the
+two can coexist. **(c)** is honest and cheap and was rejected by the owner as
+shipping less product: the corpus would exist and never reach a run.
+Consequences: `Plan` grows a field, so the planner's prompt and schema change and
+every agent test that asserts on a plan sees it. A model that asks for a lookup on
+every iteration spends its iteration budget on lookups and answers nothing — which
+the per-run cap bounds and the barren-iteration rule already ends. The tool list
+is now honest: everything in it can be dispatched.
+**A twenty-first event type**, `knowledge_consulted` (revision **0019**), and
+architecture 10.3 is edited to name it. 10.3 fixes the vocabulary deliberately —
+a trace UI has to render each type — so widening it is a decision. The argument
+is the gate criterion itself: `tool_called` records the *asking*, and there is no
+execution row to carry the *answer*, so what was asked, whether anything was
+written down, and which documents replied would otherwise be invisible.
+Overloading `result_summarized` would make the timeline lie about what kind of
+step it was.
+
 ## D-031 — An embedding is a spend like any other, and a refused one degrades the search
 Date: 2026-08-17 · Phase: 10 · PR: B-073
 Context: WP10.1 built hybrid retrieval and then called it from the agent's tool

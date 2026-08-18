@@ -41,7 +41,7 @@ Current position: **Phases 0–5 and 7–9 signed off. Phase 6 merged, its gate
                   a green suite. See "Second data source" below. Two of them
                   are already closed: **WP8.4** (#55) fixed the capability check
                   the hub table defeated, and **B-056** with it.
-Next step:        **WP10.2** (`p10.2-semantic`), the Phase 10 **gate** PR —
+Next step:        **WP10.2b** (`p10.2b-semantic`), the Phase 10 **gate** PR —
                   semantic definitions and verified queries, which owe
                   **B-059** *and* **B-070**: the layer must be able to *import*
                   definitions a database already carries, admin-reviewed with
@@ -50,19 +50,21 @@ Next step:        **WP10.2** (`p10.2-semantic`), the Phase 10 **gate** PR —
                   source as well as the pizza one, and the phase has done its job
                   when the question that answered **0 units** answers something
                   else.
-                  WP10.2 also owes **B-075 (P1)**, raised by B-073 and larger
-                  than either: the research loop dispatches `run_sql` and nothing
-                  else, so `search_knowledge` is registered, described in every
-                  prompt, and **unreachable**. Whatever puts definitions in front
-                  of the planner is the same mechanism that puts a retrieved
-                  passage there, so the two are one piece of work.
-                  **In flight**: **#68** (`b018-card-embeddings`), open for
-                  review. It was stacked on #67 and was rebased onto `main` after
-                  that merged — with `git rebase --onto origin/main <old-base>
-                  <branch>`, because after a squash merge a plain rebase replays
-                  commits already in `main`. The lesson has now been needed
-                  twice, on #65 and here; the conflict GitHub reported was the
-                  deleted base branch, not the content, and the rebase was clean.
+                  **B-075 is no longer part of that WP — it is WP10.2a and is
+                  built** (open for review), on the owner's direction of
+                  2026-08-18 that it is a **gate criterion**: an agent told it can
+                  search documents but unable to dispatch the tool means Phase 10
+                  ships a feature the product cannot reach. The gate demo changed
+                  with it — it must show the agent **consulting a document
+                  mid-run**, in the run's own trace, not the documents page
+                  working.
+                  **In flight**: **WP10.2a** (`p10.2a-knowledge-in-the-loop`),
+                  open for review. **#67 and #68 are merged**; the rebase lesson
+                  earned there is worth keeping — after a squash merge a plain
+                  `git rebase` on a stacked branch replays commits already in
+                  `main`, and `git rebase --onto origin/main <old-base> <branch>`
+                  is the fix. GitHub reported a conflict on #68 that was the
+                  deleted base branch rather than the content.
 Merge policy: ASK
 Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  (owner, 2026-08-17), so `nightly-evals.yml` can run — keep its
@@ -70,7 +72,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-18 by Claude Code (B-073 merged in #67; B-018 open in #68, rebased onto main)
+Last updated: 2026-08-18 by Claude Code (B-073 #67 and B-018 #68 merged; WP10.2a open for review)
 
 ---
 
@@ -1657,7 +1659,76 @@ unexplained.
       arm decides *candidacy*, not perfect ranking — `stores` outranks `orders`
       on that question and both reach the prompt, which is what the planner
       needs. 10 new tests; tampering the vector arm off fails three of them
-- [ ] WP10.2 Semantic definitions + verified queries + critic enforcement ← gate
+- [x] WP10.2a The agent can consult a document mid-run — `p10.2a-knowledge-in-the-loop`
+      — **B-075**, and the owner's direction on 2026-08-18 is what made it a work
+      package rather than a backlog line: *"an agent that's told it can search
+      documents but can't dispatch the tool means Phase 10 ships a feature the
+      product can't reach."* WP10.1b registered `search_knowledge`, described it
+      in every prompt, and left it **unreachable** — the loop called `run_sql` by
+      name and nothing else, so the corpus an organization uploads never reached
+      a run at all.
+      **DECISIONS D-032** settles the shape, and it is the opposite of what the
+      backlog entry recommended. B-075 proposed retrieving into the context
+      deterministically; the owner's criterion is that the agent **consults** a
+      document, which is a decision the agent makes rather than a retrieval
+      performed on its behalf. So `Plan` gains `define`: the planner may name a
+      term it needs explained before it writes SQL, and the loop dispatches the
+      tool, puts the passages in front of the next plan, and records both.
+      **A lookup costs an iteration, not a model call.** That is the load-bearing
+      detail: the lookup iteration runs no statement, so there is nothing to
+      reflect on and it costs one plan call rather than two — **cheaper** than an
+      ordinary iteration, which leaves **D-024**'s and **D-028**'s worst-case
+      arithmetic exactly as it was. Bounded further by `MAX_LOOKUPS` and by
+      refusing a term already asked, which is the duplicate-query hash's shape
+      applied to a second kind of repetition.
+      **A twenty-first event type** — `knowledge_consulted`, revision **0019** —
+      because 10.3 fixes the vocabulary and widening it is a decision. The
+      argument is the criterion itself: `tool_called` records the *asking*, and a
+      lookup leaves no execution row to carry the *answer*.
+      `KnowledgeFrame` moved to `agent/context.py` beside `REFERENCE_FRAME` and
+      `HISTORY_FRAME`, since a retrieved passage now renders in the layered
+      prompt as well as in a tool envelope — three frames for untrusted text, in
+      one place, which is what the test comparing them was always assuming.
+      **The tamper is the best evidence here.** Dropping the retrieved passage on
+      the floor — retrieving it, emitting the trace, and never putting it in the
+      bundle — leaves the dispatch test and the trace test **both passing** and
+      fails only `test_the_definition_reaches_the_plan_that_writes_the_sql`. That
+      is precisely the failure a gate demo would not catch by watching the
+      timeline. 10 new tests.
+      **Two defects came out of running it live, and neither was reachable from
+      the suite.** First: a model that needs a definition says so by *refusing* —
+      `answerable` false, the reason naming what is undefined, the term in
+      `define` — and the loop checked `answerable` **first**, so the one state
+      this feature exists for became a dead run. Every scripted test passed
+      because every script set `answerable` true. Second: a duplicate lookup was
+      refused correctly and **in silence**, so the model asked again at iteration
+      3, got nothing, and hedged an answer it had already computed. Both fixed,
+      both now have tests, and the second is why `_progress_so_far` names what
+      has been looked up without repeating it.
+      **Verified live** on 2026-08-18, against a term this business invented so
+      that no model could guess it. *"How many anchor orders were there in July
+      2026?"* → iteration 1 asked (*"Count July 2026 orders once the business
+      meaning of 'anchor orders' is established"*) → `tool_called
+      search_knowledge` → `knowledge_consulted term='anchor orders' passages=1
+      found_by=['both'] source='Order reporting policy > Anchor orders'` →
+      iteration 2 wrote `status = 'completed' AND total_amount > 40 AND
+      EXTRACT(ISODOW …) BETWEEN 1 AND 5`, which is the document's sentence turned
+      into SQL and which nothing in the catalog could have suggested. A first
+      attempt using *"net revenue"* is worth recording as the control: the model
+      **never asked**, because the `orders` card lists a `status` column whose
+      examples include 'cancelled'. The lookup fires when a definition genuinely
+      cannot be inferred, which is the case it exists for — and it means a gate
+      demo has to use a term the business actually invented.
+      Raised **B-077** (`search_tables` and `describe_table` are still advertised
+      and still undispatchable, now named in a test that fails if a third joins
+      them) and **B-078 (P1)**, which the same live run found and which WP10.2b
+      must answer: having written the right SQL, the model spent two more
+      iterations reasoning its way *out* of the weekday clause and answered
+      **1,054** where the document says **747**. The definition reached it and it
+      discarded it in the open — and nothing could object, because a passage
+      retrieved as prose carries no machine-readable filters for a critic to
+      check the statement against
+- [ ] WP10.2b Semantic definitions + verified queries + critic enforcement ← gate
 - [ ] GATE: uploaded policy changes generated SQL; isolation test; sign-off
 
 ## Phase 11 — Charts + polish (M11)
