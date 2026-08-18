@@ -3,28 +3,29 @@
 Current position: **Phases 0–5 and 7–9 signed off. Phase 6 merged, its gate
                   partially met and deliberately unticked. Phase 10 is half
                   built: WP10.1 is complete and on `main` (#64 and #65, merged
-                  2026-08-17), **B-073 and B-018 are open for review as two
-                  stacked PRs**, and WP10.2 — the gate — has not started.** An organization's own documents can
-                  now be uploaded, chunked, embedded, retrieved and consulted,
-                  tenant-isolated by RLS like every other tenant table — and
-                  since B-073 they are **actually embedded**, which nothing in
-                  the application had ever done: no code path built an embedder,
-                  so every upload stored text alone and the vector arm was dead
-                  in production. It is now a metered, run-charged, ceiling-checked
-                  spend like every other. And since **B-018** a **table card** is
-                  found by meaning too: golden eval **#14** passes live, where
-                  the same question used to retrieve nothing and hand the planner
-                  an empty catalog. What is missing is the half of Phase 10 that
-                  says what a *word* means, which is where both of the phase's
-                  P1s live — plus **B-075**, which says the agent cannot
-                  currently call the retrieval tool at all. The **Phase 9 gate
+                  2026-08-17), **B-073 is merged (#67)**, **B-018 is open for
+                  review (#68)**, and WP10.2 — the gate — has not started.** An
+                  organization's own documents can now be uploaded, chunked,
+                  embedded, retrieved and consulted, tenant-isolated by RLS like
+                  every other tenant table — and since B-073 they are **actually
+                  embedded**, which nothing in the application had ever done: no
+                  code path built an embedder, so every upload stored text alone
+                  and the vector arm was dead in production. It is now a metered,
+                  run-charged, ceiling-checked spend like every other. And with
+                  **B-018** a **table card** is found by meaning too: golden eval
+                  **#14** passes live, where the same question used to retrieve
+                  nothing and hand the planner an empty catalog. What is missing
+                  is the half of Phase 10 that says what a *word* means, which is
+                  where both of the phase's P1s live — plus **B-075**, which says
+                  the agent cannot currently call the retrieval tool at all. The **Phase 9 gate
                   was signed off on 2026-08-16** (#60): 20/20 golden evals, a
                   seeded wrong-date draft caught deterministically with no model
                   call, and an answer card showing its citation and its
                   limitations. The **live** run is recorded at **12/20** and that
                   number stands — five of the eight failures are one harness
                   defect (**B-066**), two are the harness expecting the wrong
-                  thing, one is **B-018**. The **Phase 8 gate
+                  thing, one is **B-018** — and that last one is **now fixed and
+                  green live** (#68). The **Phase 8 gate
                   was signed off on 2026-08-16** (#52): the revenue-decline
                   question answered **$938.28** in two research steps against a
                   cap of eight, *"which menu items sell best?"* refused honestly
@@ -55,13 +56,13 @@ Next step:        **WP10.2** (`p10.2-semantic`), the Phase 10 **gate** PR —
                   prompt, and **unreachable**. Whatever puts definitions in front
                   of the planner is the same mechanism that puts a retrieved
                   passage there, so the two are one piece of work.
-                  **In flight**: two stacked PRs, both open for review —
-                  **#67** (`b073-embedder-in-the-loop`, CI green) and
-                  **b018-card-embeddings** stacked on it. After a squash merge a
-                  plain `git rebase` on the stacked branch replays commits
-                  already in `main`; use
-                  `git rebase --onto origin/main <old-base> <branch>`, as #65
-                  needed on #64.
+                  **In flight**: **#68** (`b018-card-embeddings`), open for
+                  review. It was stacked on #67 and was rebased onto `main` after
+                  that merged — with `git rebase --onto origin/main <old-base>
+                  <branch>`, because after a squash merge a plain rebase replays
+                  commits already in `main`. The lesson has now been needed
+                  twice, on #65 and here; the conflict GitHub reported was the
+                  deleted base branch, not the content, and the rebase was clean.
 Merge policy: ASK
 Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  (owner, 2026-08-17), so `nightly-evals.yml` can run — keep its
@@ -69,7 +70,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-17 by Claude Code (B-073 and B-018 open for review, stacked; WP10.2 next)
+Last updated: 2026-08-18 by Claude Code (B-073 merged in #67; B-018 open in #68, rebased onto main)
 
 ---
 
@@ -79,6 +80,14 @@ Last updated: 2026-08-17 by Claude Code (B-073 and B-018 open for review, stacke
 #65 (WP10.1b).** **Nothing is in flight** — no open PR, no unmerged branch,
 nothing local. `main` is at **29b028e** and every branch this session used has
 been deleted on the remote.
+
+> **Partly superseded on 2026-08-18.** The session after this one took **B-073**
+> (merged, #67) and **B-018** (open, #68) before WP10.2, at the owner's
+> direction. So section 2's *"B-018 is not closable"* and section 3's *"what
+> B-073 needs"* are both **done** — read them as the reasoning behind two closed
+> items rather than as work outstanding. Section 0 still stands: **WP10.2 is
+> next**, and it inherited a new P1 on the way, **B-075**. The header above is
+> the current position.
 
 ### 0. Where to pick up: WP10.2, the Phase 10 gate
 
