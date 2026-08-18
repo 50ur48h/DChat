@@ -1,50 +1,39 @@
 # STATUS — data-agent build
 
-Current position: **Phases 0–5 and 7–9 signed off. Phase 6 merged, its gate
-                  partially met and deliberately unticked. Phase 10 is nearly
-                  built: WP10.1 (#64, #65), B-073 (#67), B-018 (#68), WP10.2a
-                  (#69), WP10.2b (#70) and WP10.2c (#71) are all on `main`, and
-                  WP10.2d — the gate — is a draft at #72 with six things left.**
-                  An organization's own writing now reaches the agent by two
-                  routes with two different strengths, which is the phase's whole
-                  argument. **Prose informs**: documents are uploaded, chunked,
-                  embedded and retrieved, and the agent can **ask** what a term
-                  means mid-run — `search_knowledge` was registered and
-                  unreachable until WP10.2a, so the corpus reached no run at all.
-                  **Structure binds**: a semantic definition carries
-                  machine-readable filters and the critic blocks a statement that
-                  ignores one. An answer resting only on prose says so, and stops
-                  saying so once an Admin blesses that passage into a definition
-                  (**D-033**). A critic finding strong enough to stop a run now
-                  reaches the reader rather than the trace alone (**D-034**).
-                  Card search is hybrid too, so golden eval **#14** passes live
-                  where the same question used to retrieve nothing.
-                  What is missing is the product surface for all of it — routes
-                  and an admin screen — and the gate's own evidence.
-                  The **Phase 9 gate was signed off on 2026-08-16** (#60): 20/20
-                  golden evals, a seeded wrong-date draft caught deterministically
-                  with no model call, and an answer card showing its citation and
-                  its limitations. The **live** run is recorded at **12/20** and
-                  that number stands — five of the eight failures were one harness
-                  defect (**B-066**, fixed), two were the harness expecting the
-                  wrong thing, and one was **B-018**, now fixed and green live.
-                  The **Phase 8 gate was signed off on 2026-08-16** (#52): the
-                  revenue-decline question answered **$938.28** in two research
-                  steps against a cap of eight, *"which menu items sell best?"*
-                  refused honestly with zero queries, and a mid-run refresh
-                  replayed the whole trace.
-                  A **second, real data source** was loaded and tried on
-                  2026-08-16 — an F&B operator's 112k-row warehouse, not a
-                  fixture this project designed. It found seven defects
-                  (**B-054**…**B-060**), four of them P1/P2 and none visible to
-                  a green suite. See "Second data source" below. Two are closed:
-                  **WP8.4** (#55) fixed the capability check the hub table
-                  defeated, and **B-056** with it; **B-059** is half closed, its
-                  import service built and its live walk owed by the gate.
-Next step:        **Sign off the Phase 10 gate, or don't.** #72 is ready for review
-                  and every item it owed is done. The one criterion not met live is
-                  **B-078**, accepted as covered-by-test on B-053's precedent.
-                  Previously: **Finish WP10.2d** on the existing branch `p10.2d-import`
+Current position: **Phases 0–5 and 7–10 signed off. Phase 6 merged, its gate
+                  partially met and deliberately unticked.** The **Phase 10 gate
+                  was signed off on 2026-08-18** (#72): an organization's own
+                  writing now changes the SQL a model generates, proved twice —
+                  once on a customer's 112k-row warehouse, where an imported and
+                  Admin-accepted definition turned *"Ayam Penyet Set, 0.00 units
+                  sold"* into an honest refusal with
+                  `row_role <> 'parent_zero_qty'` in **4 of 4** executed
+                  queries, and once on the fixture this project designed, where
+                  defining `repeat_rate`'s denominator moved golden eval **#10**
+                  from FAIL to PASS. **Prose informs, structure binds** (D-033)
+                  is now a property of the product rather than of the plan: a
+                  definition reaches the prompt framed as authoritative, its
+                  filters are enforced against the AST, and a run says which
+                  definitions governed it — or that none matched, which is the
+                  sentence three gate walks needed and never had (**B-087**).
+                  **One gate criterion was accepted rather than demonstrated**:
+                  B-078's live drop-and-catch, covered by test, unstageable
+                  since **B-083** — see standing note 5, and re-run it the day
+                  the planner's model changes.
+                  Six defects this phase were found by **running** the thing
+                  rather than reading it, and one of them — **B-083**, a
+                  definition that bound the critic and never reached the model —
+                  would have made the gate demo pass for the exact opposite of
+                  its intended reason.
+Next step:        **Phase 11 — charts and polish**, not yet started (owner:
+                  *"don't continue with Phase 11 yet"*, 2026-08-18). It now opens
+                  with **B-088**, raised to **P1** and scheduled by the owner
+                  after hitting it mid-walk: an accepted definition cannot be
+                  edited, un-accepted, or re-accepted, and *"a semantic layer
+                  whose definitions are write-once will not survive real use."*
+                  Then WP11.1 (chart tool) and WP11.2 (polish + Playwright, the
+                  gate).
+                  Superseded: **Finish WP10.2d** on the branch `p10.2d-import`
                   (**draft #72**) — the Phase 10 **gate** PR. Two of its pieces
                   are built and green: **B-079/D-034** (an unresolved critic
                   block is the answer's first limitation and caps its
@@ -88,23 +77,21 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-18 by Claude Code (WP10.2d complete; #72 ready for review; B-078 accepted as covered-by-test; GATE box awaits the owner)
+Last updated: 2026-08-18 by Claude Code (**Phase 10 signed off** — #72 merged, gate ticked; B-088 raised to P1 and scheduled in Phase 11; Phase 11 not started)
 
 ---
 
-## ⚠ Session-end handoff — read this before starting anything
+## How Phase 10 was finished — the record, not a to-do list
 
-**Five PRs merged this session: #67 (B-073), #68 (B-018), #69 (WP10.2a),
-#70 (WP10.2b) and #71 (WP10.2c).** One is **in flight**: **#72**, a **draft**
-on `p10.2d-import`, which is the Phase 10 **gate** branch and is not ready for
-review. `main` is at the WP10.2c merge and every other branch is deleted.
+**Nothing here is outstanding.** Six PRs closed the phase: #67 (B-073),
+#68 (B-018), #69 (WP10.2a), #70 (WP10.2b), #71 (WP10.2c) and **#72 (WP10.2d,
+the gate)**, merged and signed off on 2026-08-18. `main` is at the #72 merge and
+every phase branch is deleted. Kept because the reasoning is worth more than the
+outcome: each numbered item below records what the gate owed and what settled
+it, and §3 is the argument for the habit that found six defects a green suite
+could not.
 
-### 0. Where to pick up: finish WP10.2d, the gate
-
-**Start here.** Branch `p10.2d-import` already exists and carries two of the
-gate's pieces — do not start a new one. It is a **gate PR**, so it ends with a
-manual test script (CLAUDE.md: numbered steps, what the user should see at each,
-including the failure case) and a sign-off; **do not tick the GATE box yourself.**
+### 0. What the gate owed, and what closed each item
 
 What is already on the branch, tested and green:
 
@@ -398,9 +385,11 @@ looked like afterwards.
 
 ### 8. What is open, and what it means
 
-**P1** — **B-059** (import: service built, routes/UI/live walk owed),
-**B-078**'s remainder and **B-079**'s demo, both folded into the gate;
-**B-029** (a second real provider, the only thing that closes the Phase 6 gate).
+**P1** — **B-088** (an accepted definition cannot be edited — raised by the
+owner and scheduled to open Phase 11); **B-029** (a second real provider, the
+only thing that closes the Phase 6 gate). **Closed this phase**: B-059, B-079,
+B-083, B-085 — and **B-078 accepted** rather than done, covered by test and
+unstageable until the planner's model changes (standing note 5).
 
 **P2** — **B-077** (`search_tables` and `describe_table` are advertised to the
 model and the loop cannot dispatch them — named in a test that fails if a third
@@ -441,7 +430,26 @@ enough to break one.
    account with `GET /v1/models` *before* writing them into `LLM_MODELS` — the
    same check done for OpenAI. A pricing page says what exists, not what a key
    may call. That habit is B-027, still unautomated.
-5. **A false block is the critic's characteristic failure — test for it every
+5. **B-078 is unstageable, not wrong — revisit it if the planner's model
+   changes.** The Phase 10 gate accepted *"a required filter is dropped by the
+   model and caught by the critic"* as **covered by test rather than
+   demonstrated** (owner, 2026-08-18, B-053's disposition). Four live attempts
+   produced compliance twice and honest refusals twice, and **B-083 is why**:
+   before that fix a matched definition reached the critic and never the model,
+   so the model dropped required filters *every time* — the criterion would have
+   passed trivially while proving the opposite of its intent, that a model is
+   punished for not reading minds. Now that the definition reaches the prompt,
+   **compliance is the correct behaviour**, and forcing a failure to film it is
+   set dressing rather than evidence.
+   **What would make it stageable again**: a weaker or cheaper model configured
+   for the **planner** role (`LLM_ROLE_MAP`), where a genuine drop is likelier —
+   so the moment that map changes, this criterion is worth re-running before
+   anything else is concluded from it. The rule's value does not depend on being
+   filmed: it is deterministic, it runs on every answer, it ships with its
+   false-block twin, and **D-034** guarantees that a block which does stop a run
+   becomes the answer's first limitation.
+
+6. **A false block is the critic's characteristic failure — test for it every
    time.** Owner's direction, 2026-08-16, after the third one in a session. A
    rule that fires on a legitimate question is worse than a rule that misses,
    because a fluent refusal of an answerable question teaches people the product
@@ -455,7 +463,7 @@ enough to break one.
    *not* fire on a legitimate question near it.** The second is the one that
    catches this class, and golden eval #18 is the first test that found a false
    block before a human did — which is the whole argument for the eval suite.
-6. **There are two customer databases now, and only one of them is a fixture.**
+7. **There are two customer databases now, and only one of them is a fixture.**
    `Demo` is the pizza generator, whose numbers `truths.json` and the Phase 9
    evals depend on — do not touch it. `F&B demo` is a real operator's warehouse
    loaded from a SQLite file the owner supplied, which lives in `.SampleData/`
@@ -1890,7 +1898,7 @@ unexplained.
       run: the critic blocked on the last permitted pass, the answer shipped
       anyway saying *"explicitly excluding cancelled and refunded orders"*, and
       the block was invisible because `limitations_for` reads only warnings
-- [ ] **B-083 (P1)** A definition bound the critic and never reached the model
+- [x] **B-083 (P1)** A definition bound the critic and never reached the model
       — found while wiring verified queries into the same layer and asking what
       else renders there. `runner` matched definitions, put them on the bundle
       and handed them to the critic under a comment claiming *"the critic must
@@ -1910,7 +1918,7 @@ unexplained.
       dropped it every time because it could not know, so the demo would have
       passed for the wrong reason — proving a model is punished for not reading
       minds rather than that a constraint binds a model that saw it.
-- [ ] **B-081 (P2)** Nothing guarded BACKLOG.md, and a row was silently merged
+- [x] **B-081 (P2)** Nothing guarded BACKLOG.md, and a row was silently merged
       into another — `scripts/check_backlog.sh`, in `hygiene` beside
       `check_status.sh` and in `make preflight`. Ids unique and contiguous from
       B-001, every row beginning a line with the seven columns the header
@@ -1927,8 +1935,8 @@ unexplained.
       `in progress` and `accepted`, which two rows already used: a guard that
       enforces a vocabulary the project does not use is one that gets
       switched off.
-- [ ] WP10.2d Import (B-059) + verified queries + admin UI ← gate
-- [ ] GATE: **an organization's own writing changed the SQL a model generated,
+- [x] WP10.2d Import (B-059) + verified queries + admin UI ← gate
+- [x] GATE: **an organization's own writing changed the SQL a model generated,
       on a customer's warehouse** — `prep_quantity` imported from the customer's
       `meta_metric`, accepted by an Admin with the row-role filter their own
       `meta_gate` states in English and records as `enforced = 0`, after which
@@ -1944,10 +1952,28 @@ unexplained.
       demonstrated** (owner, 2026-08-18, B-053's disposition): four attempts gave
       compliance and two honest refusals, and **B-083's fix is why** — before it
       the model never saw the definition and dropped the filter every time, so
-      the criterion would have been met for the worst possible reason. User
-      sign-off
+      the criterion would have been met for the worst possible reason.
+      **Signed off by the owner on 2026-08-18** (#72), gate wording confirmed as
+      read.
 
 ## Phase 11 — Charts + polish (M11)
+- [ ] **B-088 (P1)** An accepted definition cannot be edited — no edit, no
+      un-accept, and re-accepting is a 404. **Raised from P2 to P1 and scheduled
+      here by the owner on 2026-08-18**, having hit it mid-walk: *"a semantic
+      layer whose definitions are write-once will not survive real use."* The
+      likeliest moment to get a filter wrong is the first time you write one,
+      which is exactly when the product locks you out; the only way back today
+      is deleting the row in `psql` and importing again. Wants
+      `PATCH .../definitions/{id}` for an **active** definition —
+      `required_filters`, `synonyms`, `description` — validated against the
+      catalog exactly as `accept` is, Admin-only, and **audited**, because it
+      changes what the platform enforces on generated SQL. Retiring an active
+      definition has the same shape and the same absence, so it belongs in the
+      same route or a sibling. Decide at the same time whether an edit is
+      **versioned** rather than overwriting: arch 5.4 says definitions are
+      *"validated against the catalog at save time and versioned"*, nothing
+      versions anything yet, and a run that cited a definition last month cannot
+      show what it said at the time
 - [ ] WP11.1 Chart tool (validated Vega-Lite) + client renderer
       — carries **B-048** (owner, at the Phase 7 sign-off): the chart belongs
       **inside the answer card**, and its spec must be openable the way the SQL
