@@ -117,6 +117,13 @@ table is already known here."* — a request that succeeded and proposed nothing
 
 ### 4. Accepting is where prose becomes a constraint (D-033) — **you must do this**
 
+**Accept one card only: `prep_quantity`. Leave the other seventeen in the
+queue.** Acceptance is per-card — each has its own "Also called" field, its own
+filter editor and its own buttons — and accepting the rest is not wrong, it
+just gives you seventeen definitions that bind nothing and one more thing to
+read. If you have already accepted them all, that is this script's fault for not
+saying so; see "Starting over" at the foot of this file.
+
 Find the **`prep_quantity`** card.
 
 First, read the sentence above the buttons **before touching anything**:
@@ -279,6 +286,25 @@ bash scripts/check_status.sh && bash scripts/check_backlog.sh
 **You should see** the API suite green, the web suite at **107 passed**, a clean
 build listing the new `/orgs/[orgId]/data-sources/[dataSourceId]/definitions`
 route, and both guards intact.
+
+---
+
+### Starting over
+
+An accepted definition **cannot currently be corrected** — there is no edit and
+no un-accept, and re-accepting an active one is a 404 (**B-088**). If you accept
+one with the wrong filter, or accept the whole queue by mistake, the way back is
+to remove that row and import again: the import skips every name already known,
+so exactly the removed metric comes back as a proposal.
+
+```sh
+ORG=ebfe8139-abbb-45ee-8e21-8ed3c3b50642
+docker exec dataagent-platform-pg-1 psql -U dataagent -d dataagent -c   "DELETE FROM semantic_definitions WHERE org_id='$ORG' AND name='prep_quantity';"
+```
+
+Then press **Import** on the screen again — one card returns.
+
+To clear everything and restart from step 3, drop the `AND name=…` clause.
 
 ---
 
