@@ -107,6 +107,58 @@ export interface KnowledgeDocument {
   indexed_at: string | null;
 }
 
+/**
+ * One predicate a statement must honour to be computing a metric (arch 5.4).
+ *
+ * The half of a definition a check can act on. The other half — `description`
+ * and `expression` — is prose for the prompt, and nothing parses it.
+ */
+export interface RequiredFilter {
+  table: string;
+  column: string;
+  /** in | not_in | eq | ne | gt | gte | lt | lte */
+  op: string;
+  values: string[];
+}
+
+/**
+ * What a metric means here, in the form the critic can enforce (D-033).
+ *
+ * `binds` is sent by the API rather than inferred from an empty
+ * `required_filters`, and the difference it names is the whole of D-033: a
+ * definition with filters **constrains** generated SQL and the critic blocks a
+ * statement that ignores one; a definition without them **informs** the model
+ * and is checked by nothing. A screen that worked that out for itself would
+ * eventually work it out wrongly.
+ */
+export interface SemanticDefinition {
+  id: string;
+  name: string;
+  /** metric | dimension */
+  kind: string;
+  description: string;
+  expression: string | null;
+  required_filters: RequiredFilter[];
+  synonyms: string[];
+  binds: boolean;
+}
+
+/**
+ * An imported definition waiting for an Admin (B-059).
+ *
+ * `provenance` is here because the review screen's first question is *where did
+ * this sentence come from* — the source table and the snapshot it was read at.
+ * A proposal whose origin cannot be shown is one nobody can responsibly accept.
+ */
+export interface DefinitionProposal {
+  id: string;
+  name: string;
+  description: string;
+  expression: string | null;
+  synonyms: string[];
+  provenance: Record<string, unknown>;
+}
+
 /** What registering a data source needs. The password goes nowhere else. */
 export interface NewDataSource {
   name: string;
@@ -413,6 +465,47 @@ export function isKnowledgeDocument(value: unknown): value is KnowledgeDocument 
     isNullableString(value.failure_reason) &&
     typeof value.created_at === "string" &&
     isNullableString(value.indexed_at)
+  );
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
+export function isRequiredFilter(value: unknown): value is RequiredFilter {
+  return (
+    isRecord(value) &&
+    typeof value.table === "string" &&
+    typeof value.column === "string" &&
+    typeof value.op === "string" &&
+    isStringArray(value.values)
+  );
+}
+
+export function isSemanticDefinition(value: unknown): value is SemanticDefinition {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    typeof value.kind === "string" &&
+    typeof value.description === "string" &&
+    isNullableString(value.expression) &&
+    Array.isArray(value.required_filters) &&
+    value.required_filters.every(isRequiredFilter) &&
+    isStringArray(value.synonyms) &&
+    typeof value.binds === "boolean"
+  );
+}
+
+export function isDefinitionProposal(value: unknown): value is DefinitionProposal {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    typeof value.description === "string" &&
+    isNullableString(value.expression) &&
+    isStringArray(value.synonyms) &&
+    isRecord(value.provenance)
   );
 }
 

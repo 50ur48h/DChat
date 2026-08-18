@@ -16,6 +16,7 @@ import {
   isConversation,
   isConversationMessage,
   isDataSource,
+  isDefinitionProposal,
   isExecution,
   isHealth,
   isInvitation,
@@ -26,6 +27,7 @@ import {
   isRefreshResult,
   isRun,
   isRunEvents,
+  isSemanticDefinition,
   isTestResult,
   type Accepted,
   type Accepted202,
@@ -34,6 +36,7 @@ import {
   type Conversation,
   type ConversationMessage,
   type DataSource,
+  type DefinitionProposal,
   type Execution,
   type Health,
   type Invitation,
@@ -43,9 +46,11 @@ import {
   type NewDataSource,
   type ProfileResult,
   type RefreshResult,
+  type RequiredFilter,
   type Run,
   type RunEvent,
   type RunEvents,
+  type SemanticDefinition,
   type TestResult,
 } from "./types";
 
@@ -177,6 +182,51 @@ export interface Api {
   uploadDocument(orgId: string, file: File, title?: string): Promise<KnowledgeDocument>;
   reindexDocument(orgId: string, documentId: string): Promise<KnowledgeDocument>;
   removeDocument(orgId: string, documentId: string): Promise<void>;
+  /**
+   * The semantic layer (WP10.2d). **Every one of these is Admin** — an accepted
+   * definition constrains generated SQL, so it is a privileged object rather
+   * than content. A screen that calls them for a Reader earns a 403 the API
+   * records; `useOrgRole` is what stops it being offered (B-008).
+   */
+  definitions(orgId: string, dataSourceId: string): Promise<SemanticDefinition[]>;
+  definitionProposals(orgId: string, dataSourceId: string): Promise<DefinitionProposal[]>;
+  createDefinition(
+    orgId: string,
+    dataSourceId: string,
+    definition: {
+      name: string;
+      description: string;
+      expression?: string | undefined;
+      synonyms?: string[] | undefined;
+      required_filters?: RequiredFilter[] | undefined;
+    },
+  ): Promise<SemanticDefinition>;
+  importDefinitions(
+    orgId: string,
+    dataSourceId: string,
+    mapping: {
+      table: string;
+      schema?: string | undefined;
+      name_column: string;
+      description_column: string;
+      expression_column?: string | undefined;
+      synonyms_column?: string | undefined;
+    },
+  ): Promise<DefinitionProposal[]>;
+  /**
+   * Bless a proposal, and say what it requires.
+   *
+   * The filters are what turn prose into a constraint (D-033), and an empty
+   * list is a real answer rather than a missing one: an Admin may accept a
+   * definition as prose, which puts it in front of the model without binding it.
+   */
+  acceptProposal(
+    orgId: string,
+    dataSourceId: string,
+    definitionId: string,
+    requiredFilters: RequiredFilter[],
+  ): Promise<SemanticDefinition>;
+  rejectProposal(orgId: string, dataSourceId: string, definitionId: string): Promise<void>;
   conversations(orgId: string): Promise<Conversation[]>;
   createConversation(
     orgId: string,
@@ -308,6 +358,58 @@ export function createApi(getToken: () => Promise<string | null>): Api {
     },
     async removeDocument(orgId, documentId) {
       await call(`/v1/orgs/${orgId}/documents/${documentId}`, { method: "DELETE" });
+    },
+    async definitions(orgId, dataSourceId) {
+      const payload = await call(`/v1/orgs/${orgId}/data-sources/${dataSourceId}/definitions`);
+      if (!Array.isArray(payload) || !payload.every(isSemanticDefinition)) {
+        throw new ApiError("The API's definitions response did not match the expected shape", 200);
+      }
+      return payload;
+    },
+    async definitionProposals(orgId, dataSourceId) {
+      const payload = await call(
+        `/v1/orgs/${orgId}/data-sources/${dataSourceId}/definitions/proposals`,
+      );
+      if (!Array.isArray(payload) || !payload.every(isDefinitionProposal)) {
+        throw new ApiError("The API's proposals response did not match the expected shape", 200);
+      }
+      return payload;
+    },
+    async createDefinition(orgId, dataSourceId, definition) {
+      return narrow(
+        await call(`/v1/orgs/${orgId}/data-sources/${dataSourceId}/definitions`, {
+          method: "POST",
+          body: definition,
+        }),
+        isSemanticDefinition,
+        "definition",
+      );
+    },
+    async importDefinitions(orgId, dataSourceId, mapping) {
+      const payload = await call(
+        `/v1/orgs/${orgId}/data-sources/${dataSourceId}/definitions/import`,
+        { method: "POST", body: mapping },
+      );
+      if (!Array.isArray(payload) || !payload.every(isDefinitionProposal)) {
+        throw new ApiError("The API's import response did not match the expected shape", 201);
+      }
+      return payload;
+    },
+    async acceptProposal(orgId, dataSourceId, definitionId, requiredFilters) {
+      return narrow(
+        await call(
+          `/v1/orgs/${orgId}/data-sources/${dataSourceId}/definitions/${definitionId}/accept`,
+          { method: "POST", body: { required_filters: requiredFilters } },
+        ),
+        isSemanticDefinition,
+        "definition",
+      );
+    },
+    async rejectProposal(orgId, dataSourceId, definitionId) {
+      await call(
+        `/v1/orgs/${orgId}/data-sources/${dataSourceId}/definitions/${definitionId}/reject`,
+        { method: "POST" },
+      );
     },
     async refreshCatalog(orgId, dataSourceId) {
       return narrow(

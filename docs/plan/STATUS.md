@@ -126,9 +126,20 @@ What is already on the branch, tested and green:
    the import returned, because activating on import is the shortcut a product
    surface would take. Locking the *read* side to Admin is deliberate and is
    the weaker half of the argument: filed as **B-082** rather than defaulted.
-2. **The admin review UI** — the screen that shows a proposal, its provenance and
-   what it would create, and lets an Admin accept or reject each row. Follow
-   B-008: a Reader sees no controls, and an unknown role fails closed.
+2. ~~**The admin review UI**~~ — **done.** `screens/definitions.tsx`, at
+   `/orgs/{org}/data-sources/{id}/definitions`, linked from the data-source card
+   for Admins only. A proposal shows what it says, its expression, its synonyms
+   and **where it came from** — the customer's own table, out of the provenance
+   the import recorded. B-008 held twice over: a Reader sees one sentence
+   explaining why not, an unknown role fails closed, and the screen **fetches
+   nothing** for either, because a 403 for an action never offered is an audited
+   denial nobody attempted. The load-bearing detail is D-033 made visible: the
+   accept button reads **"Accept and enforce"** or **"Accept as prose"**
+   depending on whether a filter is staged, and the sentence above it says what
+   that will mean — *"a query that ignores it is blocked"* against *"binds
+   nothing… an answer resting on it will say so"*. Two defects the tests found
+   and no reading would have: the same error rendered in two cards at once, and
+   two different controls both labelled "Table". 15 web tests; suite now 107.
 3. **`semantic/verified.py`** — admin-blessed query patterns surfaced to the
    planner as few-shot grounding (arch 5.4).
 4. **B-070** — define `repeat_rate` with its denominator, so golden eval **#10**

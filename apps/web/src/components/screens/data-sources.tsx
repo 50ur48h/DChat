@@ -302,6 +302,13 @@ export function DataSources({ orgId, role }: { orgId: string; role: string | nul
                     <Link href={`/orgs/${orgId}/data-sources/${source.id}/catalog`}>
                       <Button>Catalog</Button>
                     </Link>
+                    {/* Admin only, because everything behind it is: an accepted
+                        definition constrains the SQL this platform will run. */}
+                    {isAdmin && (
+                      <Link href={`/orgs/${orgId}/data-sources/${source.id}/definitions`}>
+                        <Button>Definitions</Button>
+                      </Link>
+                    )}
                     {canRefresh && (
                       <>
                         <Button disabled={busy} onClick={() => refresh(source)}>

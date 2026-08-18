@@ -54,6 +54,16 @@ under "Unreleased", only for changes a user would notice.
   description, so a real question matched nothing at all.
 
 ### Added
+- Definitions your database already carries can be imported rather than retyped.
+  Point an admin at the table that holds your metrics and their meanings, and
+  each row arrives as a proposal showing what it says and which of your tables it
+  came from. Nothing takes effect until an admin accepts it.
+- A definitions screen, per data source, which draws the line the rest of the
+  product depends on: accepted with the filters a metric requires, a definition
+  is **enforced** and a query that ignores it is stopped; accepted as it stands,
+  it is guidance the agent reads and nothing checks. The screen says which of the
+  two a click is about to do, before the click, and labels every definition in
+  force with which one it is.
 - When a review of an answer does not pass and the answer is shown anyway, the
   review's objection is now the first thing listed beside it, in the reviewer's
   own words, and the answer can no longer describe itself as highly confident.
