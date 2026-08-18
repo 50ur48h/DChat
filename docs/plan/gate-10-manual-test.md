@@ -6,14 +6,33 @@ and cannot be asserted into existence.
 
 Roughly 20 minutes. Steps 6–8 spend real API credit (about 25k tokens total).
 
-**Setup, once**
+**Setup** — already done for you on this machine (rebuilt, migrated to
+revision **0021**, all five containers healthy, embedder reaching the API). To
+redo it from scratch:
 
 ```sh
 git checkout p10.2d-import && git pull
-make migrate          # revision 0021 is new
-make up               # if the stack is not already running
-docker compose -f ops/docker-compose.yml restart web api   # host edits do not cross the bind mount
+make up               # rebuilds and starts; recreating is what picks up host edits
+make migrate
 ```
+
+**Where to go**
+
+| | |
+|---|---|
+| App | <http://localhost:3000> |
+| Org | `sourabh` (`ebfe8139-abbb-45ee-8e21-8ed3c3b50642`) |
+| Data source | **F&B demo** (`ad18394b-0fb7-45a7-ad4e-66a68cf8b241`) |
+| Definitions screen | <http://localhost:3000/orgs/ebfe8139-abbb-45ee-8e21-8ed3c3b50642/data-sources/ad18394b-0fb7-45a7-ad4e-66a68cf8b241/definitions> |
+
+Sign-in is **Entra** here, not dev names. The org has 0 definitions and an
+active 35-table catalog, so step 3 starts clean.
+
+**One thing needs your decision before step 2.** That step needs a **Reader**,
+and this org has two members and both are Admin — you (`sourabh@rereed.com`) and
+`sourabhkumrawat02@gmail.com`. I have not changed either. On the members screen,
+set the second one to **Reader** (two clicks, and it exercises the members UI on
+the way past); afterwards set it back to Admin the same way.
 
 ---
 

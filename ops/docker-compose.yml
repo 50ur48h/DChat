@@ -127,6 +127,16 @@ services:
       LLM_RUN_COST_LIMIT_USD: ${LLM_RUN_COST_LIMIT_USD:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # The embedding model, for exactly the reason the block above exists
+      # (B-086). Retrieval happens *inside the API process*, so a model named
+      # only in the developer's shell reaches the eval harness and never the
+      # product: the container built no embedder, every card and document stayed
+      # lexical, and D-031 degraded the search on every question asked in the
+      # browser while the same question answered fully from the host. Empty is a
+      # legitimate deployment — it costs the vector arm and the result says so.
+      EMBEDDINGS_PROVIDER: ${EMBEDDINGS_PROVIDER:-}
+      EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-}
+      EMBEDDINGS_DIMENSIONS: ${EMBEDDINGS_DIMENSIONS:-}
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
