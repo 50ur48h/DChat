@@ -85,6 +85,23 @@ def _passes() -> str:
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
+def _reflects_citing_the_execution(request: object) -> str:
+    """Reflect with a finding that cites the execution just run.
+
+    The id is minted at run time, so it is read out of the prompt for the reason
+    `_cites_the_execution` gives — and reading it is itself the assertion that
+    the reflecting model is shown what it ran.
+    """
+    text_of = getattr(request, "prompt_text", "")
+    found = _UUID.search(text_of)
+    assert found is not None, f"the reflecting prompt named no execution: {text_of}"
+    return _reflect(
+        findings=[
+            ReflectFinding(statement="Shop counts are available.", supported_by=[found.group(0)])
+        ]
+    )
+
+
 def _cites_the_execution(request: object) -> str:
     """Compose by reading the execution id out of the prompt it was given.
 
@@ -155,6 +172,61 @@ async def test_a_question_becomes_sql_rows_and_a_cited_answer(
     assert view.answer == "There are 3 shops."
     assert view.finished_at is not None
     # The finding is the citation, and it names the row the DAL really wrote.
+    assert len(view.findings) == 1
+    assert view.findings[0].support == list(outcome.execution_ids)
+
+
+async def test_a_rephrased_answer_is_not_a_second_finding(
+    context: ToolContext, fake_llm: FakeLLM
+) -> None:
+    """**B-096.** The Phase 7 rule is *one claim once*, and the guard that
+    enforced it compared characters — so the composer doing its job, rephrasing
+    a finding into an answer, defeated it.
+
+    A live run showed an answer card with two "high confidence" badges and two
+    "show the query" controls over a single query: *"Monthly order counts are
+    available for all 18 months…"* beside *"Orders by month: February 2025:
+    3,624; …"*, both citing the same execution.
+
+    Two claims resting on exactly the same executions are one claim, whatever
+    words they use — which is the rule `mark_cited` already followed, one line
+    below the one that did not.
+    """
+    fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql")
+    # The loop reaches a finding of its own, in its own words, **citing the same
+    # execution the answer will cite** — which is the live case: two phrasings
+    # of one claim resting on one query.
+    fake_llm.script(_reflects_citing_the_execution, role="plan")
+    fake_llm.script(_cites_the_execution, role="compose")
+    fake_llm.script(_passes(), role="critic")
+    run_id = await _run_for(context, "How many shops are there?")
+
+    await _execute(context, run_id)
+
+    view = await runs.get_run(org_id=context.org_id, run_id=run_id)
+    statements = [finding.statement for finding in view.findings]
+    assert len(view.findings) == 1, (
+        f"the same claim was recorded twice, in two phrasings: {statements}"
+    )
+
+
+async def test_a_genuinely_new_claim_still_becomes_a_finding(
+    context: ToolContext, fake_llm: FakeLLM
+) -> None:
+    """The other side of B-096, so the fix cannot be "record nothing".
+
+    A run whose loop reached no finding still has an answer to stand behind, and
+    the card is built around a claim that points at the row supporting it.
+    """
+    fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql")
+    fake_llm.script(_reflect(), role="plan")
+    fake_llm.script(_cites_the_execution, role="compose")
+    fake_llm.script(_passes(), role="critic")
+    run_id = await _run_for(context, "How many shops are there?")
+
+    outcome = await _execute(context, run_id)
+
+    view = await runs.get_run(org_id=context.org_id, run_id=run_id)
     assert len(view.findings) == 1
     assert view.findings[0].support == list(outcome.execution_ids)
 

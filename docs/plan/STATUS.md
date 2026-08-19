@@ -2181,6 +2181,15 @@ unexplained.
       is. A chart nobody can trace back to the query behind it is decoration that
       looks like evidence — the same claim Phase 7 made for answers, extended to
       pictures. Filed before the tool is designed rather than retrofitted after
+- [x] **B-096 (P1)** the same claim was recorded twice, because the guard
+      against it compared characters — the Phase 7 rule is *one claim once*, and
+      a text match enforces it only for identical text, so the composer
+      rephrasing a finding into an answer defeated it. The owner saw it on a
+      live run: two `high confidence` badges and two *“show the query”* controls
+      over one query. **The fix keys on the evidence**: two claims resting on
+      exactly the same executions are one claim, whatever words they use — which
+      is the rule `mark_cited` already followed one line below. Fixed in this
+      WP, with a test that fails against the old guard
 - [ ] **B-095 (P1)** a run whose every query *failed* carries no limitation, and
       the answer calls the failure an empty result — *“no data was returned”*
       with `limitations: []`, while both executions had ended in a connector

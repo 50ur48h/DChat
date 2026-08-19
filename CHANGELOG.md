@@ -37,6 +37,10 @@ under "Unreleased", only for changes a user would notice.
   knowing its address.
 
 ### Fixed
+- An answer no longer appears twice on its own card. A claim the agent reached
+  during its work and the same claim restated in the final answer were recorded
+  as two separate findings whenever the wording differed, so a single query
+  could produce two confidence badges and two "show the query" links.
 - Settings you put in your local configuration now reach the running product.
   Six of them — the row and time caps on every query, how long a stored result
   lives, the embedding batch size, what a run does when a model has no price,

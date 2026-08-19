@@ -756,10 +756,24 @@ async def _write_ending(
 
     # The loop already persisted each finding as it reached it, so only the
     # composed answer may still need one.
+    #
+    # **Matched on the evidence, not on the words** (**B-096**). The Phase 7 rule
+    # is *one claim once*, and a guard that compares characters enforces it only
+    # for identical characters — so the composer doing its job, rephrasing a
+    # finding into an answer, defeated it. A live run showed the card with two
+    # "high confidence" badges and two "show the query" controls over one query:
+    # *"Monthly order counts are available for all 18 months…"* and *"Orders by
+    # month: February 2025: 3,624; …"*, both citing the same execution.
+    #
+    # Two claims resting on exactly the same executions are one claim, whatever
+    # words they use. That is the rule `mark_cited` below already follows, in as
+    # many words — this line simply had not learned it.
     already = {finding.statement.strip() for finding in state.findings}
-    if final.answered and cited and final.answer.strip() not in already:
+    evidence = {tuple(sorted(finding.support)) for finding in state.findings}
+    restated = final.answer.strip() in already or tuple(sorted(cited)) in evidence
+    if final.answered and cited and not restated:
         # A finding only when there is something to stand behind, and only when
-        # the loop did not already record this sentence — otherwise the answer
+        # the loop did not already record this claim — otherwise the answer
         # card shows the same claim twice, which the Phase 7 gate caught once
         # already.
         await runs.add_finding(
