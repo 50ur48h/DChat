@@ -2181,6 +2181,12 @@ unexplained.
       is. A chart nobody can trace back to the query behind it is decoration that
       looks like evidence — the same claim Phase 7 made for answers, extended to
       pictures. Filed before the tool is designed rather than retrofitted after
+- [ ] **B-095 (P1)** a run whose every query *failed* carries no limitation, and
+      the answer calls the failure an empty result — *“no data was returned”*
+      with `limitations: []`, while both executions had ended in a connector
+      error. A reader is told their data is empty when nothing was asked of it.
+      One predicate: the thin-evidence note only looks at executions that
+      succeeded. Found on WP11.1's manual walk, from the owner's own question
 - [ ] WP11.2 History/catalog/members polish + Playwright smoke      ← gate PR
       — carries **B-017**: recovery when an org has no Admin who can sign in
       (owner's call 2026-08-12, moved forward from Phase 12)
