@@ -30,6 +30,16 @@ and `accept` takes a body — the filters — that `reject` has no meaning for. 
 single status PATCH would also make the interesting one, accepting *with*
 filters, look like a routine update.
 
+**`POST …/reinstate` brings a retired one back** (**B-094**), and it is a POST
+for the reason accept and reject are: it is a decision with consequences, not a
+field. Retiring had no opposite, and three correct rules made that a dead end —
+`accept` takes only proposals, `PATCH` takes only active ones, and an import
+skips a name any row already holds — so a mis-clicked retire was recoverable
+only in `psql`. It validates before it takes effect, and takes optional filters
+for the case that would otherwise be a second dead end: a definition whose
+catalog has moved on cannot be edited while retired, so it is repaired in the
+same act that brings it back.
+
 **PATCH is for an active definition's content, and `DELETE` retires it**
 (**B-088**). Until they existed a definition was write-once — no edit, no
 un-accept, re-accepting a 404 — and the only way to correct a filter was to
@@ -51,9 +61,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, Field
 
 from dataagent.auth.context import RequestContext
@@ -261,6 +271,22 @@ class UpdateDefinitionIn(BaseModel):
     )
 
 
+class ReinstateIn(BaseModel):
+    """Optional corrections to make as a definition comes back into force.
+
+    Omitted is the ordinary case and means *as it was retired*. Filters are
+    accepted here because a retired definition cannot be edited — `PATCH` takes
+    only active ones — so one whose catalog has moved on would otherwise be
+    permanently unreinstatable, which is a second dead end behind the one B-094
+    is about.
+    """
+
+    required_filters: list[RequiredFilterModel] | None = Field(
+        default=None,
+        description="Replaces what it was retired holding. Omit to keep them.",
+    )
+
+
 class VersionOut(BaseModel):
     """One state a definition has been in force in (**B-088**, arch 5.4)."""
 
@@ -424,14 +450,23 @@ async def retire_verified_query(
 async def list_definitions(
     context: Annotated[RequestContext, Depends(require_admin)],
     data_source_id: DataSourceId,
+    status: Annotated[
+        Literal["active", "retired"],
+        Query(description="`active` binds; `retired` is out of force and can be reinstated."),
+    ] = "active",
 ) -> list[DefinitionOut]:
-    """The **active** ones, by name.
+    """The **active** ones by default, by name.
 
     Proposals are not here — they have their own route, because a screen that
     mixes what binds with what is merely suggested is the screen on which
     somebody mistakes the second for the first.
+
+    `status=retired` exists because they vanished entirely (**B-094**): an Admin
+    could not see there was anything to bring back, which turned a mis-clicked
+    retire into a database job. Listing one changes nothing about it — a retired
+    definition still binds nothing and still reaches no prompt.
     """
-    found = await definitions_service.definitions_for(context.org_id, data_source_id)
+    found = await definitions_service.definitions_for(context.org_id, data_source_id, status=status)
     return [DefinitionOut.of(definition) for definition in found]
 
 
@@ -653,6 +688,50 @@ async def retire_definition(
         )
     except LookupError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such definition") from error
+
+
+@router.post(
+    "/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}/reinstate",
+    response_model=DefinitionOut,
+    summary="Bring a retired definition back into force",
+)
+async def reinstate_definition(
+    context: Annotated[RequestContext, Depends(require_admin)],
+    data_source_id: DataSourceId,
+    definition_id: DefinitionId,
+    body: ReinstateIn | None = None,
+) -> DefinitionOut:
+    """**B-094.** `DELETE` had no opposite, and the absence was a dead end rather
+    than an inconvenience: a retired definition cannot be accepted, cannot be
+    edited, and cannot be re-imported, because its name is still taken.
+
+    Validated before it takes effect, exactly as an edit is — a definition
+    retired last month may name a column the catalog has since lost, and putting
+    it back into force to bind nothing would be worse than leaving it retired.
+    The optional `required_filters` is what stops *that* being a second dead end.
+
+    A definition that is not retired is a 404: there is nothing to bring back,
+    and a route that quietly succeeded on an active one would be a second way to
+    write its filters with none of `PATCH`'s framing.
+    """
+    try:
+        definition = await definitions_service.reinstate(
+            org_id=context.org_id,
+            definition_id=definition_id,
+            required_filters=(
+                None
+                if body is None or body.required_filters is None
+                else _filters(body.required_filters)
+            ),
+            actor_user_id=context.user_id,
+        )
+    except DefinitionError as error:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
+    except LookupError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such retired definition") from error
+    except (NotFoundError, NoCatalogError) as error:
+        raise _no_such_source(error) from error
+    return DefinitionOut.of(definition)
 
 
 @router.get(

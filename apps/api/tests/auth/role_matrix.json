@@ -164,6 +164,11 @@
     "contributor": "deny(403)",
     "reader": "deny(403)"
   },
+  "POST /v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}/reinstate": {
+    "admin": "allow",
+    "contributor": "deny(403)",
+    "reader": "deny(403)"
+  },
   "POST /v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}/reject": {
     "admin": "allow",
     "contributor": "deny(403)",

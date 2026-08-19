@@ -175,7 +175,19 @@ DEFINITION_STATUSES: tuple[str, ...] = ("proposed", "active", "retired")
 #: B-088). `created` and `accepted` are both first versions and are told apart
 #: because their provenance differs: one is an Admin's own sentence, the other
 #: is the customer's, blessed.
-DEFINITION_CHANGES: tuple[str, ...] = ("created", "accepted", "updated", "retired")
+#:
+#: `reinstated` is its own word rather than another `updated` (revision 0023,
+#: **B-094**): bringing a definition back into force is a decision, not a field
+#: edit, and a history that called it an edit would read as though somebody had
+#: changed the wording. The gap between retired and active is the thing a reader
+#: of the history most needs to see.
+DEFINITION_CHANGES: tuple[str, ...] = (
+    "created",
+    "accepted",
+    "updated",
+    "retired",
+    "reinstated",
+)
 
 
 class Organization(Base):

@@ -190,7 +190,11 @@ export interface Api {
    * than content. A screen that calls them for a Reader earns a 403 the API
    * records; `useOrgRole` is what stops it being offered (B-008).
    */
-  definitions(orgId: string, dataSourceId: string): Promise<SemanticDefinition[]>;
+  definitions(
+    orgId: string,
+    dataSourceId: string,
+    status?: "active" | "retired" | undefined,
+  ): Promise<SemanticDefinition[]>;
   definitionProposals(orgId: string, dataSourceId: string): Promise<DefinitionProposal[]>;
   createDefinition(
     orgId: string,
@@ -257,6 +261,20 @@ export interface Api {
    * checked against it last month is still explainable this month.
    */
   retireDefinition(orgId: string, dataSourceId: string, definitionId: string): Promise<void>;
+  /**
+   * Bring a retired definition back into force (**B-094**).
+   *
+   * `requiredFilters` is for the case that would otherwise be a dead end: a
+   * retired definition cannot be edited, so one whose catalog has moved on is
+   * repaired in the same act that brings it back. Omit it to keep what the
+   * definition was retired holding, which is the ordinary case.
+   */
+  reinstateDefinition(
+    orgId: string,
+    dataSourceId: string,
+    definitionId: string,
+    requiredFilters?: RequiredFilter[] | undefined,
+  ): Promise<SemanticDefinition>;
   /** Everything this definition has said, oldest first (B-088, D-036). */
   definitionVersions(
     orgId: string,
@@ -395,8 +413,11 @@ export function createApi(getToken: () => Promise<string | null>): Api {
     async removeDocument(orgId, documentId) {
       await call(`/v1/orgs/${orgId}/documents/${documentId}`, { method: "DELETE" });
     },
-    async definitions(orgId, dataSourceId) {
-      const payload = await call(`/v1/orgs/${orgId}/data-sources/${dataSourceId}/definitions`);
+    async definitions(orgId, dataSourceId, status) {
+      const payload = await call(
+        `/v1/orgs/${orgId}/data-sources/${dataSourceId}/definitions` +
+          (status ? `?status=${status}` : ""),
+      );
       if (!Array.isArray(payload) || !payload.every(isSemanticDefinition)) {
         throw new ApiError("The API's definitions response did not match the expected shape", 200);
       }
@@ -468,6 +489,22 @@ export function createApi(getToken: () => Promise<string | null>): Api {
       await call(`/v1/orgs/${orgId}/data-sources/${dataSourceId}/definitions/${definitionId}`, {
         method: "DELETE",
       });
+    },
+    async reinstateDefinition(orgId, dataSourceId, definitionId, requiredFilters) {
+      return narrow(
+        await call(
+          `/v1/orgs/${orgId}/data-sources/${dataSourceId}/definitions/${definitionId}/reinstate`,
+          {
+            method: "POST",
+            // Omitted rather than sent empty when there is nothing to correct:
+            // the API reads an absent list as "as it was retired" and an empty
+            // one as "replace them with none", which is a different request.
+            body: requiredFilters ? { required_filters: requiredFilters } : {},
+          },
+        ),
+        isSemanticDefinition,
+        "definition",
+      );
     },
     async definitionVersions(orgId, dataSourceId, definitionId) {
       const payload = await call(

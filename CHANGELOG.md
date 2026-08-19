@@ -73,6 +73,11 @@ under "Unreleased", only for changes a user would notice.
   description, so a real question matched nothing at all.
 
 ### Added
+- A definition taken out of force can be brought back. Retired ones are listed
+  on the definitions screen under "Out of force" — they were invisible before,
+  so there was no way to tell there was anything to recover — and one click
+  returns a definition to force with what it was holding when it was retired.
+  Its history says it was brought back rather than edited.
 - The definitions screen can now correct a definition that is already in force,
   take one out of force, and show what it has said version by version. Until now
   the correction existed only as an API call, so the way to fix a filter was

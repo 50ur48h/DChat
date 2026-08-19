@@ -839,6 +839,186 @@ async def test_a_definition_in_another_organization_cannot_be_edited(
 
 
 # ---------------------------------------------------------------------------
+# Bringing one back, which used to require psql (B-094)
+# ---------------------------------------------------------------------------
+
+
+async def test_a_retired_definition_can_be_brought_back_and_the_history_says_so(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """**B-094, and the acceptance the owner wrote.** `DELETE` had no opposite,
+    and three correct rules made that a dead end: accept takes only proposals,
+    edit takes only active ones, and an import skips a name any row already
+    holds. A mis-clicked retire was recoverable only in the database.
+
+    The history must read as a life — retired, then reinstated — because a
+    reader of it is asking what was in force when an answer was written, and a
+    gap that looked like an ordinary edit would answer that wrongly.
+    """
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+    definition = await _active_definition(api, org_id, source_id)
+    await api.call("DELETE", f"{base}/{definition['id']}", "alice")
+
+    status, back = await api.call("POST", f"{base}/{definition['id']}/reinstate", "alice")
+
+    assert status == 200
+    # v1 created, v2 retired, v3 reinstated: one more than it went out on.
+    assert back["version"] == 3
+    _, active = await api.call("GET", base, "alice")
+    assert [item["name"] for item in active] == [definition["name"]]
+
+    _, history = await api.call("GET", f"{base}/{definition['id']}/versions", "alice")
+    assert [item["change"] for item in history] == ["created", "retired", "reinstated"]
+
+
+async def test_reinstating_keeps_the_filters_it_was_retired_holding(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """The ordinary case: back as it was, still binding what it bound."""
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+    definition = await _active_definition(api, org_id, source_id)
+    await api.call(
+        "PATCH",
+        f"{base}/{definition['id']}",
+        "alice",
+        {
+            "required_filters": [
+                {"table": "products", "column": "price", "op": "gt", "values": ["0"]}
+            ]
+        },
+    )
+    await api.call("DELETE", f"{base}/{definition['id']}", "alice")
+
+    _, back = await api.call("POST", f"{base}/{definition['id']}/reinstate", "alice")
+
+    assert back["binds"] is True
+    assert back["required_filters"][0]["column"] == "price"
+
+
+async def test_a_definition_whose_catalog_moved_on_is_repaired_as_it_comes_back(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """**The second dead end, closed in the same act.** A retired definition
+    cannot be edited — `PATCH` takes only active ones — so one whose filters no
+    longer resolve would be permanently unreinstatable, which is B-094's own
+    shape one layer down."""
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+    definition = await _active_definition(api, org_id, source_id)
+    await api.call("DELETE", f"{base}/{definition['id']}", "alice")
+
+    status, body = await api.call(
+        "POST",
+        f"{base}/{definition['id']}/reinstate",
+        "alice",
+        {
+            "required_filters": [
+                {"table": "products", "column": "invented", "op": "eq", "values": ["1"]}
+            ]
+        },
+    )
+
+    assert status == 400
+    assert "invented" in body["detail"]
+    # Refused means still retired, not half-back.
+    _, active = await api.call("GET", base, "alice")
+    assert active == []
+
+    status, back = await api.call(
+        "POST",
+        f"{base}/{definition['id']}/reinstate",
+        "alice",
+        {
+            "required_filters": [
+                {"table": "products", "column": "price", "op": "gt", "values": ["0"]}
+            ]
+        },
+    )
+
+    assert status == 200
+    assert back["required_filters"][0]["column"] == "price"
+
+
+async def test_reinstating_something_that_is_not_retired_is_a_404(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """An active definition has nothing to come back from, and a route that
+    quietly succeeded on one would be a second way to write its filters with
+    none of PATCH's framing. A proposal is not reinstatable either: it never
+    took effect, so there is no state to return it to."""
+    await _metric_table(isolated_customer_database)
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+    definition = await _active_definition(api, org_id, source_id)
+
+    status, _ = await api.call("POST", f"{base}/{definition['id']}/reinstate", "alice")
+    assert status == 404
+
+    _, proposed = await api.call("POST", f"{base}/import", "alice", _import_body())
+    status, _ = await api.call("POST", f"{base}/{proposed[0]['id']}/reinstate", "alice")
+    assert status == 404
+
+
+async def test_a_retired_definition_can_be_found_before_it_can_be_reinstated(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """**Half of B-094 is discoverability.** They vanished from every view, so an
+    Admin could not see there was anything to bring back — the reason a
+    mis-click became a database job. Listing one puts it nowhere near force:
+    the default list still holds only what binds."""
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+    definition = await _active_definition(api, org_id, source_id)
+    await api.call("DELETE", f"{base}/{definition['id']}", "alice")
+
+    status, retired = await api.call("GET", f"{base}?status=retired", "alice")
+
+    assert status == 200
+    assert [item["name"] for item in retired] == [definition["name"]]
+
+    _, active = await api.call("GET", base, "alice")
+    assert active == []
+
+
+async def test_reinstating_lands_in_the_audit_log_as_its_own_act(
+    api: Api,
+    app_database: URL,
+    isolated_customer_database: CustomerDatabase,
+) -> None:
+    """Recorded as a reinstatement rather than as an edit, in the audit trail as
+    in the history: a trail that called it an edit would read as though somebody
+    had changed the wording."""
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+    definition = await _active_definition(api, org_id, source_id)
+    await api.call("DELETE", f"{base}/{definition['id']}", "alice")
+    await api.call("POST", f"{base}/{definition['id']}/reinstate", "alice")
+
+    engine = create_async_engine(app_database)
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(
+                text("SELECT set_config('app.org_id', :org, false)"), {"org": org_id}
+            )
+            rows = (
+                await connection.execute(
+                    text("SELECT action FROM audit_log WHERE object_id = :id ORDER BY id"),
+                    {"id": definition["id"]},
+                )
+            ).fetchall()
+    finally:
+        await engine.dispose()
+
+    assert [row[0] for row in rows] == [
+        "semantic.definition_created",
+        "semantic.definition_retired",
+        "semantic.definition_reinstated",
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Verified queries: approved examples, judged but never run
 # ---------------------------------------------------------------------------
 

@@ -61,6 +61,7 @@ __all__ = [
     "definitions_for",
     "matching",
     "record_version",
+    "reinstate",
     "retire",
     "update",
     "validate",
@@ -327,13 +328,22 @@ async def create(
     return definition
 
 
-async def definitions_for(org_id: uuid.UUID, data_source_id: uuid.UUID) -> tuple[Definition, ...]:
-    """Every **active** definition for one data source, by name.
+async def definitions_for(
+    org_id: uuid.UUID, data_source_id: uuid.UUID, *, status: str = STATUS_ACTIVE
+) -> tuple[Definition, ...]:
+    """Every definition for one data source in one state, by name.
 
-    Proposed and retired ones are left where they are: a proposal has not been
-    blessed by an Admin and must not constrain anything (B-059's rule, since an
-    imported definition is a privileged object), and a retired one is kept only
-    so that a run which cited it can still explain itself.
+    **Active by default, and every caller that binds anything uses the default.**
+    A proposal has not been blessed by an Admin and must not constrain anything
+    (B-059's rule, since an imported definition is a privileged object); a
+    retired one is out of force and is kept so that a run which cited it can
+    still explain itself.
+
+    Asking for the retired ones is a screen's business, not the agent's
+    (**B-094**). They vanished from every view, so an Admin could not see there
+    was anything to bring back — which turned a mis-clicked retire into a `psql`
+    job. Nothing about being listed puts a retired definition back into force;
+    `reinstate` is the only thing that does.
     """
     async with org_session(org_id) as session:
         rows = (
@@ -342,7 +352,7 @@ async def definitions_for(org_id: uuid.UUID, data_source_id: uuid.UUID) -> tuple
                     select(SemanticDefinition)
                     .where(
                         SemanticDefinition.data_source_id == data_source_id,
-                        SemanticDefinition.status == STATUS_ACTIVE,
+                        SemanticDefinition.status == status,
                     )
                     .order_by(SemanticDefinition.name)
                 )
@@ -570,6 +580,82 @@ async def retire(
             details={"name": row.name, "version": row.version},
         )
         await session.flush()
+
+
+async def reinstate(
+    *,
+    org_id: uuid.UUID,
+    definition_id: uuid.UUID,
+    required_filters: Sequence[Mapping[str, object]] | None = None,
+    actor_user_id: uuid.UUID | None = None,
+) -> Definition:
+    """Bring a retired definition back into force (**B-094**).
+
+    **The verb `retire` had no opposite, and three correct rules made that a dead
+    end**: `accept` takes only proposals, `update` takes only active ones, and an
+    import skips a name any row already holds — deliberately, so a crawler cannot
+    re-propose what an Admin turned down. A mis-clicked retire was therefore
+    recoverable only in the database, which is the shape of the hole **B-088**
+    was filed for one verb earlier. The owner hit it on their first real use.
+
+    **Validated before it takes effect, exactly as an edit is.** A definition
+    retired last month names columns in a catalog that has moved on since, and
+    putting one back into force with a filter that matches nothing would be worse
+    than leaving it retired: it would bind, silently, to nothing.
+
+    **Which is why the filters can be corrected here.** A retired definition
+    cannot be edited — `update` refuses anything that is not active — so a
+    definition whose filters no longer resolve would otherwise be permanently
+    unreinstatable, a second dead end behind the first. Passing
+    ``required_filters`` replaces them as part of the same act; omitting them
+    keeps what the definition was retired holding, which is the ordinary case
+    and the one the acceptance test exercises.
+
+    Recorded as its own change rather than as an `updated` (revision 0023): a
+    history that called this an edit would read as though somebody had changed
+    the wording, and the gap between retired and active is what a reader needs
+    to see.
+    """
+    from dataagent.dal.policy import source_policy
+
+    async with org_session(org_id) as session:
+        row = await session.get(SemanticDefinition, definition_id)
+        if row is None or row.status != STATUS_RETIRED:
+            # A proposal that was rejected is `retired` too, and is deliberately
+            # not reinstatable here: it never took effect, so there is no state
+            # to return it to. `version` is 1 only when a row has been in force.
+            raise LookupError("No such retired definition")
+
+        definition = _definition_of(row)
+        if required_filters is not None:
+            definition = replace(
+                definition,
+                required_filters=tuple(RequiredFilter.of(dict(item)) for item in required_filters),
+            )
+        if definition.required_filters:
+            validate(definition, await source_policy(org_id, row.data_source_id))
+
+        row.required_filters = _filters_json(definition.required_filters)
+        row.status = STATUS_ACTIVE
+        row.updated_at = datetime.now(UTC)
+        row.version += 1
+        record_version(session, row, change="reinstated", actor_user_id=actor_user_id)
+        audit(
+            session,
+            org_id=org_id,
+            actor_user_id=actor_user_id,
+            action="semantic.definition_reinstated",
+            object_type="semantic_definition",
+            object_id=str(row.id),
+            details={
+                "name": row.name,
+                "version": row.version,
+                "binds": bool(definition.required_filters),
+                "filters_corrected": required_filters is not None,
+            },
+        )
+        await session.flush()
+        return replace(definition, version=row.version)
 
 
 async def versions_for(org_id: uuid.UUID, definition_id: uuid.UUID) -> tuple[Version, ...]:

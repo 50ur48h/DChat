@@ -174,6 +174,13 @@ PROBES: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
         "/v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}/versions",
         None,
     ),
+    # Bringing one back (B-094). Admin like every other verb here, and for the
+    # sharpest reason: it puts filters back in front of the critic.
+    (
+        "POST",
+        "/v1/orgs/{org_id}/data-sources/{data_source_id}/definitions/{definition_id}/reinstate",
+        None,
+    ),
     # Verified queries (arch 5.4). Admin like the rest of the semantic layer,
     # and for a reason of its own: an approved example is SQL this organization
     # is telling the planner to imitate.
@@ -213,6 +220,11 @@ PROPOSAL_POOL: dict[str, str] = {
     f"{DEFINITIONS}/reject": "rejected",
     DEFINITIONS: "edited",
     f"{DEFINITIONS}/versions": "edited",
+    # Its own pool, already `retired`: probing it against an active row would
+    # record a 404 about state as though it were a decision about role, and
+    # sharing the `retired` pool with the DELETE probe would hand the second one
+    # a row the first had already consumed.
+    f"{DEFINITIONS}/reinstate": "reinstated",
 }
 
 #: Query strings for routes that require one. Without it the probe earns a 422
@@ -268,8 +280,8 @@ class Matrix:
     #: evidence probe records a role decision rather than "that execution is not
     #: on this run", which is a 404 of an entirely different kind.
     executions: dict[str, uuid.UUID]
-    #: Four definitions **per role**: one each for the accept, reject and retire
-    #: probes, plus an active one the edit and versions probes read. Each of
+    #: Five definitions **per role**: one each for the accept, reject, retire and
+    #: reinstate probes, plus an active one the edit and versions probes read. Each of
     #: those verbs consumes the row it is handed, so a shared one
     #: would record an already-decided 404 for whichever ran second — a
     #: lifecycle fact wearing the clothes of a role decision.
@@ -337,6 +349,9 @@ async def matrix_app(
         # a 404 about state as though it were a decision about role.
         "edited": {},
         "retired": {},
+        # And this one starts out of force, because that is the only state
+        # `reinstate` accepts (B-094).
+        "reinstated": {},
     }
     verified: dict[str, uuid.UUID] = {}
     documents: dict[str, uuid.UUID] = {}
@@ -454,10 +469,14 @@ async def matrix_app(
         # because the import path is stubbed above and because what the accept
         # and reject probes need is simply a row in the state those verbs act on.
         for role in ROLES:
-            for pool in ("accepted", "rejected", "edited", "retired"):
+            for pool in ("accepted", "rejected", "edited", "retired", "reinstated"):
                 proposal_id = uuid.uuid4()
                 proposals[pool][role] = proposal_id
-                status = "proposed" if pool in ("accepted", "rejected") else "active"
+                status = {
+                    "accepted": "proposed",
+                    "rejected": "proposed",
+                    "reinstated": "retired",
+                }.get(pool, "active")
                 await connection.execute(
                     text(
                         "INSERT INTO semantic_definitions "
