@@ -70,7 +70,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-18 by Claude Code (B-090: a guard compares .env.example with what the container is given, and found six more of B-086's class on its first run; B-088's API half merged in #75)
+Last updated: 2026-08-19 by Claude Code (B-060 reproduced live and diagnosed — three causes, filed as B-092 and B-093, no fix in this PR; B-088's API half and B-090 merged)
 
 ---
 
@@ -1996,6 +1996,33 @@ unexplained.
       read.
 
 ## Phase 11 — Charts + polish (M11)
+- [~] **B-060 (P1) — reproduced and diagnosed on live runs, 2026-08-18. No fix
+      attempted**: the owner asked to be told what is causing it and what the
+      options are before anything is built. Five real runs against the
+      customer's warehouse. **The same wording is now stable** — four runs, one
+      table, agreeing to the cent — so the run-to-run divergence of 2026-08-16
+      did not recur; Phase 9 and 10 changed the prompt and the retrieval beneath
+      it. **The instability moved rather than went away**: a paraphrase switched
+      to the other table and invented a third reading nobody has defined, then
+      spent its whole iteration budget and refused. Four defensible readings of
+      one question span a factor of **538**.
+      **Three causes, each fixable alone.** (1) The card drops the counts the
+      profiler already measured, so a code covering 0.01% of a table reads like
+      one covering 78% — **B-092**. (2) The profile is the first rows rather
+      than a random sample, so the card advertised five codes for a column with
+      eight — also **B-092**. (3) Nothing says a choice existed, though the run's
+      own `context_selected` names both candidate tables and the answer names
+      neither — **B-093**.
+      **Awaiting the owner's choice** between: make the card carry the shares it
+      already knows (B-092); say which source an answer came from when another
+      was available (B-093); a warn-only critic rule for a filter on an
+      undocumented code column, which needs B-092 first; leaving it to an Admin
+      to define the metric, which the semantic layer supports and B-088's API
+      half now makes correctable; or asking the user, which is a product
+      decision the V1 plan does not carry.
+      **Chosen on 2026-08-18: B-092 and B-093**, with the critic rule and
+      leaving it to a definition declined. They are built in the PR that follows
+      this one
 - [x] **B-090 (P1)** Nothing compared a developer's environment with the
       container's. `scripts/check_env.sh` now does, as a **declaration** rather
       than a diff — every key that stays on the host is named with its reason,
