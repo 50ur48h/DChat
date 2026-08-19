@@ -70,7 +70,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-19 by Claude Code (B-088 closed; the owner's walk found two screen defects, both fixed, and B-094 filed for the missing way back)
+Last updated: 2026-08-19 by Claude Code (B-094 raised to P1 by the owner and left unbuilt; waste_cost stays retired at v5 as the fixture that will prove it)
 
 ---
 
@@ -2128,12 +2128,22 @@ unexplained.
       was *somewhere* on the page, which it was, and so it caught nothing; the
       replacement asserts it renders inside the card being edited, and fails
       against the old code
-- [ ] B-094 (P2) a retired definition cannot be brought back through the
+- [ ] **B-094 (P1)** A retired definition cannot be brought back through the
       product, and its name stays taken so re-importing cannot recover it
       either. Three correct rules — accept takes only proposals, edit takes only
       active ones, import skips a name already held — leave a mis-clicked
       **Retire** recoverable only in `psql`, which is the shape of the hole
-      B-088 was filed for one verb earlier. Found on B-088's manual walk
+      B-088 was filed for one verb earlier. Found on B-088's manual walk.
+      **Raised from P2 to P1 by the owner on 2026-08-19**, on the argument that
+      raised B-088: write-once will not survive real use, and this is the same
+      sentence one verb later — *worse in one respect, because retired
+      definitions vanish from the screen, so nobody can see there is anything to
+      bring back*. Hit on the owner's first real use of the feature, as B-088
+      was. **Deliberately not started** (owner, 2026-08-19): the record was
+      updated and nothing built.
+      Its fixture is already in place — `waste_cost` on the local F&B demo
+      source is retired at **v5**, left that way on purpose, because the first
+      un-retire through the product is the proof this works
 - [ ] B-091 (P2) a run records the definitions that governed it by **name**, so
       a citation cannot be resolved to the version in force at the time. Harmless
       while definitions were write-once; B-088's API half is what ends that.
