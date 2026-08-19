@@ -44,7 +44,7 @@ here and refused as a 404 if it is not this organization's.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -233,6 +233,12 @@ class RunView:
     #: as a broken feature every time.
     definitions_applied: list[str] = field(default_factory=list[str])
     definitions_available: int = 0
+    #: The chart this answer carries, or the reason it carries none (WP11.1).
+    #: `{"spec": …}` or `{"declined": …, "code": …}`; None when no chart was
+    #: asked for. A refusal is here rather than in `limitations` because that
+    #: list is about whether the answer is *true*, and a missing picture says
+    #: nothing about that — the card renders this where the chart would be.
+    chart: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -670,6 +676,7 @@ async def _run_view(session: AsyncSession, run: AgentRun) -> RunView:
         cost_estimate=run.cost_estimate,
         model_usage=dict(run.model_usage),
         limitations=[str(note) for note in run.limitations],
+        chart=dict(run.chart) if run.chart else None,
         # Read off the run's own persisted state rather than recomputed: what
         # matters is what governed *this* run, and re-matching now would answer
         # with today's definitions about yesterday's answer.
@@ -858,12 +865,24 @@ def _event_for(
     return (None, {})
 
 
+def _chart_outcome(chart: Mapping[str, object] | None) -> str | None:
+    """What the trace says happened to the chart: nothing, a spec, or which rule
+    refused it."""
+    if chart is None:
+        return None
+    if chart.get("spec") is not None:
+        return "spec"
+    code = chart.get("code")
+    return str(code) if code else "declined"
+
+
 async def record_answer(
     *,
     org_id: uuid.UUID,
     run_id: uuid.UUID,
     content: str,
     limitations: Sequence[str] = (),
+    chart: Mapping[str, object] | None = None,
 ) -> MessageView:
     """Write the assistant's reply for a run, and what it does not establish.
 
@@ -874,6 +893,11 @@ async def record_answer(
     answer card can render them as their own thing — beside the answer, never
     instead of it — and so a reader can tell a hedged sentence the model chose to
     write from a caveat the platform established (WP9.2).
+
+    ``chart`` lands there for the same reason and one more (WP11.1): it holds a
+    spec **or** the sentence saying why there is none, and a refusal that had
+    nowhere to live would leave a picture silently absent — which looks like a
+    broken page rather than a decision. `None` means no chart was asked for.
     """
     async with org_session(org_id) as session:
         run = await _owned_run(session, run_id=run_id, user_id=None)
@@ -886,6 +910,8 @@ async def record_answer(
         )
         session.add(message)
         run.limitations = list(limitations)
+        if chart is not None:
+            run.chart = dict(chart)
         await session.flush()
         await write_event(
             session,
@@ -896,6 +922,10 @@ async def record_answer(
                 "message_id": str(message.id),
                 "length": len(content),
                 "limitations": len(limitations),
+                # Both outcomes are in the trace, and an absent chart is told
+                # apart from one nobody asked for: `null`, `"spec"` or the
+                # refusal's own code (B-087's discipline, for pictures).
+                "chart": _chart_outcome(chart),
             },
         )
         return MessageView(

@@ -963,6 +963,12 @@ class AgentRun(Base):
     #: rather than a field inside ``state`` because a limitation is part of the
     #: answer, and the answer card should not have to read the agent's own
     #: scratchpad to decide what to show a person.
+    #: The chart this answer carries, or the reason it carries none (WP11.1,
+    #: revision 0024). `{"spec": …}` or `{"declined": …, "code": …}`, and never
+    #: both — a refusal is an outcome, and one that had nowhere to live would
+    #: reproduce the silence the chart tool exists to prevent. NULL means no
+    #: chart was ever asked for, which is most runs.
+    chart: Mapped[dict[str, object] | None] = mapped_column(JSONB)
     limitations: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )

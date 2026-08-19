@@ -64,6 +64,7 @@ from dataagent.agent.critic import CriticVerdict
 from dataagent.agent.loop import LoopOutcome, research
 from dataagent.agent.state import ResearchState, StateFinding
 from dataagent.agent.tools.base import ToolContext
+from dataagent.agent.tools.chart import CreateChartOut
 from dataagent.agent.tools.finalize import FINALIZE, FinalizeIn
 from dataagent.agent.tools.registry import ToolRegistry, default_registry
 from dataagent.catalog.cards import offers_measures
@@ -461,7 +462,14 @@ async def _investigate(
     state.critic = verdict.as_payload()
     cited = await _verified_citations(draft.supported_by, working, events)
     return await _write_ending(
-        context, events, working, draft, cited, verdict=verdict, caveat=outcome.caveat
+        context,
+        events,
+        working,
+        draft,
+        cited,
+        verdict=verdict,
+        caveat=outcome.caveat,
+        tools=tools,
     )
 
 
@@ -722,6 +730,7 @@ async def _write_ending(
     cited: tuple[str, ...],
     verdict: CriticVerdict | None = None,
     caveat: str = "",
+    tools: ToolRegistry | None = None,
 ) -> RunOutcome:
     """Record the answer, what backs it, what it does not establish, and the trace.
 
@@ -736,19 +745,35 @@ async def _write_ending(
     """
     state = working.state
     composed = composer.assemble(final, state, verdict, citations=cited, caveat=caveat)
+    chart = await _chart_for(context, tools, events, final, cited)
     await runs.record_answer(
         org_id=context.org_id,
         run_id=context.run_id,
         content=final.answer,
         limitations=list(composed.limitations),
+        chart=chart,
     )
 
     # The loop already persisted each finding as it reached it, so only the
     # composed answer may still need one.
+    #
+    # **Matched on the evidence, not on the words** (**B-096**). The Phase 7 rule
+    # is *one claim once*, and a guard that compares characters enforces it only
+    # for identical characters — so the composer doing its job, rephrasing a
+    # finding into an answer, defeated it. A live run showed the card with two
+    # "high confidence" badges and two "show the query" controls over one query:
+    # *"Monthly order counts are available for all 18 months…"* and *"Orders by
+    # month: February 2025: 3,624; …"*, both citing the same execution.
+    #
+    # Two claims resting on exactly the same executions are one claim, whatever
+    # words they use. That is the rule `mark_cited` below already follows, in as
+    # many words — this line simply had not learned it.
     already = {finding.statement.strip() for finding in state.findings}
-    if final.answered and cited and final.answer.strip() not in already:
+    evidence = {tuple(sorted(finding.support)) for finding in state.findings}
+    restated = final.answer.strip() in already or tuple(sorted(cited)) in evidence
+    if final.answered and cited and not restated:
         # A finding only when there is something to stand behind, and only when
-        # the loop did not already record this sentence — otherwise the answer
+        # the loop did not already record this claim — otherwise the answer
         # card shows the same claim twice, which the Phase 7 gate caught once
         # already.
         await runs.add_finding(
@@ -779,6 +804,65 @@ async def _write_ending(
         stopped_by=state.stopped_by,
         limitations=composed.limitations,
     )
+
+
+async def _chart_for(
+    context: ToolContext,
+    tools: ToolRegistry | None,
+    events: EventWriter,
+    final: FinalizeIn,
+    cited: tuple[str, ...],
+) -> dict[str, object] | None:
+    """The chart the answer asked for, drawn or refused (WP11.1).
+
+    **Only of an execution this answer cites.** The model names one in
+    `chart.of`, and a chart of anything else would be a picture the answer does
+    not stand behind — the same rule `supported_by` follows, and for the same
+    reason: a chart nobody can trace back to the query behind it is decoration
+    that looks like evidence (**B-048**).
+
+    **Every path returns something a reader can act on, or None.** None means no
+    chart was asked for, which is most runs. Anything else is a spec or a
+    sentence, never an absence — a picture that quietly fails to appear is
+    indistinguishable from a broken page (B-087's lesson, for charts).
+
+    Dispatched through the registry rather than called directly, so it is
+    role-filtered, argument-validated, budgeted and traced like every other tool.
+    """
+    ask = final.chart
+    if not ask.of.strip() or tools is None:
+        # `tools is None` is the refusal path, which reaches here with a
+        # `FinalizeIn` the runner built itself — and a run that could not answer
+        # asked for no chart.
+        return None
+
+    if ask.of not in cited:
+        # Not a refusal about the data: the model pointed at a result this
+        # answer does not rest on. Said plainly, because the reader would
+        # otherwise see no chart and no reason.
+        return {
+            "declined": (
+                "No chart was drawn: the answer asked to chart a result it does not cite."
+            ),
+            "code": "uncited_execution",
+        }
+
+    result = await tools.call(
+        context,
+        "create_chart_spec",
+        {"execution_id": ask.of, "mark": ask.mark, "x": ask.x, "y": ask.y},
+        events=events,
+    )
+    if not result.ok or not isinstance(result.data, CreateChartOut):
+        return {
+            "declined": ("No chart was drawn: the chart could not be built from that result."),
+            "code": result.code or "chart_failed",
+        }
+
+    out = result.data
+    if out.spec is not None:
+        return {"spec": out.spec}
+    return {"declined": out.declined, "code": out.code}
 
 
 async def _verified_citations(

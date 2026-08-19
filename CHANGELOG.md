@@ -37,6 +37,10 @@ under "Unreleased", only for changes a user would notice.
   knowing its address.
 
 ### Fixed
+- An answer no longer appears twice on its own card. A claim the agent reached
+  during its work and the same claim restated in the final answer were recorded
+  as two separate findings whenever the wording differed, so a single query
+  could produce two confidence badges and two "show the query" links.
 - Settings you put in your local configuration now reach the running product.
   Six of them — the row and time caps on every query, how long a stored result
   lives, the embedding batch size, what a run does when a model has no price,
@@ -73,6 +77,14 @@ under "Unreleased", only for changes a user would notice.
   description, so a real question matched nothing at all.
 
 ### Added
+- An answer can carry a chart, drawn in the browser from a spec the platform
+  built, inside the answer card rather than beside it — and the spec opens the
+  way the SQL does, so a picture is as checkable as a number.
+- When a chart cannot be drawn, the answer says so where the chart would have
+  been, and says why: a category with more values than a chart can show, a
+  column of words where numbers were needed, labels on an axis meant for dates.
+  A picture that simply failed to appear was indistinguishable from a broken
+  page.
 - A definition taken out of force can be brought back. Retired ones are listed
   on the definitions screen under "Out of force" — they were invisible before,
   so there was no way to tell there was anything to recover — and one click

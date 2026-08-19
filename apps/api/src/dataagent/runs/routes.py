@@ -153,6 +153,17 @@ class RunOut(BaseModel):
             "common case."
         ),
     )
+    chart: dict[str, object] | None = Field(
+        default=None,
+        description=(
+            "The chart this answer carries, or why it carries none (WP11.1). "
+            '`{"spec": …}` is a Vega-Lite spec to render; `{"declined": …, '
+            '"code": …}` is a plain sentence for the reader, shown where the '
+            "chart would have been. Null means no chart was asked for. It is "
+            "deliberately **not** a limitation: that list is about whether the "
+            "answer is true, and a missing picture says nothing about that."
+        ),
+    )
     definitions_applied: list[str] = Field(
         default_factory=list[str],
         description=(
@@ -412,6 +423,7 @@ async def get_run(
         cost_estimate=view.cost_estimate,
         model_usage=view.model_usage,
         limitations=view.limitations,
+        chart=view.chart,
         definitions_applied=view.definitions_applied,
         definitions_available=view.definitions_available,
     )

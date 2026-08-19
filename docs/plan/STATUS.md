@@ -70,7 +70,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-19 by Claude Code (B-094 built — a retired definition can be found and brought back through the product; waste_cost is still the fixture, unspent)
+Last updated: 2026-08-19 by Claude Code (WP11.1 — a chart lives inside the answer card, and a chart that cannot be drawn says why in the chart's own place)
 
 ---
 
@@ -2152,12 +2152,50 @@ unexplained.
       a citation cannot be resolved to the version in force at the time. Harmless
       while definitions were write-once; B-088's API half is what ends that.
       Filed with the versioning that makes it fixable
-- [ ] WP11.1 Chart tool (validated Vega-Lite) + client renderer
+- [x] WP11.1 Chart tool (validated Vega-Lite) + client renderer — the chart is
+      inside the answer card and its spec opens the way the SQL does (**B-048**).
+      **A chart that cannot be drawn says why, where the chart would have been.**
+      Not in `limitations`: that region is about whether the answer is *true*,
+      and a missing picture says nothing about that — the owner's call, on
+      B-079's argument that a heading a line contradicts teaches readers to skim
+      the region carrying an unresolved critic block. `charts.decide` refuses
+      with the number that makes a refusal actionable (51 categories against a
+      cap of 50; a measure holding words; `Q1`/`Q2` on a time axis, which is a
+      *wrong* chart rather than a missing one). A truncated result is never
+      drawn at all — B-051's rule, and a chart has nowhere to put the caveat.
+      The spec is assembled server-side from a closed vocabulary and the frame's
+      own columns, so the sneaky-url case is closed by construction rather than
+      by a denylist. Stored on the run rather than the finding, which is a
+      **plan-wording correction** recorded in the plan itself: a refusal can
+      exist on a run with no finding, and arch 4.2 already puts chart specs on
+      the `ComposedAnswer`.
+      **Proved in a real browser**, which is the only place it can be: jsdom has
+      no canvas, so the unit tests mock the renderer and can only show the card
+      *offers* a chart. The browser smoke asserts vega's own marks are on the
+      page, that they are in the same card as the citation, and — the security
+      claim of the whole design — that drawing one **reaches nothing off the
+      page's origin**. The first version of that test looked for a canvas, found
+      nothing, and would have shipped an empty box: vega renders these as SVG
       — carries **B-048** (owner, at the Phase 7 sign-off): the chart belongs
       **inside the answer card**, and its spec must be openable the way the SQL
       is. A chart nobody can trace back to the query behind it is decoration that
       looks like evidence — the same claim Phase 7 made for answers, extended to
       pictures. Filed before the tool is designed rather than retrofitted after
+- [x] **B-096 (P1)** the same claim was recorded twice, because the guard
+      against it compared characters — the Phase 7 rule is *one claim once*, and
+      a text match enforces it only for identical text, so the composer
+      rephrasing a finding into an answer defeated it. The owner saw it on a
+      live run: two `high confidence` badges and two *“show the query”* controls
+      over one query. **The fix keys on the evidence**: two claims resting on
+      exactly the same executions are one claim, whatever words they use — which
+      is the rule `mark_cited` already followed one line below. Fixed in this
+      WP, with a test that fails against the old guard
+- [ ] **B-095 (P1)** a run whose every query *failed* carries no limitation, and
+      the answer calls the failure an empty result — *“no data was returned”*
+      with `limitations: []`, while both executions had ended in a connector
+      error. A reader is told their data is empty when nothing was asked of it.
+      One predicate: the thin-evidence note only looks at executions that
+      succeeded. Found on WP11.1's manual walk, from the owner's own question
 - [ ] WP11.2 History/catalog/members polish + Playwright smoke      ← gate PR
       — carries **B-017**: recovery when an org has no Admin who can sign in
       (owner's call 2026-08-12, moved forward from Phase 12)

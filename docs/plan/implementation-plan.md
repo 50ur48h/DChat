@@ -831,7 +831,9 @@ Format per WP: **Branch → Build → Tests → Accept** (accept = commands/chec
 **Goal:** demo-complete UX. Design: arch Part 3 (Vega-Lite client render), M11.
 
 ### WP11.1 — Chart tool + renderer — `p11.1-charts`
-- `agent/tools/chart.py`: takes a finding's result frame + intent → emits a **Vega-Lite spec validated against a strict schema subset** (whitelisted marks/encodings; no external URLs — data inline by values or artifact ref; reject otherwise). Spec stored on the finding.
+- `agent/tools/chart.py`: takes a stored result frame + the chart asked for → emits a **Vega-Lite spec built from a closed vocabulary** (whitelisted marks/encodings; values inline, never a URL — the spec is assembled server-side from the frame's own column names, so there is no field an address can arrive in) **or a plain sentence saying why it drew nothing**. Exactly one of the two, never neither.
+- **The outcome is stored on the run** (`agent_runs.chart`, revision 0024), not on the finding. *Corrected during WP11.1*: a refusal can exist on a run that reached no finding at all, so attaching the outcome to a finding would give the successful half a home and the refused half none — and a chart that silently fails to appear looks like a broken page (B-087's lesson, for pictures). Architecture 4.2 already carries chart specs on the `ComposedAnswer` rather than on a finding, so this is a plan-wording correction and **not an architecture deviation**.
+- The request rides on `FinalizeIn.chart`, once per run rather than once per planning step. The model chooses the chart because `charts.decide` can refuse an impossible one but cannot know *which* chart answers the question — the same numbers are a comparison or a trend depending on what was asked, and choosing from the data alone is the silent choice B-060 was filed for.
 - Web: vega-embed renderer in the answer/trace cards with graceful fallback to table on invalid spec (defense in depth — server already validated).
 - **Tests:** spec validator corpus (valid, sneaky-url, unknown-mark, oversized); FakeLLM trend question end-to-end produces a rendered-spec event.
 

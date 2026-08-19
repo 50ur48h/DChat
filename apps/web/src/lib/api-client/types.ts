@@ -113,6 +113,20 @@ export interface KnowledgeDocument {
  * The half of a definition a check can act on. The other half — `description`
  * and `expression` — is prose for the prompt, and nothing parses it.
  */
+/**
+ * A chart to draw, or the sentence saying why there is none (WP11.1).
+ *
+ * `spec` is a Vega-Lite document the browser renders. It carries its values
+ * inline and never a URL: the server assembles it from a closed vocabulary, so
+ * there is no field an address could arrive in — which matters because this is
+ * rendered in the reader's own browser.
+ */
+export interface RunChart {
+  spec?: Record<string, unknown> | null;
+  declined?: string | null;
+  code?: string | null;
+}
+
 export interface RequiredFilter {
   table: string;
   column: string;
@@ -367,6 +381,16 @@ export interface Run {
    */
   definitions_applied?: string[];
   definitions_available?: number;
+  /**
+   * The chart this answer carries, or the reason it carries none (WP11.1).
+   *
+   * Exactly one of `spec` and `declined` is set, and `null` means no chart was
+   * asked for — which is most answers. **A refusal is not a limitation**: that
+   * list is about whether the answer is *true*, and a picture that could not be
+   * drawn says nothing about that. It renders where the chart would have been,
+   * because a chart that silently fails to appear looks like a broken page.
+   */
+  chart?: RunChart | null;
   started_at: string | null;
   finished_at: string | null;
   failure_reason: string | null;
@@ -727,6 +751,7 @@ export function isRun(value: unknown): value is Run {
       (Array.isArray(value.limitations) &&
         value.limitations.every((note) => typeof note === "string"))) &&
     isOptionalStringArray(value.definitions_applied) &&
+    (value.chart === undefined || value.chart === null || isRecord(value.chart)) &&
     (value.definitions_available === undefined || typeof value.definitions_available === "number")
   );
 }

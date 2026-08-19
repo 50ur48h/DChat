@@ -41,7 +41,7 @@ from dataagent.agent.critic import CriticOut
 from dataagent.agent.loop import Reflection
 from dataagent.agent.planner import Plan
 from dataagent.agent.tools.base import ToolContext
-from dataagent.agent.tools.finalize import FinalizeIn
+from dataagent.agent.tools.finalize import ChartAsk, FinalizeIn
 from dataagent.auth.jwt_validator import TokenValidator
 from dataagent.auth.principal import Principal
 from dataagent.config import Settings
@@ -95,6 +95,26 @@ def _cite_what_actually_ran(request: LLMRequest) -> str:
         answered=True,
         supported_by=[found.group(1)],
         confidence="high",
+    ).model_dump_json()
+
+
+def _cite_and_chart(request: LLMRequest) -> str:
+    """Compose, and ask for a chart of the result just cited (WP11.1).
+
+    Written against the same prompt the real composer sees, for the reason
+    `_cite_what_actually_ran` gives: what is proved is that an id the model found
+    in its own context reaches the run's stored chart, not that two constants
+    match.
+    """
+    prompt = "\n".join(message.content for message in request.messages)
+    found = re.search(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", prompt)
+    assert found is not None
+    return FinalizeIn(
+        answer=f"{SHOPS_OPENED_IN_2021} shop opened in 2021.",
+        answered=True,
+        supported_by=[found.group(1)],
+        confidence="high",
+        chart=ChartAsk(of=found.group(1), mark="bar", x="opened_year", y="shops"),
     ).model_dump_json()
 
 
@@ -215,6 +235,63 @@ async def test_a_question_is_answered_over_http_and_the_citation_opens(
     assert evidence["status"] == "ok"
     assert evidence["tables"] == ["public.shops"]
     assert "shops" in evidence["sql"]
+
+
+async def test_a_chart_that_cannot_be_drawn_says_so_on_the_run(
+    context: ToolContext, fake_llm: FakeLLM, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**The property the whole chart design turns on** (WP11.1).
+
+    This question's result is a single count, so a bar chart of it has no
+    horizontal axis to use — and the model asked for one anyway, which is exactly
+    what a real one does. What must not happen is silence: a picture that fails
+    to appear with no reason given is indistinguishable from a broken page, which
+    is B-087's lesson carried into charts.
+
+    Asserted on the **run** rather than on the tool, because that is where the
+    answer card reads it from, and because the refusal has to survive the whole
+    path — tool, runner, database — to be worth anything.
+    """
+    fake_llm.script(
+        Plan(
+            sql=KNOWN_GOOD_SQL,
+            purpose="Count shops whose opening date falls in 2021",
+            answerable=True,
+            reason="",
+        ).model_dump_json(),
+        role="sql",
+    )
+    fake_llm.script(
+        Reflection(
+            findings=[],
+            open_questions=[],
+            next_purpose="",
+            done=True,
+            rationale="the count answers it",
+        ).model_dump_json(),
+        role="plan",
+    )
+    fake_llm.script(_cite_and_chart, role="compose")
+    fake_llm.script(CriticOut(verdict="pass", reasons=[]).model_dump_json(), role="critic")
+
+    accepted, scheduled = await _ask_over_http(context, monkeypatch)
+    await scheduled[0]  # pyright: ignore[reportGeneralTypeIssues]
+
+    status, run = await _get(context, f"/v1/orgs/{context.org_id}/runs/{accepted['run_id']}")
+
+    assert status == 200
+    chart = run["chart"]
+    assert chart is not None, "a chart was asked for and the run recorded nothing about it"
+    assert chart.get("spec") is None
+    # Names the column that is missing, because the reader's next question is
+    # which one — the same reason B-092 made a card's values carry their share.
+    assert "opened_year" in chart["declined"]
+    assert chart["code"] == "no_such_column"
+
+    # And the limitations are untouched: a missing picture says nothing about
+    # whether the answer is true, so it does not go in the list that is about
+    # exactly that (the owner's call, and B-079's argument from the other side).
+    assert not any("chart" in note.lower() for note in run["limitations"])
 
 
 async def test_the_answer_is_the_database_s_own_number(

@@ -48,6 +48,7 @@ export {
   type RefreshResult,
   type RequiredFilter,
   type Run,
+  type RunChart,
   type RunEvent,
   type RunEvents,
   type SemanticDefinition,

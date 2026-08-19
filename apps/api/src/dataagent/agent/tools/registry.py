@@ -176,12 +176,18 @@ def _readable(error: ValidationError) -> str:
 def default_registry() -> ToolRegistry:
     """The V1 tool set that WP7.2 needs, in the order a run tends to use them.
 
-    Architecture 4.6 lists more — ``get_relationships``, ``stat_test``,
-    ``create_chart_spec`` — and each arrives with the phase that can honestly
-    implement it: charts in Phase 11. A registered tool with a stub behind it
-    would be worse than an absent one, because the model would call it and
-    believe the answer. ``search_knowledge`` joined in WP10.1b, when there was a
-    corpus for it to search.
+    Architecture 4.6 lists more — ``get_relationships``, ``stat_test`` — and each
+    arrives with the phase that can honestly implement it. A registered tool with
+    a stub behind it would be worse than an absent one, because the model would
+    call it and believe the answer. ``search_knowledge`` joined in WP10.1b, when
+    there was a corpus for it to search, and ``create_chart_spec`` in WP11.1.
+
+    **``create_chart_spec`` is registered but not called from inside the loop**,
+    and that is deliberate rather than an oversight of B-075's invariant. A chart
+    is of a *finished* answer: the request rides on `finalize`, and the runner
+    dispatches it here, through this registry, once the citations are verified.
+    So it is role-filtered, argument-validated, budgeted and traced like every
+    other tool — what differs is only which stage calls it.
 
     **Ordered as a run tends to need them, and knowledge comes before SQL.**
     That is not cosmetic: 5.5's division of labour is that a document says what a
@@ -190,7 +196,10 @@ def default_registry() -> ToolRegistry:
     has already skipped the step this tool exists for.
     """
     from dataagent.agent.tools.catalog import DESCRIBE_TABLE, SEARCH_TABLES
+    from dataagent.agent.tools.chart import CREATE_CHART_SPEC
     from dataagent.agent.tools.knowledge import SEARCH_KNOWLEDGE
     from dataagent.agent.tools.sql import RUN_SQL
 
-    return ToolRegistry((SEARCH_TABLES, DESCRIBE_TABLE, SEARCH_KNOWLEDGE, RUN_SQL))
+    return ToolRegistry(
+        (SEARCH_TABLES, DESCRIBE_TABLE, SEARCH_KNOWLEDGE, RUN_SQL, CREATE_CHART_SPEC)
+    )
