@@ -392,6 +392,87 @@ describe("what the answer does not establish", () => {
   });
 });
 
+// jsdom has no canvas, so the real vega would try to draw, fail asynchronously
+// and resolve after the assertions — which made this file flake once in a full
+// run. What these tests claim is that the card offers the spec and renders the
+// refusal, not that vega draws; the drawing is what the browser smoke is for.
+vi.mock("vega-embed", () => ({ default: vi.fn(async () => ({})) }));
+
+describe("the chart, and the reason there is none", () => {
+  const SPEC = {
+    $schema: "https://vega.github.io/schema/vega-lite/v5.json",
+    mark: "bar",
+    encoding: {
+      x: { field: "month", type: "temporal" },
+      y: { field: "revenue", type: "quantitative" },
+    },
+    data: { values: [{ month: "2026-07-01", revenue: 6214 }] },
+  };
+
+  it("says why there is no chart, where the chart would have been", async () => {
+    // **The case the whole design turned on.** A picture that silently fails to
+    // appear is indistinguishable from a broken page, so the reason renders in
+    // the chart's own place — not in the limitations list, which is about
+    // whether the answer is true.
+    routeFetch({
+      run: {
+        ...ANSWERED,
+        limitations: [],
+        chart: {
+          declined:
+            "No chart was drawn: 'ingredient' has 4,812 distinct values and a chart here shows at most 50. The table has all of them.",
+          code: "too_many_categories",
+        },
+      },
+    });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    expect(await screen.findByText(/4,812 distinct values/)).toBeInTheDocument();
+    // And it did not become a limitation: that region is about the truth of the
+    // answer, and a missing picture says nothing about that.
+    expect(screen.queryByText(/things to know/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/one thing to know/i)).not.toBeInTheDocument();
+  });
+
+  it("offers the spec, the way the SQL is offered", async () => {
+    // **B-048.** A chart nobody can trace back to the query behind it is
+    // decoration that looks like evidence, so the document the browser rendered
+    // is openable — the same claim Phase 7 made for answers, extended to
+    // pictures.
+    routeFetch({ run: { ...ANSWERED, limitations: [], chart: { spec: SPEC } } });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Chart spec" }));
+
+    expect(await screen.findByText(/"mark": "bar"/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide chart spec" })).toBeInTheDocument();
+  });
+
+  it("shows nothing at all when no chart was asked for", async () => {
+    // Most answers. No empty frame and no placeholder: those are what make an
+    // absent chart look like a broken one.
+    routeFetch({ run: { ...ANSWERED, limitations: [], chart: null } });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    await screen.findByText(/answered/i);
+    expect(screen.queryByRole("button", { name: "Chart spec" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/No chart was drawn/)).not.toBeInTheDocument();
+  });
+
+  it("renders a run recorded before charts existed", async () => {
+    // `chart` is absent rather than null on an older run, and an answer card
+    // that threw on one would lose the whole answer over a missing picture.
+    routeFetch({ run: { ...ANSWERED, limitations: [] } });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    expect(await screen.findByText(/6,214 orders/)).toBeInTheDocument();
+  });
+});
+
 describe("which findings are evidence", () => {
   it("shows only the findings the answer rests on", async () => {
     routeFetch({

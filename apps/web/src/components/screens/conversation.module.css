@@ -166,3 +166,40 @@
 .composer:disabled {
   opacity: 0.5;
 }
+
+/* The chart lives inside the answer card (B-048), so it is set apart from the
+   prose without being lifted out of it. */
+.chart {
+  margin: var(--space-4) 0 0;
+}
+
+.chart figcaption {
+  margin-top: var(--space-2);
+}
+
+/* A refusal, in the place the chart would have been. Quiet: it is an
+   explanation, not a warning — nothing about the answer's truth changed. */
+.chartNote {
+  margin: var(--space-4) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.specToggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.spec {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-3);
+  overflow-x: auto;
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  font-size: var(--text-sm);
+}

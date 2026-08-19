@@ -47,6 +47,7 @@ import {
   type ConversationMessage,
   type Finding,
   type Run,
+  type RunChart,
 } from "@/lib/api-client";
 import { useSession } from "@/lib/auth/session";
 
@@ -131,6 +132,86 @@ function Citation({
  * model cannot hedge it away or invent it; an empty list means there was nothing
  * to say, which is the common case and a good one.
  */
+/**
+ * The chart, or the reason there is none (WP11.1, **B-048**).
+ *
+ * **Inside the answer card**, which is B-048's requirement: a chart beside the
+ * answer is a picture next to some prose, while a chart inside it is part of the
+ * claim. And its spec opens the way the SQL does, because a picture nobody can
+ * check is decoration that looks like evidence.
+ *
+ * **A refusal renders here too, in the chart's own place.** It is deliberately
+ * not a limitation: that list is about whether the answer is *true*, and a
+ * missing picture says nothing about that — putting it there would teach readers
+ * to skim the region that carries an unresolved critic block. What a reader
+ * needs is an answer to "where is the chart", where they were looking for one.
+ *
+ * The renderer is loaded on demand. `vega-embed` is large, most answers carry no
+ * chart, and a bundle every reader pays for to serve a minority of answers is a
+ * cost with no case.
+ */
+function AnswerChart({ chart }: { chart: RunChart | null | undefined }) {
+  const host = useRef<HTMLDivElement | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [showSpec, setShowSpec] = useState(false);
+  const spec = chart?.spec ?? null;
+
+  useEffect(() => {
+    if (!spec || !host.current) return;
+    let live = true;
+    const target = host.current;
+    void (async () => {
+      try {
+        const { default: embed } = await import("vega-embed");
+        if (!live) return;
+        // `actions: false` removes vega's own export menu: this product's answer
+        // to "let me check that" is the spec below and the SQL behind it, not a
+        // menu that saves a PNG.
+        await embed(target, spec as Parameters<typeof embed>[1], { actions: false });
+      } catch {
+        // Defence in depth (the plan's phrase): the server already validated
+        // this spec, so a failure here is a renderer problem rather than a bad
+        // document — and the table under the citation still has the numbers.
+        if (live) setFailed(true);
+      }
+    })();
+    return () => {
+      live = false;
+      target.replaceChildren();
+    };
+  }, [spec]);
+
+  if (!chart) return null;
+
+  if (!spec) {
+    return (
+      <p className={styles.chartNote}>{chart.declined ?? "No chart was drawn."}</p>
+    );
+  }
+
+  return (
+    <figure className={styles.chart}>
+      {failed ? (
+        <p className={styles.chartNote}>
+          The chart could not be drawn in this browser. The numbers are in the result below.
+        </p>
+      ) : (
+        <div ref={host} data-testid="chart" />
+      )}
+      <figcaption>
+        <button
+          type="button"
+          className={styles.specToggle}
+          onClick={() => setShowSpec((open) => !open)}
+        >
+          {showSpec ? "Hide chart spec" : "Chart spec"}
+        </button>
+      </figcaption>
+      {showSpec ? <pre className={styles.spec}>{JSON.stringify(spec, null, 2)}</pre> : null}
+    </figure>
+  );
+}
+
 function Limitations({ notes }: { notes: string[] }) {
   if (notes.length === 0) return null;
   return (
@@ -306,6 +387,7 @@ function AnswerCard({
               the reply is in the list above, which is where it belongs — the
               gate found this card showing a citation and no words at all. */}
           {!replied && run.answer && <p className={styles.findingStatement}>{run.answer}</p>}
+          <AnswerChart chart={run.chart} />
           <Limitations notes={run.limitations ?? []} />
           <Findings orgId={orgId} runId={run.id} findings={run.findings} answer={run.answer} />
           {/* Collapsed once the run is over — the answer is the point then — but

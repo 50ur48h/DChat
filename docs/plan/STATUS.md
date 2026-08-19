@@ -70,7 +70,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-19 by Claude Code (B-094 built — a retired definition can be found and brought back through the product; waste_cost is still the fixture, unspent)
+Last updated: 2026-08-19 by Claude Code (WP11.1 — a chart lives inside the answer card, and a chart that cannot be drawn says why in the chart's own place)
 
 ---
 
@@ -2152,7 +2152,23 @@ unexplained.
       a citation cannot be resolved to the version in force at the time. Harmless
       while definitions were write-once; B-088's API half is what ends that.
       Filed with the versioning that makes it fixable
-- [ ] WP11.1 Chart tool (validated Vega-Lite) + client renderer
+- [x] WP11.1 Chart tool (validated Vega-Lite) + client renderer — the chart is
+      inside the answer card and its spec opens the way the SQL does (**B-048**).
+      **A chart that cannot be drawn says why, where the chart would have been.**
+      Not in `limitations`: that region is about whether the answer is *true*,
+      and a missing picture says nothing about that — the owner's call, on
+      B-079's argument that a heading a line contradicts teaches readers to skim
+      the region carrying an unresolved critic block. `charts.decide` refuses
+      with the number that makes a refusal actionable (51 categories against a
+      cap of 50; a measure holding words; `Q1`/`Q2` on a time axis, which is a
+      *wrong* chart rather than a missing one). A truncated result is never
+      drawn at all — B-051's rule, and a chart has nowhere to put the caveat.
+      The spec is assembled server-side from a closed vocabulary and the frame's
+      own columns, so the sneaky-url case is closed by construction rather than
+      by a denylist. Stored on the run rather than the finding, which is a
+      **plan-wording correction** recorded in the plan itself: a refusal can
+      exist on a run with no finding, and arch 4.2 already puts chart specs on
+      the `ComposedAnswer`
       — carries **B-048** (owner, at the Phase 7 sign-off): the chart belongs
       **inside the answer card**, and its spec must be openable the way the SQL
       is. A chart nobody can trace back to the query behind it is decoration that
