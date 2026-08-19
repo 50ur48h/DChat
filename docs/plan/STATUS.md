@@ -70,7 +70,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-19 by Claude Code (B-094 raised to P1 by the owner and left unbuilt; waste_cost stays retired at v5 as the fixture that will prove it)
+Last updated: 2026-08-19 by Claude Code (B-094 built — a retired definition can be found and brought back through the product; waste_cost is still the fixture, unspent)
 
 ---
 
@@ -2128,22 +2128,26 @@ unexplained.
       was *somewhere* on the page, which it was, and so it caught nothing; the
       replacement asserts it renders inside the card being edited, and fails
       against the old code
-- [ ] **B-094 (P1)** A retired definition cannot be brought back through the
-      product, and its name stays taken so re-importing cannot recover it
+- [x] **B-094 (P1)** A retired definition could not be brought back through the
+      product, and its name stayed taken so re-importing could not recover it
       either. Three correct rules — accept takes only proposals, edit takes only
-      active ones, import skips a name already held — leave a mis-clicked
+      active ones, import skips a name already held — left a mis-clicked
       **Retire** recoverable only in `psql`, which is the shape of the hole
-      B-088 was filed for one verb earlier. Found on B-088's manual walk.
-      **Raised from P2 to P1 by the owner on 2026-08-19**, on the argument that
-      raised B-088: write-once will not survive real use, and this is the same
-      sentence one verb later — *worse in one respect, because retired
-      definitions vanish from the screen, so nobody can see there is anything to
-      bring back*. Hit on the owner's first real use of the feature, as B-088
-      was. **Deliberately not started** (owner, 2026-08-19): the record was
-      updated and nothing built.
-      Its fixture is already in place — `waste_cost` on the local F&B demo
-      source is retired at **v5**, left that way on purpose, because the first
-      un-retire through the product is the proof this works
+      B-088 was filed for one verb earlier. Found on B-088's manual walk,
+      **raised from P2 to P1 by the owner on 2026-08-19** and built ahead of
+      WP11.1 at their instruction, because it is small and its fixture was
+      sitting retired.
+      `POST …/definitions/{id}/reinstate` — a POST for the reason accept and
+      reject are — validated before it takes effect, Admin-only, audited, and
+      recorded as **`reinstated`** rather than as another edit (revision 0023),
+      because a history that called it an edit would read as though somebody had
+      changed the wording. `?status=retired` and an **Out of force** card close
+      the discoverability half: being listed puts nothing back into force, and
+      the card says so.
+      **The second dead end is closed in the same act.** A retired definition
+      cannot be edited, so one whose catalog has moved on would have been
+      permanently unreinstatable; `reinstate` takes optional filters and repairs
+      it as it comes back
 - [ ] B-091 (P2) a run records the definitions that governed it by **name**, so
       a citation cannot be resolved to the version in force at the time. Harmless
       while definitions were write-once; B-088's API half is what ends that.

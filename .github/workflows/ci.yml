@@ -391,6 +391,10 @@ jobs:
   web:
     needs: changes
     runs-on: ubuntu-latest
+    # Bounded, because an unbounded step here has already cost two hours. The
+    # job's real work is a couple of minutes; the browser install is the only
+    # part that reaches the network as root.
+    timeout-minutes: 20
     env:
       RUN: ${{ needs.changes.outputs.web }}
     steps:
@@ -419,7 +423,20 @@ jobs:
       # needs no compose stack, no database and no key.
       - name: Install Chromium
         if: env.RUN == 'true'
-        run: pnpm --dir apps/web exec playwright install --with-deps chromium
+        # **No `--with-deps`, deliberately.** That flag becomes root and runs
+        # `apt-get update`, and on 2026-08-19 apt stalled on GitHub's own Ubuntu
+        # mirror — twice, once for **1h 58m** — on a PR whose lint, typecheck,
+        # tests and build had all already passed. The log is unambiguous: repeated
+        # `Ign: http://azure.archive.ubuntu.com` and then seven silent minutes.
+        # The runner image already carries the shared libraries Chromium needs,
+        # so the browser comes from Playwright's own CDN and apt is never
+        # consulted. If a library ever is missing, the smoke below fails saying
+        # which — a better failure than a mirror nobody here controls.
+        #
+        # Bounded as well, because the two are separate lessons: this step must
+        # not be able to burn the job's six-hour default again, whatever stalls.
+        timeout-minutes: 8
+        run: pnpm --dir apps/web exec playwright install chromium
       - name: Browser smoke
         if: env.RUN == 'true'
         run: make test.web.e2e

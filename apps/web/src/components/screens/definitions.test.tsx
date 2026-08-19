@@ -77,6 +77,7 @@ function stubFetch(
   routes: {
     definitions?: Response;
     proposals?: Response;
+    retired?: Response;
     versions?: Response;
     patch?: Response;
   } = {},
@@ -88,6 +89,11 @@ function stubFetch(
       calls.push({ url, init });
       if (url.endsWith("/definitions/proposals")) {
         return Promise.resolve((routes.proposals ?? json([])).clone());
+      }
+      // Before the bare `/definitions` check: the retired list is the same path
+      // with a query string, and `endsWith` would miss it (B-094).
+      if (url.endsWith("/definitions?status=retired")) {
+        return Promise.resolve((routes.retired ?? json([])).clone());
       }
       if (url.endsWith("/versions")) {
         return Promise.resolve((routes.versions ?? json([])).clone());
@@ -272,6 +278,26 @@ describe("describeVersion", () => {
         changed_at: "2026-08-18T10:00:00Z",
       }),
     ).toBe("v2 — edited, enforced orders.status none of cancelled, refunded");
+  });
+
+  it("reads a reinstatement as its own act, not as an edit", () => {
+    // A history that called it an edit would read as though somebody had
+    // changed the wording, and the gap between retired and active is the thing
+    // a reader of the history most needs to see (B-094).
+    expect(
+      describeVersion({
+        version: 6,
+        change: "reinstated",
+        name: "waste_cost",
+        description: "Cost of recorded waste.",
+        expression: null,
+        required_filters: [],
+        synonyms: [],
+        status: "active",
+        changed_by: "u1",
+        changed_at: "2026-08-19T10:00:00Z",
+      }),
+    ).toBe("v6 — brought back into force, enforced nothing");
   });
 
   it("says when a version enforced nothing", () => {
@@ -669,6 +695,58 @@ describe("<Definitions />", () => {
 
     expect(await screen.findByText(/v1 — written by hand, enforced nothing/)).toBeInTheDocument();
     expect(screen.getByText(/v2 — edited, enforced orders.status/)).toBeInTheDocument();
+  });
+
+  it("shows what is out of force, so there is something to bring back", async () => {
+    // **B-094's other half.** Retiring made a definition vanish from every view,
+    // so an Admin could not see that anything was recoverable — which is what
+    // turned a mis-click into a database job.
+    stubFetch({ definitions: json([]), retired: json([{ ...BINDING, version: 5 }]) });
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
+
+    expect(await screen.findByText("Out of force")).toBeInTheDocument();
+    expect(screen.getByText("retired")).toBeInTheDocument();
+    expect(screen.getByText("v5")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reinstate" })).toBeInTheDocument();
+  });
+
+  it("hides the out-of-force card when there is nothing in it", async () => {
+    // An ordinary organization never sees it. A card that is always there,
+    // usually empty, is one people stop reading.
+    stubFetch({ definitions: json([BINDING]), retired: json([]) });
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
+
+    expect(await screen.findByText("net_revenue")).toBeInTheDocument();
+    expect(screen.queryByText("Out of force")).not.toBeInTheDocument();
+  });
+
+  it("brings a retired definition back with one click", async () => {
+    const calls = stubFetch({ definitions: json([]), retired: json([{ ...BINDING, version: 5 }]) });
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Reinstate" }));
+
+    await waitFor(() =>
+      expect(
+        calls.some((call) => call.url.endsWith("/reinstate") && call.init.method === "POST"),
+      ).toBe(true),
+    );
+    // No filters sent: the API reads an absent list as "as it was retired", and
+    // an empty one as "replace them with none", which is a different request.
+    expect(bodyOf(calls, "POST")).toEqual({});
+  });
+
+  it("says being listed is not being in force", async () => {
+    // The card is a way back, not a back door. Nothing here binds anything or
+    // reaches the model until somebody reinstates it.
+    stubFetch({ definitions: json([]), retired: json([{ ...BINDING, version: 5 }]) });
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
+
+    expect(await screen.findByText(/None of this constrains anything/)).toBeInTheDocument();
+    expect(screen.getByText(/Reinstated, it binds again/)).toBeInTheDocument();
   });
 
   it("says plainly when a definition has no recorded history", async () => {

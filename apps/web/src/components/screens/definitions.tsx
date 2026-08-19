@@ -45,6 +45,12 @@
  *      away. Found by the owner on the manual walk. Errors still share one
  *      state, so the same sentence is never on the page twice; what moved is
  *      *where* it renders.
+ *   7. **What is out of force is still visible** (**B-094**). Retiring used to
+ *      make a definition vanish from every view, and nothing could bring one
+ *      back — so an Admin could neither see that anything was recoverable nor
+ *      recover it. The owner hit that on their first real use, one verb after
+ *      B-088. **Out of force** lists them and offers a single **Reinstate**;
+ *      being listed puts nothing back into force, and the card says so.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -220,6 +226,7 @@ export function describeVersion(version: DefinitionVersion): string {
     accepted: "accepted from a proposal",
     updated: "edited",
     retired: "taken out of force",
+    reinstated: "brought back into force",
   };
   const filters =
     version.required_filters.length === 0
@@ -244,6 +251,10 @@ export function Definitions({
   const isAdmin = role === "admin";
 
   const [definitions, setDefinitions] = useState<SemanticDefinition[] | null>(null);
+  //: What has been taken out of force. Loaded with the rest rather than behind
+  //: a click, because the defect B-094 records is that nobody could *see* there
+  //: was anything to bring back (the card hides itself when there is nothing).
+  const [retired, setRetired] = useState<SemanticDefinition[]>([]);
   const [proposals, setProposals] = useState<DefinitionProposal[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   //: Which card the current error belongs to, or null for one that belongs to
@@ -285,12 +296,14 @@ export function Definitions({
   const [synonymsColumn, setSynonymsColumn] = useState("");
 
   const load = useCallback(async () => {
-    const [active, waiting] = await Promise.all([
+    const [active, waiting, outOfForce] = await Promise.all([
       api.definitions(orgId, dataSourceId),
       api.definitionProposals(orgId, dataSourceId),
+      api.definitions(orgId, dataSourceId, "retired"),
     ]);
     setDefinitions(active);
     setProposals(waiting);
+    setRetired(outOfForce);
   }, [api, orgId, dataSourceId]);
 
   useEffect(() => {
@@ -303,13 +316,15 @@ export function Definitions({
     let active = true;
     void (async () => {
       try {
-        const [current, waiting] = await Promise.all([
+        const [current, waiting, outOfForce] = await Promise.all([
           api.definitions(orgId, dataSourceId),
           api.definitionProposals(orgId, dataSourceId),
+          api.definitions(orgId, dataSourceId, "retired"),
         ]);
         if (active) {
           setDefinitions(current);
           setProposals(waiting);
+          setRetired(outOfForce);
         }
       } catch (cause) {
         if (active) setError(cause instanceof Error ? cause.message : "Could not load");
@@ -447,6 +462,17 @@ export function Definitions({
       setNotice(
         `${definition.name} is out of force. What it said is kept, so an answer ` +
           "checked against it is still explainable.",
+      );
+    }, definition.id);
+  };
+
+  const reinstate = async (definition: SemanticDefinition) => {
+    await run(async () => {
+      const back = await api.reinstateDefinition(orgId, dataSourceId, definition.id);
+      setNotice(
+        back.binds
+          ? `${back.name} is back in force at version ${back.version}, binding what it bound.`
+          : `${back.name} is back in force at version ${back.version}, as prose. Nothing checks it.`,
       );
     }, definition.id);
   };
@@ -664,6 +690,79 @@ export function Definitions({
           </ul>
         )}
       </Card>
+
+      {/* Hidden when there is nothing out of force, so an ordinary organization
+          never sees it — but present the moment there is something to bring
+          back, which is the half of B-094 that made a mis-click permanent. */}
+      {retired.length > 0 ? (
+        <Card
+          title="Out of force"
+          subtitle="Retired, and kept. None of this constrains anything or reaches the model; an answer checked against one is still explainable."
+        >
+          <ul className={styles.list}>
+            {retired.map((definition) => (
+              <li key={definition.id} className={styles.item}>
+                <div className={styles.itemHead}>
+                  <div>
+                    <h3 className={styles.title}>{definition.name}</h3>
+                    {definition.synonyms.length > 0 ? (
+                      <p className={styles.meta}>Also called: {definition.synonyms.join(", ")}</p>
+                    ) : null}
+                  </div>
+                  <Row>
+                    <Badge tone="neutral">v{definition.version}</Badge>
+                    <Badge tone="peach">retired</Badge>
+                  </Row>
+                </div>
+                <p className={styles.description}>{definition.description}</p>
+                {definition.required_filters.length > 0 ? (
+                  <ul className={styles.filters}>
+                    {definition.required_filters.map((filter, index) => (
+                      <li key={`${filter.table}.${filter.column}.${index}`}>
+                        {describeFilter(filter)}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                <p className={styles.prose}>
+                  {definition.required_filters.length > 0
+                    ? "Reinstated, it binds again: a query that ignores its filters is blocked."
+                    : "Reinstated, it reaches the model as guidance. Nothing checks it."}
+                </p>
+
+                {errorAt === definition.id && error ? (
+                  <p className={styles.error}>{error}</p>
+                ) : null}
+
+                <Row>
+                  <Button onClick={() => void reinstate(definition)} disabled={busy}>
+                    {busy ? "Working…" : "Reinstate"}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => void showHistory(definition)}
+                    disabled={busy}
+                  >
+                    {history[definition.id] ? "Hide history" : "History"}
+                  </Button>
+                </Row>
+
+                {history[definition.id] ? (
+                  <ul className={styles.filters}>
+                    {history[definition.id]!.length === 0 ? (
+                      <li>Nothing recorded.</li>
+                    ) : (
+                      history[definition.id]!.map((version) => (
+                        <li key={version.version}>{describeVersion(version)}</li>
+                      ))
+                    )}
+                  </ul>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
 
       <Card
         title="In force"
