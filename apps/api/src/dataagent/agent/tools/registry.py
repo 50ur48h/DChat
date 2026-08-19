@@ -176,12 +176,18 @@ def _readable(error: ValidationError) -> str:
 def default_registry() -> ToolRegistry:
     """The V1 tool set that WP7.2 needs, in the order a run tends to use them.
 
-    Architecture 4.6 lists more — ``get_relationships``, ``stat_test``,
-    ``create_chart_spec`` — and each arrives with the phase that can honestly
-    implement it: charts in Phase 11. A registered tool with a stub behind it
-    would be worse than an absent one, because the model would call it and
-    believe the answer. ``search_knowledge`` joined in WP10.1b, when there was a
-    corpus for it to search.
+    Architecture 4.6 lists more — ``get_relationships``, ``stat_test`` — and each
+    arrives with the phase that can honestly implement it. A registered tool with
+    a stub behind it would be worse than an absent one, because the model would
+    call it and believe the answer. ``search_knowledge`` joined in WP10.1b, when
+    there was a corpus for it to search.
+
+    ``create_chart_spec`` is built (WP11.1) and deliberately **not registered
+    yet**: B-075's invariant is that a tool the model can see is a tool the loop
+    can call, and where a chart is *asked for* is an open design question — the
+    plan's schema is closed (B-033), so a chart request has to ride on `finalize`
+    or be decided without the model at all. Registering it before that is settled
+    would put a promise in the prompt that nothing keeps.
 
     **Ordered as a run tends to need them, and knowledge comes before SQL.**
     That is not cosmetic: 5.5's division of labour is that a document says what a
