@@ -89,6 +89,11 @@ services:
       # Where to fetch the provider's discovery document. The expected `iss`
       # comes from that document, not from configuration (DECISIONS D-009).
       OIDC_AUTHORITY: ${OIDC_AUTHORITY:-}
+      # The optional pin for the expected `iss`. Normally unset — the issuer is
+      # read from the discovery document — but a deployment that pins it on the
+      # host and not here would validate tokens differently in the two places,
+      # which is the worst kind of auth difference to debug.
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
       # Built from the same parts as the root DATABASE_URL, but reaching the
       # database over the compose network rather than a published host port.
       DATABASE_URL: postgresql+asyncpg://${PLATFORM_DB_USER:-dataagent}:${PLATFORM_DB_PASSWORD:?set PLATFORM_DB_PASSWORD in .env}@platform-pg:5432/${PLATFORM_DB_NAME:-dataagent}
@@ -125,6 +130,11 @@ services:
       LLM_ROLE_MAP: ${LLM_ROLE_MAP:-}
       LLM_PRICES: ${LLM_PRICES:-}
       LLM_RUN_COST_LIMIT_USD: ${LLM_RUN_COST_LIMIT_USD:-}
+      # What a run does when the cap is on and a model has no price. The answer
+      # differs — refuse, or proceed unmetered — so a developer who set it on the
+      # host and watched the container do the other thing would be debugging the
+      # policy rather than their configuration.
+      LLM_REFUSE_UNPRICED_WHEN_CAPPED: ${LLM_REFUSE_UNPRICED_WHEN_CAPPED:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # The embedding model, for exactly the reason the block above exists
@@ -137,6 +147,15 @@ services:
       EMBEDDINGS_PROVIDER: ${EMBEDDINGS_PROVIDER:-}
       EMBEDDINGS_MODEL: ${EMBEDDINGS_MODEL:-}
       EMBEDDINGS_DIMENSIONS: ${EMBEDDINGS_DIMENSIONS:-}
+      EMBEDDINGS_BATCH: ${EMBEDDINGS_BATCH:-}
+      # The DAL's caps, which decide what a query is allowed to cost the
+      # customer's database. Tuned on the host and not passed, they were a
+      # setting that moved the tests and left the product alone (B-090).
+      DAL_MAX_ROWS: ${DAL_MAX_ROWS:-}
+      DAL_TIMEOUT_SECONDS: ${DAL_TIMEOUT_SECONDS:-}
+      # How long a stored result lives. A promise made to the customer, so the
+      # container has to make the same one the developer thinks it is making.
+      ARTIFACT_RETENTION_DAYS: ${ARTIFACT_RETENTION_DAYS:-}
     ports:
       - "${API_PORT:-8000}:8000"
     volumes:
