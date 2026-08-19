@@ -3,9 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   acceptanceSummary,
+  changesFrom,
   describeFilter,
   describeProvenance,
+  describeVersion,
   Definitions,
+  editSummary,
 } from "./definitions";
 
 const session = {
@@ -43,6 +46,7 @@ const BINDING = {
   ],
   synonyms: ["net sales"],
   binds: true,
+  version: 2,
 };
 
 const PROSE = {
@@ -53,6 +57,7 @@ const PROSE = {
   required_filters: [],
   synonyms: [],
   binds: false,
+  version: 1,
 };
 
 function json(body: unknown, status = 200): Response {
@@ -68,7 +73,14 @@ function json(body: unknown, status = 200): Response {
  * is the only honest shape — a positional list would depend on which half of
  * `Promise.all` the runtime happened to start first.
  */
-function stubFetch(routes: { definitions?: Response; proposals?: Response } = {}) {
+function stubFetch(
+  routes: {
+    definitions?: Response;
+    proposals?: Response;
+    versions?: Response;
+    patch?: Response;
+  } = {},
+) {
   const calls: { url: string; init: RequestInit }[] = [];
   vi.stubGlobal(
     "fetch",
@@ -77,13 +89,28 @@ function stubFetch(routes: { definitions?: Response; proposals?: Response } = {}
       if (url.endsWith("/definitions/proposals")) {
         return Promise.resolve((routes.proposals ?? json([])).clone());
       }
+      if (url.endsWith("/versions")) {
+        return Promise.resolve((routes.versions ?? json([])).clone());
+      }
       if (url.endsWith("/definitions")) {
         return Promise.resolve((routes.definitions ?? json([])).clone());
+      }
+      if (init.method === "PATCH") {
+        return Promise.resolve((routes.patch ?? json({ ...BINDING, version: 3 })).clone());
+      }
+      if (init.method === "DELETE") {
+        return Promise.resolve(json(null, 204));
       }
       return Promise.resolve(json({}, 200));
     }),
   );
   return calls;
+}
+
+/** The body of the last request made with this method. */
+function bodyOf(calls: { url: string; init: RequestInit }[], method: string): unknown {
+  const sent = calls.filter((call) => call.init.method === method).at(-1);
+  return sent?.init.body ? JSON.parse(String(sent.init.body)) : undefined;
 }
 
 describe("describeFilter", () => {
@@ -119,6 +146,123 @@ describe("acceptanceSummary", () => {
 
   it("says a query ignoring the filters will be blocked", () => {
     expect(acceptanceSummary(BINDING.required_filters)).toContain("blocked");
+  });
+});
+
+describe("changesFrom", () => {
+  it("sends only the field that moved", () => {
+    // **The omission is the contract** (B-088). The API reads an absent field
+    // as "leave it alone", so sending the whole form back would make every save
+    // a rewrite of fields nobody touched.
+    const changes = changesFrom(BINDING, {
+      description: "Revenue excluding cancelled and refunded orders.",
+      expression: "sum(orders.total_amount)",
+      synonyms: "net sales",
+      filters: BINDING.required_filters,
+    });
+
+    expect(changes).toEqual({});
+  });
+
+  it("clears a formula with null rather than an empty string", () => {
+    // The one place where absent and null differ: a metric with no formula is a
+    // real thing to say, and "" is not how the API is told so.
+    const changes = changesFrom(BINDING, {
+      description: BINDING.description,
+      expression: "   ",
+      synonyms: "net sales",
+      filters: BINDING.required_filters,
+    });
+
+    expect(changes).toEqual({ expression: null });
+  });
+
+  it("sends an empty filter list when the last filter is removed", () => {
+    // "Stop enforcing this, keep the prose" is a real request, and one an Admin
+    // has to be able to make — the alternative way to undo a wrong filter is
+    // the database.
+    const changes = changesFrom(BINDING, {
+      description: BINDING.description,
+      expression: "sum(orders.total_amount)",
+      synonyms: "net sales",
+      filters: [],
+    });
+
+    expect(changes).toEqual({ required_filters: [] });
+  });
+});
+
+describe("editSummary", () => {
+  it("says when nothing has changed", () => {
+    expect(
+      editSummary(BINDING, {
+        description: BINDING.description,
+        expression: "sum(orders.total_amount)",
+        synonyms: "net sales",
+        filters: BINDING.required_filters,
+      }),
+    ).toContain("Nothing has changed");
+  });
+
+  it("says plainly when an edit stops enforcing anything", () => {
+    // The same disclosure `acceptanceSummary` makes, at the other end of a
+    // definition's life: removing the last filter is a decision with the same
+    // consequence as accepting without one.
+    const summary = editSummary(BINDING, {
+      description: BINDING.description,
+      expression: "sum(orders.total_amount)",
+      synonyms: "net sales",
+      filters: [],
+    });
+
+    expect(summary).toContain("stops enforcing anything");
+  });
+
+  it("leaves enforcement alone when only the prose changed", () => {
+    const summary = editSummary(BINDING, {
+      description: "Something else entirely.",
+      expression: "sum(orders.total_amount)",
+      synonyms: "net sales",
+      filters: BINDING.required_filters,
+    });
+
+    expect(summary).toContain("leaves what is enforced alone");
+  });
+});
+
+describe("describeVersion", () => {
+  it("reads a version as what happened and what it enforced", () => {
+    expect(
+      describeVersion({
+        version: 2,
+        change: "updated",
+        name: "net_revenue",
+        description: "Revenue excluding cancelled and refunded orders.",
+        expression: null,
+        required_filters: BINDING.required_filters,
+        synonyms: [],
+        status: "active",
+        changed_by: "u1",
+        changed_at: "2026-08-18T10:00:00Z",
+      }),
+    ).toBe("v2 — edited, enforced orders.status none of cancelled, refunded");
+  });
+
+  it("says when a version enforced nothing", () => {
+    expect(
+      describeVersion({
+        version: 1,
+        change: "accepted",
+        name: "basket_size",
+        description: "What an average order is worth.",
+        expression: null,
+        required_filters: [],
+        synonyms: [],
+        status: "active",
+        changed_by: null,
+        changed_at: "2026-08-18T10:00:00Z",
+      }),
+    ).toBe("v1 — accepted from a proposal, enforced nothing");
   });
 });
 
@@ -343,5 +487,147 @@ describe("<Definitions />", () => {
       expect(body).not.toHaveProperty("synonyms_column");
       expect(body).not.toHaveProperty("expression_column");
     });
+  });
+
+  it("corrects a filter on a definition already in force", async () => {
+    // **B-088, and the whole of it.** This screen used to show a definition and
+    // offer nothing but reading it: no edit, no un-accept, and the only way to
+    // give a filter the column it should have had was deleting the row in psql.
+    const calls = stubFetch({ definitions: json([BINDING]) });
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("What it means"), {
+      target: { value: "Revenue, excluding anything cancelled." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(bodyOf(calls, "PATCH")).toBeDefined());
+    // Only the field that moved. A save that resent the filters would be a
+    // rewrite of what the platform enforces, dressed as a typo fix.
+    expect(bodyOf(calls, "PATCH")).toEqual({
+      description: "Revenue, excluding anything cancelled.",
+    });
+  });
+
+  it("adds a filter to a definition that binds nothing", async () => {
+    const calls = stubFetch({ definitions: json([PROSE]) });
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("Table"), { target: { value: "orders" } });
+    fireEvent.change(screen.getByLabelText("Column"), { target: { value: "status" } });
+    fireEvent.change(screen.getByLabelText("Values"), { target: { value: "completed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add filter" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(bodyOf(calls, "PATCH")).toBeDefined());
+    expect(bodyOf(calls, "PATCH")).toEqual({
+      required_filters: [{ table: "orders", column: "status", op: "in", values: ["completed"] }],
+    });
+  });
+
+  it("says what saving will do before it is saved", async () => {
+    // The same disclosure accepting makes, at the other end of a definition's
+    // life: removing the last filter has the same consequence as accepting
+    // without one, and the moment to say so is before the click.
+    stubFetch({ definitions: json([BINDING]) });
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+
+    expect(screen.getByText(/stops enforcing anything/)).toBeInTheDocument();
+  });
+
+  it("keeps a refused edit on screen to correct", async () => {
+    // The API refuses a filter naming a column this database does not have, and
+    // it names the column. Clearing the form would send the Admin back to
+    // retype work the message was written to help them repair.
+    const calls = stubFetch({
+      definitions: json([BINDING]),
+      patch: json({ detail: "'net_revenue' requires a filter on orders.nope" }, 400),
+    });
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("What it means"), {
+      target: { value: "Something else." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(bodyOf(calls, "PATCH")).toBeDefined());
+    expect(await screen.findByText(/orders.nope/)).toBeInTheDocument();
+    expect(screen.getByLabelText("What it means")).toHaveValue("Something else.");
+  });
+
+  it("asks twice before taking a definition out of force", async () => {
+    // Retiring changes what the platform enforces on every query that follows,
+    // so the first click offers the decision and the second makes it.
+    const calls = stubFetch({ definitions: json([BINDING]) });
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Retire" }));
+
+    expect(calls.some((call) => call.init.method === "DELETE")).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Confirm: take out of force" }));
+
+    await waitFor(() =>
+      expect(calls.some((call) => call.init.method === "DELETE")).toBe(true),
+    );
+  });
+
+  it("shows which version is in force, and what the earlier ones said", async () => {
+    // A definition binds, so "what did it require when that answer was written"
+    // is a question about whether an answer was right (D-036).
+    stubFetch({
+      definitions: json([BINDING]),
+      versions: json([
+        {
+          version: 1,
+          change: "created",
+          name: "net_revenue",
+          description: "Revenue.",
+          expression: null,
+          required_filters: [],
+          synonyms: [],
+          status: "active",
+          changed_by: "u1",
+          changed_at: "2026-08-17T10:00:00Z",
+        },
+        {
+          version: 2,
+          change: "updated",
+          name: "net_revenue",
+          description: "Revenue excluding cancelled and refunded orders.",
+          expression: null,
+          required_filters: BINDING.required_filters,
+          synonyms: [],
+          status: "active",
+          changed_by: "u1",
+          changed_at: "2026-08-18T10:00:00Z",
+        },
+      ]),
+    });
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
+    expect(await screen.findByText("v2")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+
+    expect(await screen.findByText(/v1 — written by hand, enforced nothing/)).toBeInTheDocument();
+    expect(screen.getByText(/v2 — edited, enforced orders.status/)).toBeInTheDocument();
+  });
+
+  it("says plainly when a definition has no recorded history", async () => {
+    // One written before the platform kept a history. An empty list is a real
+    // answer, and implying a history exists would be worse than saying none does.
+    stubFetch({ definitions: json([BINDING]), versions: json([]) });
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
+    fireEvent.click(await screen.findByRole("button", { name: "History" }));
+
+    expect(await screen.findByText(/Nothing recorded/)).toBeInTheDocument();
   });
 });

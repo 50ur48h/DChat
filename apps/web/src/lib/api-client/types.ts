@@ -141,6 +141,31 @@ export interface SemanticDefinition {
   required_filters: RequiredFilter[];
   synonyms: string[];
   binds: boolean;
+  /** Which state of this definition is in force. Every edit bumps it (B-088). */
+  version: number;
+}
+
+/**
+ * One state a definition has been in force in (B-088, D-036).
+ *
+ * A definition binds, so *what did this metric require when that answer was
+ * written* is a question about whether an answer was right. The whole state is
+ * kept rather than a diff, because the person asking has an answer they distrust
+ * in front of them and will not replay a chain of changes.
+ */
+export interface DefinitionVersion {
+  version: number;
+  /** created | accepted | updated | retired */
+  change: string;
+  name: string;
+  description: string;
+  expression: string | null;
+  required_filters: RequiredFilter[];
+  synonyms: string[];
+  /** active | retired — a definition's last version is the one that retired it. */
+  status: string;
+  changed_by: string | null;
+  changed_at: string;
 }
 
 /**
@@ -505,7 +530,25 @@ export function isSemanticDefinition(value: unknown): value is SemanticDefinitio
     Array.isArray(value.required_filters) &&
     value.required_filters.every(isRequiredFilter) &&
     isStringArray(value.synonyms) &&
-    typeof value.binds === "boolean"
+    typeof value.binds === "boolean" &&
+    typeof value.version === "number"
+  );
+}
+
+export function isDefinitionVersion(value: unknown): value is DefinitionVersion {
+  return (
+    isRecord(value) &&
+    typeof value.version === "number" &&
+    typeof value.change === "string" &&
+    typeof value.name === "string" &&
+    typeof value.description === "string" &&
+    isNullableString(value.expression) &&
+    Array.isArray(value.required_filters) &&
+    value.required_filters.every(isRequiredFilter) &&
+    isStringArray(value.synonyms) &&
+    typeof value.status === "string" &&
+    isNullableString(value.changed_by) &&
+    typeof value.changed_at === "string"
   );
 }
 

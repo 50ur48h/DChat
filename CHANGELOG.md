@@ -73,6 +73,10 @@ under "Unreleased", only for changes a user would notice.
   description, so a real question matched nothing at all.
 
 ### Added
+- The definitions screen can now correct a definition that is already in force,
+  take one out of force, and show what it has said version by version. Until now
+  the correction existed only as an API call, so the way to fix a filter was
+  curl or the database.
 - A definition an admin accepted can now be corrected. Its description, formula,
   synonyms and required filters can all be changed, checked against your catalog
   exactly as they were when it was accepted, and a definition that turned out to
