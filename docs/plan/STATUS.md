@@ -70,7 +70,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-19 by Claude Code (WP11.1 — a chart lives inside the answer card, and a chart that cannot be drawn says why in the chart's own place)
+Last updated: 2026-08-19 by Claude Code (WP11.1 merged; B-097 and B-098 filed from the owner's walk, assessed and not built)
 
 ---
 
@@ -2196,6 +2196,18 @@ unexplained.
       error. A reader is told their data is empty when nothing was asked of it.
       One predicate: the thin-evidence note only looks at executions that
       succeeded. Found on WP11.1's manual walk, from the owner's own question
+- [ ] B-097 (P2) the prose enumerated all 18 months above a chart of the same
+      18 points — B-096's redundancy from a different direction, prose against
+      picture rather than finding against finding. **Assessed before building**
+      at the owner's request: a composer-prompt change, keyed on **result size**
+      rather than on whether a chart was drawn. Keying it on the chart is the
+      trap — prose and chart request are written in the same `finalize` call, so
+      a model told "you are drawing a chart, do not list the numbers" can end up
+      beside a refusal, leaving the reader neither. It becomes structural only
+      if the prose should *refer* to the picture
+- [ ] B-098 (P3) chart axes are labelled with raw column names. Small, WP11.2's
+      polish pass; the axis title is one field on a spec the server already
+      assembles
 - [ ] WP11.2 History/catalog/members polish + Playwright smoke      ← gate PR
       — carries **B-017**: recovery when an org has no Admin who can sign in
       (owner's call 2026-08-12, moved forward from Phase 12)
