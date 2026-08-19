@@ -391,6 +391,10 @@ jobs:
   web:
     needs: changes
     runs-on: ubuntu-latest
+    # Bounded, because an unbounded step here has already cost two hours. The
+    # job's real work is a couple of minutes; the browser install is the only
+    # part that reaches the network as root.
+    timeout-minutes: 20
     env:
       RUN: ${{ needs.changes.outputs.web }}
     steps:
@@ -419,6 +423,12 @@ jobs:
       # needs no compose stack, no database and no key.
       - name: Install Chromium
         if: env.RUN == 'true'
+        # `--with-deps` becomes root and runs apt, which on 2026-08-19 hung for
+        # **1h 58m** on a PR whose lint, typecheck, tests and build had all
+        # already passed — the job would have run to GitHub's six-hour default
+        # before anyone learned anything. A hang here says nothing about the
+        # change under review, so it fails fast and gets re-run.
+        timeout-minutes: 8
         run: pnpm --dir apps/web exec playwright install --with-deps chromium
       - name: Browser smoke
         if: env.RUN == 'true'
