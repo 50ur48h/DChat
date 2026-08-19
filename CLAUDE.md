@@ -59,6 +59,19 @@ make evals              # eval harness with FakeLLM (Phase 9+)
     | sort -u | while read c; do curl -s "http://localhost:3000$c" | grep -q '<a-token-from-your-change>' \
     && echo "$c: present" || echo "$c: ABSENT"; done
   ```
+- **A new web dependency needs the image rebuilt, and the B-044 recipe will not
+  tell you.** `node_modules` comes from the image, not the bind mount, so
+  `pnpm add x` on the host leaves the container without it: the page loads, your
+  code is served, and only the feature that imports `x` fails. WP11.1 hit this —
+  `vega-embed` was installed on the host, the served chunk contained every
+  string the recipe greps for, and the browser still showed the chart's fallback
+  because the dynamic import 404'd inside the container. Grep proves *your code*
+  reached the browser; it says nothing about whether that code's imports
+  resolve. After adding a dependency:
+  ```sh
+  docker compose -f ops/docker-compose.yml --env-file .env up -d --build web
+  docker exec dataagent-web-1 sh -c "ls node_modules/<the-package> >/dev/null && echo present"
+  ```
 - Git Bash rewrites any argument starting with `/` into a `C:\...` path, so a
   `docker exec … sh -c '/opt/…'` arrives as nonsense. Start such command strings
   with a word (`exec /opt/…`), as `ops/scripts/seed_mssql.sh` does.
