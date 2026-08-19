@@ -170,7 +170,15 @@
 /* The chart lives inside the answer card (B-048), so it is set apart from the
    prose without being lifted out of it. */
 .chart {
+  /* Full width of the card: `width: "container"` on the embed makes vega follow
+     this, so the chart is as wide as the answer rather than a thumbnail beside
+     it. */
+  width: 100%;
   margin: var(--space-4) 0 0;
+}
+
+.chart > div {
+  width: 100%;
 }
 
 .chart figcaption {

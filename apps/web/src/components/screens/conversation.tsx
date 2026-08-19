@@ -150,6 +150,51 @@ function Citation({
  * chart, and a bundle every reader pays for to serve a minority of answers is a
  * cost with no case.
  */
+/**
+ * Vega's config, in the page's own colours.
+ *
+ * Read from the computed style rather than written twice: the app's tokens are
+ * the single place a colour is decided, and a chart with its own palette is a
+ * chart that drifts from the product the first time somebody changes a token.
+ */
+function chartTheme(element: HTMLElement): Record<string, unknown> {
+  const style = getComputedStyle(element);
+  const token = (name: string, fallback: string) =>
+    style.getPropertyValue(name).trim() || fallback;
+
+  const ink = token("--fg", "#101828");
+  const muted = token("--fg-muted", "#667085");
+  const line = token("--border", "#eaecf0");
+  const primary = token("--primary", "#5b5bd6");
+
+  const axis = {
+    labelColor: muted,
+    titleColor: muted,
+    domainColor: line,
+    tickColor: line,
+    gridColor: line,
+    labelFontSize: 11,
+    titleFontSize: 11,
+    titleFontWeight: 500 as const,
+  };
+
+  return {
+    // Transparent, so the card's surface shows through and the chart is part of
+    // the answer rather than a picture pasted onto it.
+    background: "transparent",
+    font: style.fontFamily,
+    axis,
+    axisX: { ...axis, labelAngle: 0 },
+    view: { stroke: "transparent" },
+    line: { color: primary, strokeWidth: 2 },
+    bar: { fill: primary },
+    point: { fill: primary },
+    area: { fill: primary, fillOpacity: 0.2, line: { color: primary } },
+    title: { color: ink, fontSize: 13, fontWeight: 600 as const },
+    legend: { labelColor: muted, titleColor: muted },
+  };
+}
+
 function AnswerChart({ chart }: { chart: RunChart | null | undefined }) {
   const host = useRef<HTMLDivElement | null>(null);
   const [failed, setFailed] = useState(false);
@@ -167,7 +212,20 @@ function AnswerChart({ chart }: { chart: RunChart | null | undefined }) {
         // `actions: false` removes vega's own export menu: this product's answer
         // to "let me check that" is the spec below and the SQL behind it, not a
         // menu that saves a PNG.
-        await embed(target, spec as Parameters<typeof embed>[1], { actions: false });
+        //
+        // The theme is read from the page's own tokens rather than hard-coded,
+        // so a chart belongs to the card it sits in — vega's default is a white
+        // box, which on this surface reads as an image that failed to load
+        // rather than as part of the answer.
+        // `"container"` is vega-lite's own value for "as wide as the parent",
+        // and it belongs on the spec: the embed option of the same name is
+        // typed as a number, because it means something else there.
+        const sized = { ...spec, width: "container", autosize: { type: "fit-x", contains: "padding" } };
+        await embed(target, sized as Parameters<typeof embed>[1], {
+          actions: false,
+          renderer: "svg",
+          config: chartTheme(target),
+        });
       } catch {
         // Defence in depth (the plan's phrase): the server already validated
         // this spec, so a failure here is a renderer problem rather than a bad
