@@ -2168,7 +2168,14 @@ unexplained.
       by a denylist. Stored on the run rather than the finding, which is a
       **plan-wording correction** recorded in the plan itself: a refusal can
       exist on a run with no finding, and arch 4.2 already puts chart specs on
-      the `ComposedAnswer`
+      the `ComposedAnswer`.
+      **Proved in a real browser**, which is the only place it can be: jsdom has
+      no canvas, so the unit tests mock the renderer and can only show the card
+      *offers* a chart. The browser smoke asserts vega's own marks are on the
+      page, that they are in the same card as the citation, and — the security
+      claim of the whole design — that drawing one **reaches nothing off the
+      page's origin**. The first version of that test looked for a canvas, found
+      nothing, and would have shipped an empty box: vega renders these as SVG
       — carries **B-048** (owner, at the Phase 7 sign-off): the chart belongs
       **inside the answer card**, and its spec must be openable the way the SQL
       is. A chart nobody can trace back to the query behind it is decoration that

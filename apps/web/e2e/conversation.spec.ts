@@ -21,7 +21,7 @@
 
 import { expect, test } from "@playwright/test";
 
-import { ANSWER, QUESTION, ids, startStubApi, type StubApi } from "./stub-api";
+import { ANSWER, CHART_SPEC, QUESTION, ids, startStubApi, type StubApi } from "./stub-api";
 
 let api: StubApi;
 
@@ -142,4 +142,79 @@ test("a refresh mid-run replays the whole trace", async ({ page }) => {
   await page.getByRole("button", { name: /how this was worked out/ }).click();
   await expect(page.getByText("Read the catalog")).toBeVisible();
   await expect(page.getByText("Finished")).toBeVisible();
+});
+
+
+test("the chart is drawn in the browser, inside the answer", async ({ page }) => {
+  /**
+   * **The half of WP11.1 that only a real browser can prove.** jsdom has no
+   * canvas, so every unit test here mocks `vega-embed` and asserts the card
+   * *offers* a chart — which says nothing about whether one appears. This runs
+   * the real renderer against a real spec.
+   *
+   * Inside the answer card, not beside it, is B-048's requirement: a chart
+   * beside the answer is a picture next to some prose; a chart inside it is
+   * part of the claim.
+   */
+  await openConversation(page);
+  await ask(page);
+  await expect(page.getByText(ANSWER)).toBeVisible({ timeout: 15_000 });
+
+  const chart = page.getByTestId("chart");
+  await expect(chart).toBeVisible({ timeout: 15_000 });
+  // Vega renders these marks as SVG. Asserting on the marks rather than on the
+  // container is the difference between "the page reserved room for a chart"
+  // and "a chart was drawn" — the first version of this test looked for a
+  // canvas, passed nothing, and would have shipped an empty box.
+  await expect(chart.locator("svg.marks")).toBeVisible({ timeout: 15_000 });
+  await expect(chart.locator("svg .mark-line, svg .mark-group")).not.toHaveCount(0);
+
+  // **And it is inside the run's own card, not in a panel of its own** — B-048.
+  // Anchored to the citation rather than to the answer sentence: the sentence
+  // lives in the message bubble above, because the card suppresses it once the
+  // thread has caught up (the Phase 7 gate found this card showing a citation
+  // and no words). So "the same card as the evidence" is the honest form of
+  // "inside the answer".
+  const card = page.getByTestId("chart").locator("xpath=ancestor::section[1]");
+  await expect(card.getByRole("button", { name: /Show the query behind this/ })).toBeVisible();
+});
+
+test("the chart spec opens, the way the query does", async ({ page }) => {
+  /** B-048: a chart nobody can trace back to what produced it is decoration
+   * that looks like evidence. */
+  await openConversation(page);
+  await ask(page);
+  await expect(page.getByText(ANSWER)).toBeVisible({ timeout: 15_000 });
+
+  await page.getByRole("button", { name: "Chart spec" }).click();
+
+  await expect(page.getByText(`"mark": "${CHART_SPEC.mark}"`)).toBeVisible();
+  // The values travel inline, and a reader can see that for themselves.
+  await expect(page.getByText(/"order_count": 4125/)).toBeVisible();
+});
+
+
+test("drawing the chart reaches nothing outside the page", async ({ page }) => {
+  /**
+   * **The security claim of the whole chart design, in a real browser.**
+   *
+   * A spec is rendered in the reader's own browser, so an address inside one is
+   * a request that browser makes — with a customer's aggregates in hand. The
+   * server closes this by construction: it assembles the document itself from a
+   * closed vocabulary and the result's own column names, so there is no field a
+   * URL can arrive in. This is that promise, checked rather than asserted.
+   */
+  const offPage: string[] = [];
+  const origin = new URL(page.url() || "http://localhost").origin;
+  page.on("request", (request) => {
+    const target = new URL(request.url());
+    const own = target.host.includes("localhost") || target.host.includes("127.0.0.1");
+    if (!own) offPage.push(request.url());
+  });
+
+  await openConversation(page);
+  await ask(page);
+  await expect(page.getByTestId("chart").locator("svg.marks")).toBeVisible({ timeout: 15_000 });
+
+  expect(offPage, `the page fetched something off ${origin}: ${offPage.join(", ")}`).toEqual([]);
 });

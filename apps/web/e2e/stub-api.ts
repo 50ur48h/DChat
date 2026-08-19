@@ -26,6 +26,29 @@ const CONVERSATION = "22222222-2222-2222-2222-222222222222";
 const RUN = "33333333-3333-3333-3333-333333333333";
 const EXECUTION = "44444444-4444-4444-4444-444444444444";
 
+/**
+ * The chart the answer carries, exactly as `agent/charts.py` assembles one.
+ *
+ * Inline values and no URL, because that is the property the server guarantees
+ * by construction — and a stub that served a URL would be testing a document
+ * the product cannot produce.
+ */
+export const CHART_SPEC = {
+  $schema: "https://vega.github.io/schema/vega-lite/v5.json",
+  mark: "line",
+  encoding: {
+    x: { field: "order_month", type: "temporal" },
+    y: { field: "order_count", type: "quantitative" },
+  },
+  data: {
+    values: [
+      { order_month: "2026-05-01", order_count: 3624 },
+      { order_month: "2026-06-01", order_count: 4125 },
+      { order_month: "2026-07-01", order_count: 3857 },
+    ],
+  },
+};
+
 export const ANSWER = "3,718 orders were placed in July 2026.";
 export const QUESTION = "How many orders were placed in July 2026?";
 
@@ -204,6 +227,9 @@ data: ${body}
         findings: done
           ? [{ id: "f1", statement: ANSWER, support: [EXECUTION], confidence: "high" }]
           : [],
+        // A real spec, of the shape the server builds: values inline, no URL.
+        // Only once the run is done, because a chart is part of an answer.
+        chart: done ? { spec: CHART_SPEC } : null,
         started_at: "2026-08-15T09:00:01Z",
         finished_at: done ? "2026-08-15T09:00:20Z" : null,
         failure_reason: null,
