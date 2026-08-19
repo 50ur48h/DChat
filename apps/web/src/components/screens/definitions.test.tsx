@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -216,6 +216,32 @@ describe("editSummary", () => {
     });
 
     expect(summary).toContain("stops enforcing anything");
+  });
+
+  it("never reads as a receipt", () => {
+    // The first draft opened every line with "Saved, …", and on the manual walk
+    // that sentence sat above an editor whose save had just been refused — so
+    // the screen appeared to confirm a change it had not made. A line about a
+    // consequence must not be mistakable for one about an outcome.
+    const drafts = [
+      { description: "Changed.", expression: "", synonyms: "", filters: [] },
+      {
+        description: BINDING.description,
+        expression: "sum(orders.total_amount)",
+        synonyms: "net sales",
+        filters: BINDING.required_filters,
+      },
+      {
+        description: BINDING.description,
+        expression: "sum(orders.total_amount)",
+        synonyms: "net sales",
+        filters: [{ table: "orders", column: "status", op: "in", values: ["completed"] }],
+      },
+    ];
+
+    for (const draft of drafts) {
+      expect(editSummary(BINDING, draft)).not.toMatch(/^Saved\b/);
+    }
   });
 
   it("leaves enforcement alone when only the prose changed", () => {
@@ -559,6 +585,31 @@ describe("<Definitions />", () => {
     await waitFor(() => expect(bodyOf(calls, "PATCH")).toBeDefined());
     expect(await screen.findByText(/orders.nope/)).toBeInTheDocument();
     expect(screen.getByLabelText("What it means")).toHaveValue("Something else.");
+  });
+
+  it("shows a refused save inside the editor, not at the top of the page", async () => {
+    // **Found by the owner on the manual walk.** The message was rendered in one
+    // region above the import form and the review queue, and the editor is at
+    // the bottom of a long screen — so a refused save looked like nothing
+    // happening at all. The previous test asserted the sentence was *somewhere*
+    // on the page, which it was, and so it caught nothing.
+    const calls = stubFetch({
+      definitions: json([BINDING]),
+      patch: json({ detail: "'net_revenue' requires a filter on orders.nope" }, 400),
+    });
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByLabelText("What it means"), {
+      target: { value: "Something else." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => expect(bodyOf(calls, "PATCH")).toBeDefined());
+
+    const card = (await screen.findByRole("button", { name: "Save changes" })).closest("li");
+    expect(card).not.toBeNull();
+    expect(within(card!).getByText(/orders.nope/)).toBeInTheDocument();
   });
 
   it("asks twice before taking a definition out of force", async () => {

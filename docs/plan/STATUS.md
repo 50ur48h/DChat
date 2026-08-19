@@ -70,7 +70,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-19 by Claude Code (B-088 closed — a definition can now be corrected, retired and read back through the product rather than through psql)
+Last updated: 2026-08-19 by Claude Code (B-088 closed; the owner's walk found two screen defects, both fixed, and B-094 filed for the missing way back)
 
 ---
 
@@ -2118,7 +2118,22 @@ unexplained.
       fields that changed**, because the API reads an absent one as *leave it
       alone* and resending a description nobody touched is how a description
       quietly loses a sentence. A refused edit stays on screen to correct, since
-      the 400 names the column it was written to help repair
+      the 400 names the column it was written to help repair.
+      **The owner's walk found two defects in this screen and both are fixed
+      here**: a refused save put its message in one region at the top of a long
+      page, where nobody editing at the bottom would see it — so a refusal
+      looked like nothing happening — and the summary line opened with
+      *"Saved, …"*, which reads as a receipt for a save that had not happened.
+      The test that was supposed to cover the first one asserted the sentence
+      was *somewhere* on the page, which it was, and so it caught nothing; the
+      replacement asserts it renders inside the card being edited, and fails
+      against the old code
+- [ ] B-094 (P2) a retired definition cannot be brought back through the
+      product, and its name stays taken so re-importing cannot recover it
+      either. Three correct rules — accept takes only proposals, edit takes only
+      active ones, import skips a name already held — leave a mis-clicked
+      **Retire** recoverable only in `psql`, which is the shape of the hole
+      B-088 was filed for one verb earlier. Found on B-088's manual walk
 - [ ] B-091 (P2) a run records the definitions that governed it by **name**, so
       a citation cannot be resolved to the version in force at the time. Harmless
       while definitions were write-once; B-088's API half is what ends that.

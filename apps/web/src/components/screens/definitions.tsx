@@ -33,10 +33,18 @@
  *      first time you write one, which is exactly when the product locked you
  *      out. Editing sends **only what changed**, because the API reads an absent
  *      field as *leave it alone* — resending a description nobody touched is how
- *      a description quietly loses a sentence. Retiring keeps what the
+ *      quietly loses a sentence. Retiring keeps what the
  *      definition said, so an answer checked against it last month is still
  *      explainable this month, and it asks twice because it changes what the
  *      platform enforces.
+ *   6. **A refusal appears where the action was.** This screen is long — an
+ *      import form, a review queue and every definition in force — and it used
+ *      to put every error in one region at the top. A save refused from the
+ *      editor at the bottom then looked like nothing happening at all: the API
+ *      had named the column it could not find, and the sentence was a screen
+ *      away. Found by the owner on the manual walk. Errors still share one
+ *      state, so the same sentence is never on the page twice; what moved is
+ *      *where* it renders.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -178,22 +186,30 @@ export function changesFrom(definition: SemanticDefinition, draft: Draft) {
   return changes;
 }
 
-/** What saving this edit will do, said before the click, as accepting does. */
+/**
+ * What saving this edit will do, said before the click, as accepting does.
+ *
+ * **Written in the conditional**, and that is not fussiness: the first draft
+ * opened with *"Saved, …"*, which reads as a confirmation, and on the manual
+ * walk it sat above an editor whose save had just been refused. A line that
+ * describes a consequence must not be mistakable for a receipt.
+ */
 export function editSummary(definition: SemanticDefinition, draft: Draft): string {
   const changes = changesFrom(definition, draft);
   if (Object.keys(changes).length === 0) return "Nothing has changed yet.";
   if (changes.required_filters === undefined) {
-    return "Saved, this changes what the model is told and leaves what is enforced alone.";
+    return "Saving this changes what the model is told and leaves what is enforced alone.";
   }
   if (draft.filters.length === 0) {
     return (
-      "Saved, this stops enforcing anything: the definition stays as guidance, " +
+      "Saving this stops enforcing anything: the definition stays as guidance, " +
       "and no query will be checked against it."
     );
   }
   return (
-    `Saved, a query that ignores ${draft.filters.length === 1 ? "this filter" : "these filters"} ` +
-    "is blocked before the answer is written."
+    `Once saved, a query that ignores ${
+      draft.filters.length === 1 ? "this filter" : "these filters"
+    } is blocked before the answer is written.`
   );
 }
 
@@ -230,6 +246,10 @@ export function Definitions({
   const [definitions, setDefinitions] = useState<SemanticDefinition[] | null>(null);
   const [proposals, setProposals] = useState<DefinitionProposal[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  //: Which card the current error belongs to, or null for one that belongs to
+  //: the screen. The message renders there rather than at the top, because an
+  //: editor at the bottom of a long page is where the person is looking.
+  const [errorAt, setErrorAt] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -300,9 +320,10 @@ export function Definitions({
     };
   }, [api, orgId, dataSourceId, isAdmin]);
 
-  const run = async (action: () => Promise<void>) => {
+  const run = async (action: () => Promise<void>, anchor: string | null = null) => {
     setBusy(true);
     setError(null);
+    setErrorAt(null);
     setNotice(null);
     try {
       await action();
@@ -311,6 +332,7 @@ export function Definitions({
       // The API's own message, which names the column a filter got wrong. A
       // generic "that did not work" would send an Admin back to guess.
       setError(cause instanceof Error ? cause.message : "That did not work");
+      setErrorAt(anchor);
     } finally {
       setBusy(false);
     }
@@ -373,7 +395,7 @@ export function Definitions({
           ? `${proposal.name} now binds: a query that ignores it is blocked.`
           : `${proposal.name} is in force as prose. Nothing checks it.`,
       );
-    });
+    }, proposal.id);
   };
 
   const startEditing = (definition: SemanticDefinition) => {
@@ -414,7 +436,7 @@ export function Definitions({
           ? `${saved.name} now binds at version ${saved.version}: a query that ignores it is blocked.`
           : `${saved.name} is in force as prose at version ${saved.version}. Nothing checks it.`,
       );
-    });
+    }, definition.id);
   };
 
   const retire = async (definition: SemanticDefinition) => {
@@ -426,7 +448,7 @@ export function Definitions({
         `${definition.name} is out of force. What it said is kept, so an answer ` +
           "checked against it is still explainable.",
       );
-    });
+    }, definition.id);
   };
 
   const showHistory = async (definition: SemanticDefinition) => {
@@ -463,10 +485,11 @@ export function Definitions({
 
   return (
     <Stack>
-      {/* One error region for the whole screen. Every action here shares one
-          `error`, so rendering it per card would put the same sentence on the
-          page twice and read as two problems. */}
-      {error ? <p className={styles.error}>{error}</p> : null}
+      {/* One error *state* for the whole screen, so the same sentence is never
+          on the page twice — but it renders beside the action that earned it.
+          A save refused from the editor at the bottom of this page used to put
+          its message up here, where nobody editing was looking. */}
+      {error && errorAt === null ? <p className={styles.error}>{error}</p> : null}
 
       <Card
         title="Import from a metric table"
@@ -616,6 +639,10 @@ export function Definitions({
                     {acceptanceSummary(filters)}
                   </p>
 
+                  {errorAt === proposal.id && error ? (
+                    <p className={styles.error}>{error}</p>
+                  ) : null}
+
                   <Row>
                     <Button onClick={() => void accept(proposal)} disabled={busy}>
                       {filters.length > 0 ? "Accept and enforce" : "Accept as prose"}
@@ -624,7 +651,7 @@ export function Definitions({
                       onClick={() =>
                         void run(async () => {
                           await api.rejectProposal(orgId, dataSourceId, proposal.id);
-                        })
+                        }, proposal.id)
                       }
                       disabled={busy}
                     >
@@ -770,6 +797,13 @@ export function Definitions({
                         {editSummary(definition, edit)}
                       </p>
 
+                      {/* Beside the button that earned it. The 400 names the
+                          column the catalog does not have, and it is written to
+                          be repaired from — which needs it to be read. */}
+                      {errorAt === definition.id && error ? (
+                        <p className={styles.error}>{error}</p>
+                      ) : null}
+
                       <Row>
                         <Button onClick={() => void save(definition)} disabled={busy}>
                           {busy ? "Working…" : "Save changes"}
@@ -840,6 +874,10 @@ export function Definitions({
                       </Row>
                     </>
                   )}
+
+                  {errorAt === definition.id && error && !open ? (
+                    <p className={styles.error}>{error}</p>
+                  ) : null}
 
                   {versions ? (
                     <ul className={styles.filters}>
