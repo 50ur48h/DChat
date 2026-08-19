@@ -27,6 +27,24 @@
  *   4. **`binds` comes from the API.** Not inferred here from an empty filter
  *      array — the distinction is too important to be re-derived by every screen
  *      that shows it, and re-derived means eventually derived wrongly.
+ *   5. **A decision can be revised** (**B-088**). Accepting used to be final:
+ *      no edit, no un-accept, and the only way to correct a filter was deleting
+ *      the row in `psql`. The likeliest moment to get a filter wrong is the
+ *      first time you write one, which is exactly when the product locked you
+ *      out. Editing sends **only what changed**, because the API reads an absent
+ *      field as *leave it alone* — resending a description nobody touched is how
+ *      quietly loses a sentence. Retiring keeps what the
+ *      definition said, so an answer checked against it last month is still
+ *      explainable this month, and it asks twice because it changes what the
+ *      platform enforces.
+ *   6. **A refusal appears where the action was.** This screen is long — an
+ *      import form, a review queue and every definition in force — and it used
+ *      to put every error in one region at the top. A save refused from the
+ *      editor at the bottom then looked like nothing happening at all: the API
+ *      had named the column it could not find, and the sentence was a screen
+ *      away. Found by the owner on the manual walk. Errors still share one
+ *      state, so the same sentence is never on the page twice; what moved is
+ *      *where* it renders.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -39,6 +57,7 @@ import { Row, Stack } from "@/components/ui/page";
 import {
   createApi,
   type DefinitionProposal,
+  type DefinitionVersion,
   type RequiredFilter,
   type SemanticDefinition,
 } from "@/lib/api-client";
@@ -106,6 +125,109 @@ export function acceptanceSummary(filters: RequiredFilter[]): string {
 
 const EMPTY_FILTER: RequiredFilter = { table: "", column: "", op: "in", values: [] };
 
+/** What an Admin has typed into the editor for one definition in force. */
+interface Draft {
+  description: string;
+  expression: string;
+  synonyms: string;
+  filters: RequiredFilter[];
+}
+
+function draftOf(definition: SemanticDefinition): Draft {
+  return {
+    description: definition.description,
+    expression: definition.expression ?? "",
+    synonyms: definition.synonyms.join(", "),
+    filters: definition.required_filters,
+  };
+}
+
+function words(value: string): string[] {
+  return value
+    .split(",")
+    .map((word) => word.trim())
+    .filter((word) => word.length > 0);
+}
+
+function sameFilters(left: RequiredFilter[], right: RequiredFilter[]): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+/**
+ * The fields this edit actually changes, and nothing else.
+ *
+ * **The omission is the contract, not an optimisation.** The API reads an absent
+ * field as *leave it alone* and a present one as *replace it*, so sending the
+ * whole form back would make every save a rewrite of fields nobody touched —
+ * and `expression` is the one place where `null` and absent differ, since a
+ * metric with no formula is a real thing to say.
+ */
+export function changesFrom(definition: SemanticDefinition, draft: Draft) {
+  const changes: {
+    description?: string;
+    expression?: string | null;
+    synonyms?: string[];
+    required_filters?: RequiredFilter[];
+  } = {};
+  if (draft.description.trim() !== definition.description) {
+    changes.description = draft.description.trim();
+  }
+  const expression = draft.expression.trim();
+  if (expression !== (definition.expression ?? "")) {
+    changes.expression = expression === "" ? null : expression;
+  }
+  const synonyms = words(draft.synonyms);
+  if (synonyms.join("\u0000") !== definition.synonyms.join("\u0000")) {
+    changes.synonyms = synonyms;
+  }
+  if (!sameFilters(draft.filters, definition.required_filters)) {
+    changes.required_filters = draft.filters;
+  }
+  return changes;
+}
+
+/**
+ * What saving this edit will do, said before the click, as accepting does.
+ *
+ * **Written in the conditional**, and that is not fussiness: the first draft
+ * opened with *"Saved, …"*, which reads as a confirmation, and on the manual
+ * walk it sat above an editor whose save had just been refused. A line that
+ * describes a consequence must not be mistakable for a receipt.
+ */
+export function editSummary(definition: SemanticDefinition, draft: Draft): string {
+  const changes = changesFrom(definition, draft);
+  if (Object.keys(changes).length === 0) return "Nothing has changed yet.";
+  if (changes.required_filters === undefined) {
+    return "Saving this changes what the model is told and leaves what is enforced alone.";
+  }
+  if (draft.filters.length === 0) {
+    return (
+      "Saving this stops enforcing anything: the definition stays as guidance, " +
+      "and no query will be checked against it."
+    );
+  }
+  return (
+    `Once saved, a query that ignores ${
+      draft.filters.length === 1 ? "this filter" : "these filters"
+    } is blocked before the answer is written.`
+  );
+}
+
+/** One version of a definition, as a line of history. */
+export function describeVersion(version: DefinitionVersion): string {
+  const what: Record<string, string> = {
+    created: "written by hand",
+    accepted: "accepted from a proposal",
+    updated: "edited",
+    retired: "taken out of force",
+  };
+  const filters =
+    version.required_filters.length === 0
+      ? "enforced nothing"
+      : `enforced ${version.required_filters.map(describeFilter).join("; ")}`;
+  return `v${version.version} — ${what[version.change] ?? version.change}, ${filters}`;
+}
+
 export function Definitions({
   orgId,
   dataSourceId,
@@ -124,6 +246,10 @@ export function Definitions({
   const [definitions, setDefinitions] = useState<SemanticDefinition[] | null>(null);
   const [proposals, setProposals] = useState<DefinitionProposal[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  //: Which card the current error belongs to, or null for one that belongs to
+  //: the screen. The message renders there rather than at the top, because an
+  //: editor at the bottom of a long page is where the person is looking.
+  const [errorAt, setErrorAt] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -135,6 +261,18 @@ export function Definitions({
   //: table carried, and nobody asks a question in those words (B-085).
   const [alsoCalled, setAlsoCalled] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState<Record<string, RequiredFilter>>({});
+
+  //: Which definition in force is being edited, and what has been typed into it
+  //: (B-088). One at a time: two open editors is two ways to lose an edit, and
+  //: the thing being changed is what the platform enforces on generated SQL.
+  const [editing, setEditing] = useState<string | null>(null);
+  const [edit, setEdit] = useState<Draft | null>(null);
+  const [editFilter, setEditFilter] = useState<RequiredFilter>(EMPTY_FILTER);
+  //: Retiring takes a metric out of force, so it is asked twice. The second
+  //: click is the confirmation; anything else cancels it.
+  const [retiring, setRetiring] = useState<string | null>(null);
+  //: Loaded on demand, because most visits to this screen are not audits.
+  const [history, setHistory] = useState<Record<string, DefinitionVersion[]>>({});
 
   const [table, setTable] = useState("");
   const [nameColumn, setNameColumn] = useState("");
@@ -182,9 +320,10 @@ export function Definitions({
     };
   }, [api, orgId, dataSourceId, isAdmin]);
 
-  const run = async (action: () => Promise<void>) => {
+  const run = async (action: () => Promise<void>, anchor: string | null = null) => {
     setBusy(true);
     setError(null);
+    setErrorAt(null);
     setNotice(null);
     try {
       await action();
@@ -193,6 +332,7 @@ export function Definitions({
       // The API's own message, which names the column a filter got wrong. A
       // generic "that did not work" would send an Admin back to guess.
       setError(cause instanceof Error ? cause.message : "That did not work");
+      setErrorAt(anchor);
     } finally {
       setBusy(false);
     }
@@ -255,7 +395,81 @@ export function Definitions({
           ? `${proposal.name} now binds: a query that ignores it is blocked.`
           : `${proposal.name} is in force as prose. Nothing checks it.`,
       );
-    });
+    }, proposal.id);
+  };
+
+  const startEditing = (definition: SemanticDefinition) => {
+    setEditing(definition.id);
+    setEdit(draftOf(definition));
+    setEditFilter(EMPTY_FILTER);
+    setRetiring(null);
+  };
+
+  const stopEditing = () => {
+    setEditing(null);
+    setEdit(null);
+    setEditFilter(EMPTY_FILTER);
+  };
+
+  const save = async (definition: SemanticDefinition) => {
+    if (edit === null) return;
+    const changes = changesFrom(definition, edit);
+    if (Object.keys(changes).length === 0) {
+      stopEditing();
+      return;
+    }
+    await run(async () => {
+      const saved = await api.updateDefinition(orgId, dataSourceId, definition.id, changes);
+      // Closed inside the action, so it only happens on success: a filter the
+      // catalog refused leaves the Admin's work on screen to correct rather
+      // than retype, which is the whole reason this screen exists.
+      stopEditing();
+      // Reloaded by `run`, so a stale history would be the one thing on screen
+      // that had not caught up.
+      setHistory((current) => {
+        const next = { ...current };
+        delete next[definition.id];
+        return next;
+      });
+      setNotice(
+        saved.binds
+          ? `${saved.name} now binds at version ${saved.version}: a query that ignores it is blocked.`
+          : `${saved.name} is in force as prose at version ${saved.version}. Nothing checks it.`,
+      );
+    }, definition.id);
+  };
+
+  const retire = async (definition: SemanticDefinition) => {
+    await run(async () => {
+      await api.retireDefinition(orgId, dataSourceId, definition.id);
+      setRetiring(null);
+      if (editing === definition.id) stopEditing();
+      setNotice(
+        `${definition.name} is out of force. What it said is kept, so an answer ` +
+          "checked against it is still explainable.",
+      );
+    }, definition.id);
+  };
+
+  const showHistory = async (definition: SemanticDefinition) => {
+    if (history[definition.id]) {
+      setHistory((current) => {
+        const next = { ...current };
+        delete next[definition.id];
+        return next;
+      });
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const versions = await api.definitionVersions(orgId, dataSourceId, definition.id);
+      setHistory((current) => ({ ...current, [definition.id]: versions }));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not read the history");
+    } finally {
+      setBusy(false);
+    }
   };
 
   if (!isAdmin) {
@@ -271,10 +485,11 @@ export function Definitions({
 
   return (
     <Stack>
-      {/* One error region for the whole screen. Every action here shares one
-          `error`, so rendering it per card would put the same sentence on the
-          page twice and read as two problems. */}
-      {error ? <p className={styles.error}>{error}</p> : null}
+      {/* One error *state* for the whole screen, so the same sentence is never
+          on the page twice — but it renders beside the action that earned it.
+          A save refused from the editor at the bottom of this page used to put
+          its message up here, where nobody editing was looking. */}
+      {error && errorAt === null ? <p className={styles.error}>{error}</p> : null}
 
       <Card
         title="Import from a metric table"
@@ -424,6 +639,10 @@ export function Definitions({
                     {acceptanceSummary(filters)}
                   </p>
 
+                  {errorAt === proposal.id && error ? (
+                    <p className={styles.error}>{error}</p>
+                  ) : null}
+
                   <Row>
                     <Button onClick={() => void accept(proposal)} disabled={busy}>
                       {filters.length > 0 ? "Accept and enforce" : "Accept as prose"}
@@ -432,7 +651,7 @@ export function Definitions({
                       onClick={() =>
                         void run(async () => {
                           await api.rejectProposal(orgId, dataSourceId, proposal.id);
-                        })
+                        }, proposal.id)
                       }
                       disabled={busy}
                     >
@@ -456,41 +675,227 @@ export function Definitions({
           <p className={styles.empty}>No definitions yet.</p>
         ) : (
           <ul className={styles.list}>
-            {definitions.map((definition) => (
-              <li key={definition.id} className={styles.item}>
-                <div className={styles.itemHead}>
-                  <div>
-                    <h3 className={styles.title}>{definition.name}</h3>
-                    {definition.synonyms.length > 0 ? (
-                      <p className={styles.meta}>Also called: {definition.synonyms.join(", ")}</p>
-                    ) : null}
+            {definitions.map((definition) => {
+              const open = editing === definition.id && edit !== null;
+              const versions = history[definition.id];
+              return (
+                <li key={definition.id} className={styles.item}>
+                  <div className={styles.itemHead}>
+                    <div>
+                      <h3 className={styles.title}>{definition.name}</h3>
+                      {definition.synonyms.length > 0 ? (
+                        <p className={styles.meta}>Also called: {definition.synonyms.join(", ")}</p>
+                      ) : null}
+                    </div>
+                    <Row>
+                      {/* The version is next to the badge because they answer
+                          one question together: what is in force, and which
+                          version of it. */}
+                      <Badge tone="neutral">v{definition.version}</Badge>
+                      <Badge tone={definition.binds ? "mint" : "neutral"}>
+                        {definition.binds ? "enforced" : "prose only"}
+                      </Badge>
+                    </Row>
                   </div>
-                  <Badge tone={definition.binds ? "mint" : "neutral"}>
-                    {definition.binds ? "enforced" : "prose only"}
-                  </Badge>
-                </div>
-                <p className={styles.description}>{definition.description}</p>
-                {definition.expression ? (
-                  <p className={styles.expression}>
-                    <code>{definition.expression}</code>
-                  </p>
-                ) : null}
-                {definition.required_filters.length > 0 ? (
-                  <ul className={styles.filters}>
-                    {definition.required_filters.map((filter, index) => (
-                      <li key={`${filter.table}.${filter.column}.${index}`}>
-                        {describeFilter(filter)}
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className={styles.prose}>
-                    Nothing checks this one. It reaches the model as guidance, and an answer
-                    resting on it says its definition was not verified.
-                  </p>
-                )}
-              </li>
-            ))}
+
+                  {open && edit !== null ? (
+                    <>
+                      <div className={styles.importForm}>
+                        <Input
+                          label="What it means"
+                          value={edit.description}
+                          onChange={(event) =>
+                            setEdit({ ...edit, description: event.target.value })
+                          }
+                        />
+                        <Input
+                          label="Formula (optional)"
+                          value={edit.expression}
+                          placeholder="sum(orders.total_amount)"
+                          onChange={(event) => setEdit({ ...edit, expression: event.target.value })}
+                        />
+                        <Input
+                          label="Also called"
+                          value={edit.synonyms}
+                          placeholder="the words people use when they ask"
+                          onChange={(event) => setEdit({ ...edit, synonyms: event.target.value })}
+                        />
+                      </div>
+
+                      {edit.filters.length > 0 ? (
+                        <ul className={styles.filters}>
+                          {edit.filters.map((filter, index) => (
+                            <li key={`${filter.table}.${filter.column}.${index}`}>
+                              {describeFilter(filter)}{" "}
+                              <Button
+                                variant="ghost"
+                                onClick={() =>
+                                  setEdit({
+                                    ...edit,
+                                    filters: edit.filters.filter((_, at) => at !== index),
+                                  })
+                                }
+                                disabled={busy}
+                              >
+                                Remove
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+
+                      <div className={styles.filterForm}>
+                        <Input
+                          label="Table"
+                          value={editFilter.table}
+                          onChange={(event) =>
+                            setEditFilter({ ...editFilter, table: event.target.value })
+                          }
+                        />
+                        <Input
+                          label="Column"
+                          value={editFilter.column}
+                          onChange={(event) =>
+                            setEditFilter({ ...editFilter, column: event.target.value })
+                          }
+                        />
+                        <Select
+                          label="Must be"
+                          options={OPERATORS}
+                          value={editFilter.op}
+                          onChange={(event) =>
+                            setEditFilter({ ...editFilter, op: event.target.value })
+                          }
+                        />
+                        <Input
+                          label="Values"
+                          value={editFilter.values.join(", ")}
+                          placeholder="completed"
+                          onChange={(event) =>
+                            setEditFilter({ ...editFilter, values: words(event.target.value) })
+                          }
+                        />
+                        <Button
+                          onClick={() => {
+                            if (
+                              !editFilter.table.trim() ||
+                              !editFilter.column.trim() ||
+                              editFilter.values.length === 0
+                            ) {
+                              return;
+                            }
+                            setEdit({ ...edit, filters: [...edit.filters, editFilter] });
+                            setEditFilter(EMPTY_FILTER);
+                          }}
+                          disabled={busy}
+                        >
+                          Add filter
+                        </Button>
+                      </div>
+
+                      <p className={edit.filters.length > 0 ? styles.binds : styles.prose}>
+                        {editSummary(definition, edit)}
+                      </p>
+
+                      {/* Beside the button that earned it. The 400 names the
+                          column the catalog does not have, and it is written to
+                          be repaired from — which needs it to be read. */}
+                      {errorAt === definition.id && error ? (
+                        <p className={styles.error}>{error}</p>
+                      ) : null}
+
+                      <Row>
+                        <Button onClick={() => void save(definition)} disabled={busy}>
+                          {busy ? "Working…" : "Save changes"}
+                        </Button>
+                        <Button variant="ghost" onClick={stopEditing} disabled={busy}>
+                          Cancel
+                        </Button>
+                      </Row>
+                    </>
+                  ) : (
+                    <>
+                      <p className={styles.description}>{definition.description}</p>
+                      {definition.expression ? (
+                        <p className={styles.expression}>
+                          <code>{definition.expression}</code>
+                        </p>
+                      ) : null}
+                      {definition.required_filters.length > 0 ? (
+                        <ul className={styles.filters}>
+                          {definition.required_filters.map((filter, index) => (
+                            <li key={`${filter.table}.${filter.column}.${index}`}>
+                              {describeFilter(filter)}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : (
+                        <p className={styles.prose}>
+                          Nothing checks this one. It reaches the model as guidance, and an answer
+                          resting on it says its definition was not verified.
+                        </p>
+                      )}
+
+                      <Row>
+                        <Button onClick={() => startEditing(definition)} disabled={busy}>
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          onClick={() => void showHistory(definition)}
+                          disabled={busy}
+                        >
+                          {versions ? "Hide history" : "History"}
+                        </Button>
+                        {/* Asked twice, because it changes what the platform
+                            enforces on every query that follows. */}
+                        {retiring === definition.id ? (
+                          <>
+                            <Button
+                              variant="danger"
+                              onClick={() => void retire(definition)}
+                              disabled={busy}
+                            >
+                              Confirm: take out of force
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              onClick={() => setRetiring(null)}
+                              disabled={busy}
+                            >
+                              Keep it
+                            </Button>
+                          </>
+                        ) : (
+                          <Button onClick={() => setRetiring(definition.id)} disabled={busy}>
+                            Retire
+                          </Button>
+                        )}
+                      </Row>
+                    </>
+                  )}
+
+                  {errorAt === definition.id && error && !open ? (
+                    <p className={styles.error}>{error}</p>
+                  ) : null}
+
+                  {versions ? (
+                    <ul className={styles.filters}>
+                      {versions.length === 0 ? (
+                        <li>
+                          Nothing recorded. This definition was written before the platform kept a
+                          history, so what it said before its next edit is not knowable.
+                        </li>
+                      ) : (
+                        versions.map((version) => (
+                          <li key={version.version}>{describeVersion(version)}</li>
+                        ))
+                      )}
+                    </ul>
+                  ) : null}
+                </li>
+              );
+            })}
           </ul>
         )}
       </Card>

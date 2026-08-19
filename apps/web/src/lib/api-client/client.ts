@@ -17,6 +17,7 @@ import {
   isConversationMessage,
   isDataSource,
   isDefinitionProposal,
+  isDefinitionVersion,
   isExecution,
   isHealth,
   isInvitation,
@@ -37,6 +38,7 @@ import {
   type ConversationMessage,
   type DataSource,
   type DefinitionProposal,
+  type DefinitionVersion,
   type Execution,
   type Health,
   type Invitation,
@@ -228,6 +230,39 @@ export interface Api {
     synonyms?: string[] | undefined,
   ): Promise<SemanticDefinition>;
   rejectProposal(orgId: string, dataSourceId: string, definitionId: string): Promise<void>;
+  /**
+   * Correct a definition that is already in force (**B-088**).
+   *
+   * **Only the fields that changed are sent**, and that is the contract rather
+   * than an optimisation: the API reads an absent field as *leave it alone* and
+   * a present one as *replace it*, so resending a description nobody edited is
+   * how a description quietly loses a sentence. `expression: null` clears the
+   * formula, which is the one place where absent and null differ.
+   */
+  updateDefinition(
+    orgId: string,
+    dataSourceId: string,
+    definitionId: string,
+    changes: {
+      description?: string | undefined;
+      expression?: string | null | undefined;
+      synonyms?: string[] | undefined;
+      required_filters?: RequiredFilter[] | undefined;
+    },
+  ): Promise<SemanticDefinition>;
+  /**
+   * Take a definition out of force, keeping what it said.
+   *
+   * Retired rather than deleted, like everything else in this layer: an answer
+   * checked against it last month is still explainable this month.
+   */
+  retireDefinition(orgId: string, dataSourceId: string, definitionId: string): Promise<void>;
+  /** Everything this definition has said, oldest first (B-088, D-036). */
+  definitionVersions(
+    orgId: string,
+    dataSourceId: string,
+    definitionId: string,
+  ): Promise<DefinitionVersion[]>;
   conversations(orgId: string): Promise<Conversation[]>;
   createConversation(
     orgId: string,
@@ -415,6 +450,33 @@ export function createApi(getToken: () => Promise<string | null>): Api {
         isSemanticDefinition,
         "definition",
       );
+    },
+    async updateDefinition(orgId, dataSourceId, definitionId, changes) {
+      return narrow(
+        await call(`/v1/orgs/${orgId}/data-sources/${dataSourceId}/definitions/${definitionId}`, {
+          method: "PATCH",
+          // `changes` is passed through as the caller built it. The screen is
+          // what decides which fields moved, because it is the only place that
+          // knows what the Admin actually touched.
+          body: changes,
+        }),
+        isSemanticDefinition,
+        "definition",
+      );
+    },
+    async retireDefinition(orgId, dataSourceId, definitionId) {
+      await call(`/v1/orgs/${orgId}/data-sources/${dataSourceId}/definitions/${definitionId}`, {
+        method: "DELETE",
+      });
+    },
+    async definitionVersions(orgId, dataSourceId, definitionId) {
+      const payload = await call(
+        `/v1/orgs/${orgId}/data-sources/${dataSourceId}/definitions/${definitionId}/versions`,
+      );
+      if (!Array.isArray(payload) || !payload.every(isDefinitionVersion)) {
+        throw new ApiError("The API's versions response did not match the expected shape", 200);
+      }
+      return payload;
     },
     async rejectProposal(orgId, dataSourceId, definitionId) {
       await call(

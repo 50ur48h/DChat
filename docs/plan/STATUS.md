@@ -70,7 +70,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 10.
-Last updated: 2026-08-19 by Claude Code (B-092 and B-093 built on the owner's choice; #75, #76 and #77 merged, and this is the last of Phase 11's first four)
+Last updated: 2026-08-19 by Claude Code (B-088 closed; the owner's walk found two screen defects, both fixed, and B-094 filed for the missing way back)
 
 ---
 
@@ -2091,7 +2091,7 @@ unexplained.
       passes a key nobody set and an integer field refused to parse it. That
       rule also fixes a latent break B-086 shipped — a `.env` missing
       `EMBEDDINGS_DIMENSIONS` was a container that could not start
-- [ ] **B-088 (P1)** An accepted definition cannot be edited — no edit, no
+- [x] **B-088 (P1)** An accepted definition cannot be edited — no edit, no
       un-accept, and re-accepting is a 404. **Raised from P2 to P1 and scheduled
       here by the owner on 2026-08-18**, having hit it mid-walk: *"a semantic
       layer whose definitions are write-once will not survive real use."* The
@@ -2112,9 +2112,28 @@ unexplained.
       the day every overwrite starts costing one. `semantic_definition_versions`
       is append-only in the database — 0022 revokes UPDATE and DELETE from
       `dataagent_app`, and `rls_proof` proves it.
-      **The web half is next**: editing and retiring on the Definitions screen,
-      so the fix is reachable without curl. The API is what the gate walk
-      needed; the screen is what makes it a product
+      **The web half is this PR**: the "In force" card now edits a definition's
+      description, formula, synonyms and filters, retires it behind a second
+      click, and shows what it has said version by version. It sends **only the
+      fields that changed**, because the API reads an absent one as *leave it
+      alone* and resending a description nobody touched is how a description
+      quietly loses a sentence. A refused edit stays on screen to correct, since
+      the 400 names the column it was written to help repair.
+      **The owner's walk found two defects in this screen and both are fixed
+      here**: a refused save put its message in one region at the top of a long
+      page, where nobody editing at the bottom would see it — so a refusal
+      looked like nothing happening — and the summary line opened with
+      *"Saved, …"*, which reads as a receipt for a save that had not happened.
+      The test that was supposed to cover the first one asserted the sentence
+      was *somewhere* on the page, which it was, and so it caught nothing; the
+      replacement asserts it renders inside the card being edited, and fails
+      against the old code
+- [ ] B-094 (P2) a retired definition cannot be brought back through the
+      product, and its name stays taken so re-importing cannot recover it
+      either. Three correct rules — accept takes only proposals, edit takes only
+      active ones, import skips a name already held — leave a mis-clicked
+      **Retire** recoverable only in `psql`, which is the shape of the hole
+      B-088 was filed for one verb earlier. Found on B-088's manual walk
 - [ ] B-091 (P2) a run records the definitions that governed it by **name**, so
       a citation cannot be resolved to the version in force at the time. Harmless
       while definitions were write-once; B-088's API half is what ends that.
