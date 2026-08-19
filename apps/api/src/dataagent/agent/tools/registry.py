@@ -180,14 +180,14 @@ def default_registry() -> ToolRegistry:
     arrives with the phase that can honestly implement it. A registered tool with
     a stub behind it would be worse than an absent one, because the model would
     call it and believe the answer. ``search_knowledge`` joined in WP10.1b, when
-    there was a corpus for it to search.
+    there was a corpus for it to search, and ``create_chart_spec`` in WP11.1.
 
-    ``create_chart_spec`` is built (WP11.1) and deliberately **not registered
-    yet**: B-075's invariant is that a tool the model can see is a tool the loop
-    can call, and where a chart is *asked for* is an open design question — the
-    plan's schema is closed (B-033), so a chart request has to ride on `finalize`
-    or be decided without the model at all. Registering it before that is settled
-    would put a promise in the prompt that nothing keeps.
+    **``create_chart_spec`` is registered but not called from inside the loop**,
+    and that is deliberate rather than an oversight of B-075's invariant. A chart
+    is of a *finished* answer: the request rides on `finalize`, and the runner
+    dispatches it here, through this registry, once the citations are verified.
+    So it is role-filtered, argument-validated, budgeted and traced like every
+    other tool — what differs is only which stage calls it.
 
     **Ordered as a run tends to need them, and knowledge comes before SQL.**
     That is not cosmetic: 5.5's division of labour is that a document says what a
@@ -196,7 +196,10 @@ def default_registry() -> ToolRegistry:
     has already skipped the step this tool exists for.
     """
     from dataagent.agent.tools.catalog import DESCRIBE_TABLE, SEARCH_TABLES
+    from dataagent.agent.tools.chart import CREATE_CHART_SPEC
     from dataagent.agent.tools.knowledge import SEARCH_KNOWLEDGE
     from dataagent.agent.tools.sql import RUN_SQL
 
-    return ToolRegistry((SEARCH_TABLES, DESCRIBE_TABLE, SEARCH_KNOWLEDGE, RUN_SQL))
+    return ToolRegistry(
+        (SEARCH_TABLES, DESCRIBE_TABLE, SEARCH_KNOWLEDGE, RUN_SQL, CREATE_CHART_SPEC)
+    )

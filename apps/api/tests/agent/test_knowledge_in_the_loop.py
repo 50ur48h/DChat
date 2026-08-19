@@ -450,8 +450,12 @@ NOT_DISPATCHABLE = {
     "describe_table": "the context stage already selects and renders the cards",
 }
 
-#: What `loop.research` can actually call, by name.
-DISPATCHABLE = {"run_sql", "search_knowledge"}
+#: What the run can actually dispatch, by name. `create_chart_spec` is called by
+#: the **runner** rather than from inside the loop (WP11.1) — a chart is of a
+#: finished answer, so the request rides on `finalize` and is dispatched once the
+#: citations are verified. Through this same registry, so it is role-filtered,
+#: budgeted and traced like the rest; only the stage differs.
+DISPATCHABLE = {"run_sql", "search_knowledge", "create_chart_spec"}
 
 
 def test_every_registered_tool_is_either_dispatchable_or_listed_as_not() -> None:

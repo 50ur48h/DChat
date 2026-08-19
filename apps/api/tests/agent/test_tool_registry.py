@@ -96,6 +96,7 @@ def test_the_tool_list_is_in_registration_order() -> None:
         "describe_table",
         "search_knowledge",
         "run_sql",
+        "create_chart_spec",
     ]
 
 
