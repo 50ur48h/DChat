@@ -1,80 +1,161 @@
 # STATUS — data-agent build
 
-Current position: **Phases 0–5 and 7–10 signed off. Phase 6 merged, its gate
-                  partially met and deliberately unticked.** The **Phase 10 gate
-                  was signed off on 2026-08-18** (#72): an organization's own
-                  writing now changes the SQL a model generates, proved twice —
-                  once on a customer's 112k-row warehouse, where an imported and
-                  Admin-accepted definition turned *"Ayam Penyet Set, 0.00 units
-                  sold"* into an honest refusal with
-                  `row_role <> 'parent_zero_qty'` in **4 of 4** executed
-                  queries, and once on the fixture this project designed, where
-                  defining `repeat_rate`'s denominator moved golden eval **#10**
-                  from FAIL to PASS. **Prose informs, structure binds** (D-033)
-                  is now a property of the product rather than of the plan: a
-                  definition reaches the prompt framed as authoritative, its
-                  filters are enforced against the AST, and a run says which
-                  definitions governed it — or that none matched, which is the
-                  sentence three gate walks needed and never had (**B-087**).
-                  **One gate criterion was accepted rather than demonstrated**:
-                  B-078's live drop-and-catch, covered by test, unstageable
-                  since **B-083** — see standing note 5, and re-run it the day
-                  the planner's model changes.
-                  Six defects this phase were found by **running** the thing
-                  rather than reading it, and one of them — **B-083**, a
-                  definition that bound the critic and never reached the model —
-                  would have made the gate demo pass for the exact opposite of
-                  its intended reason.
-Next step:        **Phase 11 is under way**, in the order the owner set on
-                  2026-08-18: B-088, B-090, B-060, then WP11.1. **B-088's API
-                  half is merged** (#75) — the edit route: `PATCH`, `DELETE`
-                  (retire) and `GET .../versions`, validated as `accept` is,
-                  Admin-only, audited, and **versioned** (D-036, migration 0022)
-                  because a definition binds and an overwrite makes *"what did
-                  it require when that answer was written"* unanswerable.
-                  **B-090 is this PR.** Next are the edit route's other half on
-                  the Definitions screen, and **B-060** — which the owner asked
-                  to be *reproduced and
-                  explained before anything is built*, since it is about answer
-                  stability rather than a missing feature.
-                  The original scheduling note follows. It opened with **two P1s
-                  the owner scheduled**,
-                  both of them guards against a class of silence rather than
-                  features:
-                  **1. B-088 — an accepted definition cannot be edited.** No
-                  edit, no un-accept, re-accepting is a 404, and the only way
-                  back is deleting the row in `psql` and importing again. Hit
-                  during the gate walk. *"A semantic layer whose definitions are
-                  write-once will not survive real use."* Wants
-                  `PATCH .../definitions/{id}` for an **active** definition,
-                  validated exactly as `accept` is, Admin-only and audited —
-                  it changes what the platform enforces on generated SQL — plus
-                  a decision on whether an edit is **versioned**, which arch 5.4
-                  implies (*"validated… and versioned"*) and nothing does.
-                  **2. B-090 — nothing compares a developer's environment with
-                  the container's.** B-086 was one instance and the owner ruled
-                  the class deserves a guard rather than a note: `.env.example`
-                  documents 48 keys, compose references 46, and 12 are passed to
-                  nothing. Most of those twelve are legitimately host-only, which
-                  is why a diff is useless and the guard has to be a
-                  **declaration** — a `HOST_ONLY` list in `TENANT_TABLES`' idiom,
-                  in `hygiene`, with a `--selftest`.
-                  **Then WP11.1** (chart tool, carrying B-048: the chart lives
-                  inside the answer card and its spec opens the way the SQL
-                  does) **and WP11.2** (polish + Playwright, the gate, carrying
-                  B-017, B-061 and B-020).
+Current position: **Phases 0–5 and 7–11's first four items are done. Phase 6
+                  merged, its gate partially met and deliberately unticked.**
+                  **Phase 11 is most of the way through**: B-088 (definitions can
+                  be corrected and retired), B-090 (the environment guard),
+                  B-060 (reproduced, diagnosed, and its two chosen fixes built as
+                  B-092 and B-093), B-094 (a retired definition can be brought
+                  back) and **WP11.1 — charts** are all merged. What remains is
+                  **B-095** and then **WP11.2**, the phase gate.
+                  The session of 2026-08-19 was unusually productive for a reason
+                  worth repeating: **six defects were found by the owner walking
+                  the product by hand**, not by the suite — B-094, B-095, B-096,
+                  B-097, B-098, and the two screen defects in B-088's web half.
+                  Every one was invisible to a green build.
+Next step:        **B-095 first** (open P1). A run whose queries **all failed**
+                  carries no limitation at all, and the answer says *"no data was
+                  returned from the queries"* — a claim about the customer's data
+                  when the truth is about the platform, which never reached the
+                  database. One predicate is the whole of it: the thin-evidence
+                  note in `composer.limitations_for` only considers executions
+                  that **succeeded** (`reference.ok and row_count == 0`), so a
+                  failed one matches no rule. Worth deciding in the same pass
+                  whether such a run should be `answered` at all.
+                  **Then WP11.2 — the phase gate**, carrying **B-017** (recovery
+                  when an org has no Admin who can sign in), **B-061** and
+                  **B-020**, with **B-097** (prose enumerating what the chart
+                  already shows — assessed, see its row) and **B-098** (raw column
+                  names on chart axes) as polish candidates in scope. The gate is
+                  *"show me the revenue trend by month" → chart renders;
+                  Playwright green; a non-developer can run the demo from the
+                  README quickstart alone*.
 Merge policy: ASK
 Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  (owner, 2026-08-17), so `nightly-evals.yml` can run — keep its
                  token cap tight, because the local live run spent **223k
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
-                 nothing in Phase 10.
-Last updated: 2026-08-19 by Claude Code (WP11.1 merged; B-097 and B-098 filed from the owner's walk, assessed and not built)
+                 nothing in Phase 11.
+Last updated: 2026-08-19 by Claude Code (session end — WP11.1, B-094 and B-096 merged; B-095 is the next P1; D-037 records the chart decisions)
 
 ---
 
-## ⚠ Session end, 2026-08-19 — start here
+## The session of 2026-08-19 — the record, not a to-do list
+
+**Nothing here is outstanding.** Where to pick up is the **Next step** field
+above. This section exists because the reasoning behind several choices is not
+recoverable from the code, and because what the session *cost* is worth knowing
+before repeating the shape of it.
+
+### What shipped
+
+| PR | What |
+|----|------|
+| **#79** | B-088's web half — editing, retiring and history on the Definitions screen |
+| **#80** | B-094 raised to P1, record only |
+| **#81** | **B-094** — a retired definition can be found and brought back (revision 0023) |
+| **#82** | **WP11.1 — charts** (revision 0024), and **B-096** folded in |
+| **#83** | B-097 and B-098 filed and assessed, not built |
+
+**WP11.1** gives an answer a chart, drawn in the browser from a spec the server
+built, inside the answer card with its spec openable the way the SQL is (B-048).
+A chart that *cannot* be drawn says why, in the chart's own place, with the
+number that makes the refusal actionable.
+
+**B-094** closed a dead end three correct rules had created between them: accept
+takes only proposals, edit takes only active ones, and an import skips a name
+already held — so a mis-clicked **Retire** was recoverable only in `psql`. The
+owner left `waste_cost` retired on purpose so the first un-retire would be
+through the product; it came back at **v6**, recorded as `reinstated` rather than
+as another edit.
+
+**B-096** was the same claim recorded twice — see the decisions below.
+
+### What it cost, and where the time went
+
+**The CI finding.** The `web` job hung for **1h 58m** on a PR whose lint,
+typecheck, tests and build had all passed. `playwright install --with-deps` runs
+apt as root, and apt was stalling on GitHub's own Ubuntu mirror — the log reads
+`Ign: http://azure.archive.ubuntu.com` on repeat, then seven silent minutes.
+Dropping `--with-deps` took the whole job to **1m29s**: the runner image already
+carries the libraries Chromium needs, so the browser now comes from Playwright's
+CDN and no mirror is consulted. The step and the job also carry timeouts now,
+because *"do not depend on a mirror"* and *"do not burn six hours finding out"*
+are two different lessons.
+
+**Rebasing a stack.** Four PRs touching STATUS, BACKLOG and CHANGELOG conflict
+with each other by construction, and each merge invalidates the next branch's
+copy. After a **squash** merge, a stacked branch needs
+`git rebase --onto main <old-base>`: a plain rebase replays commits whose content
+is already on `main` under a different hash and conflicts with itself.
+
+**Two verification habits that failed, and how.** The B-044 recipe greps a served
+chunk for a string from your own source — it proved the chart UI reached the
+browser and said nothing about whether `vega-embed` resolved, because
+`node_modules` comes from the image and `pnpm add` ran on the host. And a browser
+assertion written for a `canvas` found nothing, because vega renders these as
+SVG; had it been written loosely enough to pass, it would have shipped an empty
+box. Both are now in CLAUDE.md and in the tests respectively.
+
+### The decisions a fresh session cannot reconstruct from the code
+
+**Charts — all three placement choices are in D-037**, with the reasoning: the
+request rides on `FinalizeIn` rather than `Plan` (once per run, +339 tokens,
+rather than once per step) or the runner alone (`charts.decide` can refuse an
+impossible chart but cannot know *which* chart answers the question — that is
+B-060's silent choice); the outcome is stored on the **run** rather than the
+finding, because a refusal can exist on a run that reached no finding; and a
+refusal renders in the **card's chart slot**, never in `limitations`, whose
+accessible name is *"What this answer does not establish"* and whose every other
+member bears on whether the answer is true.
+
+**No Recharts** (owner, 2026-08-19). The server-built validated spec is what
+makes the browser test *"drawing the chart reaches nothing outside the page"*
+true. A client-side chart library builds the picture from data and dissolves it.
+
+**Tailwind + shadcn is a separate scoped decision that has not been made** —
+**B-099**. The owner's instruction was polish within the current system, and not
+to start it inside WP11.1.
+
+**B-096 keys on the citation set, not on text.** The Phase 7 rule is *one claim
+once*; the guard compared characters, so the composer rephrasing a finding into
+an answer defeated it. Two claims resting on exactly the same executions are one
+claim, whatever words they use — which is the rule `mark_cited` already followed
+one line below. Equality rather than overlap, deliberately: an answer that
+synthesises two findings has a union nobody else cites and is a new claim.
+
+### Local state, and the traps that are still traps
+
+**Run `make migrate` before anything.** Three revisions landed this session:
+**0022** (`semantic_definition_versions`), **0023** (`reinstated`) and **0024**
+(`agent_runs.chart`). A missing revision surfaces as a CHECK violation mid-run
+rather than as a migration error.
+
+**The local stack holds real state worth knowing about.** `waste_cost` on the
+F&B demo is active at **v6** with a full history — it is the fixture that proved
+B-094 and reads as a life: created, edited, retired, reinstated. The pizza demo
+has a conversation carrying a rendered chart. The F&B **warehouse** (the
+`fnb-gate` org) was re-profiled after B-092, so its cards carry value shares; the
+F&B **demo** in the owner's own org was not, and still shows the old
+`examples: A, B, C` line until somebody profiles it.
+
+**`agent_smoke.py` runs on the host and cannot reach a container-registered
+source.** The F&B demo's host is `seed-fnb-pg`, a compose network name, so a
+host-side script gets `getaddrinfo failed` — which is how B-095 was found, since
+the answer reported those failures as *"no data was returned"*.
+
+**Three standing traps, unchanged.** `docker compose … restart web` after editing
+the web app, and verify what is *served* rather than what is on disk. A **new web
+dependency** additionally needs `--build`, and the grep recipe will not tell you.
+The environment the container gets is not the environment you have — that is
+B-090, now guarded by `scripts/check_env.sh`, which fails the build when a
+documented key reaches no service and nothing says why.
+
+## Phase 11's first four items, as they merged — the record, not a to-do list
+
+**Nothing here is outstanding.** Where to pick up is the **Next step** field at the top of
+this file; this section is how the code got where it is.
 
 **Phase 11's first three items are merged**, in the order the owner set:
 
@@ -113,7 +194,10 @@ until its data source is profiled again — an existing demo shows the old
 `examples: A, B, C` line until then. The F&B warehouse has already been
 re-profiled locally; nothing else has.
 
-## ⚠ Session end, 2026-08-18 — start here
+## How Phase 11 opened — the record, not a to-do list
+
+**Nothing here is outstanding**, and its PR table is two sessions old. Kept for its three
+warnings, which are still the three warnings.
 
 **Phase 10 is signed off and merged. Phase 11 has since started** on the owner's
 instruction of 2026-08-18, in the order they set: **B-088, then B-090, then

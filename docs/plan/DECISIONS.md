@@ -4,6 +4,49 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-037 — A chart is asked for with the answer, kept with the answer, and refused in the answer's own place
+Date: 2026-08-19 · Phase: 11 · PR: #82 (WP11.1) · Migration 0024
+Context: WP11.1 had three placement questions and none of them is visible in the
+code once the choice is made, so each would be re-litigated by the next person
+who looked. **Where the request rides**: `Plan` is a closed schema (B-033), so a
+chart field there costs tokens on *every* planning step for a feature few
+questions use. **Where the outcome is kept**: plan WP11.1 said the spec goes on
+the finding. **Where a refusal renders**: the obvious home is `limitations`,
+beside B-093's source line.
+Options: (a) the request on `Plan`, once per step; (b) on `FinalizeIn`, once per
+run; (c) no model involvement — infer the chart from the result's shape. For
+storage, the finding or the run. For the refusal, `limitations` or the chart's
+own slot in the card.
+Decision: **(b), the run, and the card's own slot.**
+*The request rides on `FinalizeIn`* — once per run rather than once per step, at
+the moment the model knows what it answered and which execution backs it, which
+is also B-048's argument for the chart living inside the answer. (c) was refused
+on the owner's reasoning: `charts.decide` can refuse an impossible chart but
+cannot know *which* chart answers the question — the same numbers are a
+comparison or a trend depending on what was asked, and choosing from the data
+alone is the silent choice B-060 was filed for. Measured cost of the closed
+schema: **+1,357 chars, ~339 tokens per run**, on the finalize call only.
+*The outcome is kept on the run* (`agent_runs.chart`), because a refusal can
+exist on a run that reached no finding at all — attaching it to a finding would
+give the drawn half a home and the refused half none. Architecture 4.2 already
+carries chart specs on the `ComposedAnswer`, so this corrected the **plan text**
+and left the architecture untouched.
+*A refusal renders where the chart would have been.* `limitations` is titled
+*"What this answer does not establish"* in its accessible name, and every other
+member of that list bears on whether the answer is **true**; a line about a
+picture under that heading teaches a reader to skim the region that also carries
+an unresolved critic block (B-079, from the other side).
+Consequences: `charts.decide` returns a spec **or** a sentence and the type
+enforces it, so a rule nobody has written yet cannot produce silence. **The spec
+is assembled server-side** from a closed vocabulary and the result's own column
+names — there is no field a URL can arrive in, which is why a browser test can
+assert the page fetches nothing off its own origin. That property is the reason
+**Recharts was declined** on 2026-08-19 when the owner raised it: a client-side
+chart library builds the picture from data in the browser and dissolves the
+validated-spec contract architecture Part 3 chose over a code sandbox. A future
+change of renderer has to keep the server-built spec or replace that test with
+something as strong.
+
 ## D-036 — An edited definition is versioned, not overwritten
 Date: 2026-08-18 · Phase: 11 · PR: B-088 · Migration 0022
 Context: **B-088** asked for an edit route, because a definition was write-once —
