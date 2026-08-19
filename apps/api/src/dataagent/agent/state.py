@@ -83,6 +83,10 @@ class ExecutionRef(BaseModel):
     #: Identifies *what was asked of the database*, so asking it again can be
     #: recognised and refused (4.4's duplicate-query rule).
     sql_hash: str = ""
+    #: The tables this statement read, as the validator resolved them. Kept so
+    #: the answer can say which source it came from when the question had more
+    #: than one (**B-093**).
+    tables: list[str] = Field(default_factory=list[str])
     row_count: int | None = None
     summary: str = ""
     ok: bool = True
@@ -188,6 +192,11 @@ class ResearchState(BaseModel):
     #: three gate walks needed and never got. Without this the two are
     #: indistinguishable downstream and the honest message cannot be written.
     definitions_available: int = 0
+    #: The tables this question retrieved that have figures to aggregate — the
+    #: sources it could have been answered from (**B-093**). Recorded at context
+    #: time, where the cards are in hand, because by the time the answer is
+    #: composed all that survives is a list of names.
+    candidate_sources: list[str] = Field(default_factory=list[str])
 
     #: Set when a ceiling stopped the run, so the composed answer can say which.
     stopped_by: str | None = None

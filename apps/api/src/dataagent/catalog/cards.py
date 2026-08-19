@@ -23,6 +23,16 @@ the way in (D-013), so the card is safe by construction rather than by care.
 so rather than implying its columns are uninteresting, and a masked column is
 described as masked rather than silently omitted — an agent that cannot see a
 column's values still needs to know the column is there.
+
+The third rule is the one **B-092** was filed for, and it is stricter than it
+sounds. A card must not present a **guess as a survey**. The profile is the first
+`max_rows` rows of the table, not a random sample, and it counts how often each
+value appeared — and until B-092 the card threw the counts away and printed
+`examples: DO, PI, UC, CN, GR`. A code on 0.01% of rows then read exactly like
+one on 78%, which is how a live run answered a purchasing question from a filter
+matching **7 rows in 51,356** with nothing in the prompt to suggest that was odd
+(**B-060**). So values carry their share, and the line says the list came from
+the head of the table rather than from a survey of it.
 """
 
 from __future__ import annotations
@@ -47,7 +57,16 @@ from dataagent.knowledge.embeddings import Embedder, embed_texts
 from dataagent.llm.base import LLMError
 from dataagent.tenancy.session import org_session
 
-__all__ = ["CardColumn", "CardInput", "build_card", "embed_cards", "refresh_cards"]
+__all__ = [
+    "MEASURES_HEADING",
+    "CardColumn",
+    "CardInput",
+    "ValueCount",
+    "build_card",
+    "embed_cards",
+    "offers_measures",
+    "refresh_cards",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +79,26 @@ MAX_EXAMPLES = 5
 #: Columns listed one per line before the card summarises the rest. A hundred-
 #: column table would otherwise produce a card nobody can use.
 MAX_LISTED_COLUMNS = 40
+
+#: How a card announces that this table has something to add up. Written by
+#: `build_card` and read back by `offers_measures`, and the two are next to each
+#: other on purpose: a reader elsewhere in the codebase matching this string
+#: would be parsing prose, while a function here is reading its own output.
+MEASURES_HEADING = "Numbers to aggregate:"
+
+
+@dataclass(frozen=True, slots=True)
+class ValueCount:
+    """One value the profile saw, and how many of the sampled rows held it.
+
+    The count travels with the value all the way to the card (**B-092**). It was
+    measured, stored and then dropped one line before it would have been useful,
+    and what it buys is the difference between *these are the values* and *this
+    one is almost all of them*.
+    """
+
+    value: str
+    count: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,7 +116,10 @@ class CardColumn:
     min_val: str | None = None
     max_val: str | None = None
     #: Already masked where it had to be — see the module docstring.
-    top_values: Sequence[str] = ()
+    top_values: Sequence[ValueCount] = ()
+    #: How many rows the profile actually read, so a share can be stated as a
+    #: share *of something* and the reader can see how thin the evidence is.
+    sample_rows: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +135,18 @@ class CardInput:
     outgoing: Sequence[tuple[tuple[str, ...], str, tuple[str, ...]]] = ()
     #: (from_table, from_columns, to_columns) for keys arriving at it.
     incoming: Sequence[tuple[str, tuple[str, ...], tuple[str, ...]]] = ()
+
+
+def offers_measures(card_text: str) -> bool:
+    """Whether this card describes a table with figures to aggregate.
+
+    The cheapest honest test for *"could this table have answered the question"*
+    (**B-093**): a table with no measure is a dimension, and an answer that did
+    not read it was not choosing between sources. Reads the sentence
+    `build_card` writes a few lines above, so the question and the answer stay
+    in one file and a test can hold them together.
+    """
+    return MEASURES_HEADING in card_text
 
 
 def _qualified(schema: str, table: str) -> str:
@@ -118,12 +172,11 @@ def _column_line(column: CardColumn) -> str:
     if column.null_frac is not None and column.null_frac > 0.01:
         facts.append(f"{column.null_frac:.0%} empty")
     if column.distinct_est is not None and column.distinct_est > 0:
-        facts.append(f"{column.distinct_est} distinct in sample")
+        facts.append(_distinct_fact(column))
     if column.min_val is not None and column.max_val is not None:
         facts.append(f"range {column.min_val} to {column.max_val}")
     if column.top_values:
-        shown = ", ".join(str(value) for value in column.top_values[:MAX_EXAMPLES])
-        facts.append(f"examples: {shown}")
+        facts.append(_values_fact(column))
 
     # Said plainly, because an agent that does not know a column is masked will
     # write a query whose results are useless and not understand why.
@@ -135,6 +188,63 @@ def _column_line(column: CardColumn) -> str:
     if facts:
         line += f" ({'; '.join(facts)})"
     return line
+
+
+def _count_of(raw: object) -> int:
+    """A stored count as an integer, and 0 for anything that is not one.
+
+    The column is JSONB, so its shape is a convention rather than a type. A row
+    written before the profile carried counts reads as 0 and simply has no share
+    to state — better than a card that cannot be built.
+    """
+    return raw if isinstance(raw, int) else 0
+
+
+def _share(count: int, total: int) -> str:
+    """A count as a share of the rows read, in the fewest characters that stay true.
+
+    Whole percents above 1, one decimal below it, and `<0.1%` under that — a code
+    on six rows in five thousand should not round to `0%` and read as absent.
+    """
+    percent = 100.0 * count / total
+    if percent >= 1:
+        return f"{percent:.0f}%"
+    if percent >= 0.1:
+        return f"{percent:.1f}%"
+    return "<0.1%"
+
+
+def _distinct_fact(column: CardColumn) -> str:
+    """How many values the profile saw, and how far it looked.
+
+    Naming the sample size is the honest half of `distinct in sample`: five
+    distinct values found in five thousand rows of a fifty-thousand-row table is
+    a much weaker claim than five found in five thousand rows of five thousand,
+    and the card used to state both the same way.
+    """
+    if column.sample_rows:
+        return f"{column.distinct_est} distinct in the first {column.sample_rows:,} rows"
+    return f"{column.distinct_est} distinct in sample"
+
+
+def _values_fact(column: CardColumn) -> str:
+    """The commonest values, each with its share (**B-092**).
+
+    **Ordered and quantified, and said to be neither exhaustive nor random.**
+    The profile reads the head of the table rather than a random sample — 5.2's
+    deliberate choice, since ordering would sort somebody's warehouse — so a
+    value that lives at the far end can be missing entirely. A model choosing a
+    filter from this list is entitled to know both things: which value is
+    typical, and that the list may not be the whole vocabulary.
+    """
+    shown = column.top_values[:MAX_EXAMPLES]
+    total = column.sample_rows or sum(item.count for item in shown)
+    if not total:
+        return "examples: " + ", ".join(item.value for item in shown)
+    described = ", ".join(f"{item.value} {_share(item.count, total)}" for item in shown)
+    more = "" if len(column.top_values) <= MAX_EXAMPLES else ", and rarer ones"
+    where = f"the table's first {total:,}" if column.sample_rows else "the rows read"
+    return f"commonest in the rows read ({where}): {described}{more}"
 
 
 def _relationship_lines(card: CardInput) -> list[str]:
@@ -183,7 +293,7 @@ def build_card(card: CardInput) -> str:
     dimensions = [c.name for c in card.columns if c.semantic_role == "dimension"]
     summary: list[str] = []
     if measures:
-        summary.append(f"Numbers to aggregate: {', '.join(measures)}.")
+        summary.append(f"{MEASURES_HEADING} {', '.join(measures)}.")
     if times:
         summary.append(f"Dates to filter or group by: {', '.join(times)}.")
     if dimensions:
@@ -340,9 +450,17 @@ async def refresh_cards(org_id: uuid.UUID, data_source_id: uuid.UUID) -> int:
                         distinct_est=column.distinct_est,
                         min_val=column.min_val,
                         max_val=column.max_val,
+                        # The counts come too, because dropping them here is
+                        # exactly the defect B-092 records: they were measured,
+                        # stored, and thrown away one line before use.
                         top_values=[
-                            str(entry.get("value", "")) for entry in (column.top_values or [])
+                            ValueCount(
+                                value=str(entry.get("value", "")),
+                                count=_count_of(entry.get("count")),
+                            )
+                            for entry in (column.top_values or [])
                         ],
+                        sample_rows=column.sample_rows,
                     )
                     for column in by_table.get(table.id, [])
                 ],

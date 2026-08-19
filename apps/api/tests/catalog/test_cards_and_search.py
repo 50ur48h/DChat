@@ -107,6 +107,96 @@ async def _card(org_id: uuid.UUID, source_id: uuid.UUID, table: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _coded_column(counts: dict[str, int], sample_rows: int) -> cards.CardColumn:
+    """A category column as the profiler would hand it over, counts and all."""
+    return cards.CardColumn(
+        name="move_type",
+        data_type="text",
+        nullable=True,
+        is_pk=False,
+        semantic_role="dimension",
+        distinct_est=len(counts),
+        top_values=[cards.ValueCount(value=value, count=count) for value, count in counts.items()],
+        sample_rows=sample_rows,
+    )
+
+
+def _card_with(column: cards.CardColumn) -> str:
+    return cards.build_card(
+        cards.CardInput(
+            schema_name="public",
+            table_name="fact_stock_move",
+            kind="table",
+            description=None,
+            row_estimate=51_356,
+            profiled=True,
+            columns=[column],
+        )
+    )
+
+
+def test_a_code_column_says_which_of_its_values_is_typical() -> None:
+    """**B-092, and the whole of it.** The profile counts how often each value
+    appeared, stored the counts, and the card used to print `examples: DO, PI,
+    UC, CN, GR` — so a code on 0.01% of rows read exactly like one on 78%.
+
+    A live run then answered a purchasing question from a filter matching 7 rows
+    in 51,356, and nothing in the prompt suggested that was odd (**B-060**).
+    """
+    line = _card_with(
+        _coded_column({"DO": 3925, "PI": 853, "UC": 208, "CN": 8, "GR": 6}, sample_rows=5000)
+    )
+
+    assert "DO 78%" in line
+    assert "PI 17%" in line
+    # The one that matters: a code on six rows in five thousand must not round
+    # to 0% and read as absent, and must not read like the other four.
+    assert "GR 0.1%" in line
+    assert "examples:" not in line
+
+
+def test_a_card_says_the_rows_it_read_were_the_tables_first() -> None:
+    """The profile is the head of the table, not a random sample — 5.2's
+    deliberate choice, since ordering would sort somebody's warehouse. A model
+    choosing a filter from this list is entitled to know the list may not be the
+    whole vocabulary: on the warehouse B-060 came from, the card advertised five
+    codes for a column that has eight, and the third-largest never appeared.
+    """
+    line = _card_with(_coded_column({"DO": 3925, "PI": 853}, sample_rows=5000))
+
+    assert "in the first 5,000 rows" in line
+    assert "the table's first" in line
+
+
+def test_a_share_below_a_tenth_of_a_percent_is_not_rounded_away() -> None:
+    """`0%` would say the value does not occur, which is the opposite of what a
+    profile that saw it means."""
+    line = _card_with(_coded_column({"COMMON": 9999, "RARE": 1}, sample_rows=10_000))
+
+    assert "RARE <0.1%" in line
+    assert "RARE 0%" not in line
+
+
+def test_a_column_profiled_before_counts_were_kept_still_builds_a_card() -> None:
+    """A row written before B-092 has values and no counts. It gets the values
+    and no shares — a card that cannot be built would be a worse answer than one
+    that says less."""
+    column = cards.CardColumn(
+        name="move_type",
+        data_type="text",
+        nullable=True,
+        is_pk=False,
+        distinct_est=2,
+        top_values=[cards.ValueCount(value="DO", count=0), cards.ValueCount(value="PI", count=0)],
+        sample_rows=None,
+    )
+
+    line = _card_with(column)
+
+    assert "examples: DO, PI" in line
+    assert "distinct in sample" in line
+
+
 async def test_a_card_describes_the_table_in_words(
     platform: URL, migrated_database: URL, isolated_customer_database: CustomerDatabase
 ) -> None:

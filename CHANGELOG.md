@@ -44,6 +44,18 @@ under "Unreleased", only for changes a user would notice.
   and ignored by the container the product actually runs in. A key left empty
   now means "use the default" everywhere, so a fresh setup starts rather than
   failing to parse a blank.
+- When a question could be answered from more than one table, the answer now
+  says which one it read and which comparable ones it did not. It does not claim
+  the others would disagree — only that a choice was made, which is what was
+  missing when the same question was answered from two different tables two
+  orders of magnitude apart.
+- Table descriptions now say how common each value of a category column is,
+  instead of listing a few of them as equals. A code appearing on a hundredth of
+  a percent of rows used to read exactly like one covering most of the table,
+  and answers were built on the former. The descriptions also say that the rows
+  they were built from are the table's first rather than a random sample, so a
+  value they never saw is visibly possible. Existing descriptions pick this up
+  the next time a data source is profiled.
 - Searching an organization's documents now really does look for meaning and not
   only wording: nothing had ever been embedded, because no part of the
   application built an embedder. Uploading fills it in, and re-indexing fills it

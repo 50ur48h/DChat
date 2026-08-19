@@ -66,6 +66,7 @@ from dataagent.agent.state import ResearchState, StateFinding
 from dataagent.agent.tools.base import ToolContext
 from dataagent.agent.tools.finalize import FINALIZE, FinalizeIn
 from dataagent.agent.tools.registry import ToolRegistry, default_registry
+from dataagent.catalog.cards import offers_measures
 from dataagent.config import Settings
 from dataagent.dal.policy import SourcePolicy
 from dataagent.knowledge import embeddings
@@ -312,6 +313,12 @@ async def _investigate(
 
     state.phase = "context"
     state.table_names = list(bundle.table_names)
+    # Which of the retrieved tables could have answered this — the ones with
+    # something to add up (**B-093**). A dimension the answer did not read was
+    # never an alternative, and saying so would be a warning about nothing.
+    state.candidate_sources = [
+        card.qualified for card in bundle.cards if offers_measures(card.card_text)
+    ]
     state.as_of = bundle.as_of.isoformat()
     await _checkpoint(context, working)
     await events.emit(
