@@ -61,6 +61,23 @@
   max-width: 68ch;
 }
 
+/* How the answer was reached, in one line (B-100). Quieter than a limitation
+   and placed above it, because the two answer different questions: this one is
+   "how did you get this", which is not a doubt about the answer, and styling it
+   like a caveat would make every answer look qualified. No rule on the left for
+   the same reason. */
+.method {
+  margin: var(--space-3) 0 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--fg-muted);
+  max-width: 68ch;
+}
+
+.methodLabel {
+  font-weight: 600;
+}
+
 /* What the answer does not establish. Quiet by design: a limitation is part of
    a good answer rather than a failure of one, so it reads as a note beside the
    reply and is never styled with --danger. The rule on the left is the only

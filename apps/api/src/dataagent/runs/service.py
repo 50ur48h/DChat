@@ -162,6 +162,11 @@ class ConversationView:
     #: That source's display name, so a client can say which database it is
     #: talking to without a second call. Null when the source was removed.
     data_source_name: str | None = None
+    #: When this thread was put away, or None while it is in the list
+    #: (**D-039**). Archiving hides it; it never removes the runs, the events or
+    #: the executions underneath, which is why the field is a timestamp a reader
+    #: can ask "when" of rather than a flag.
+    archived_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +230,10 @@ class RunView:
     #: What this answer does not establish. Rendered beside the answer, never
     #: instead of it, and empty is both the common case and a good one.
     limitations: list[str] = field(default_factory=list[str])
+    #: One line on how the answer was reached, for a reader who will not open the
+    #: SQL — architecture 4.2's fourth part of an answer (**B-100**). Empty for
+    #: runs composed before it was stored, and for runs that never composed.
+    method: str = ""
     #: Which semantic definitions governed this answer, and how many there were
     #: to match (**B-087**). Both, because they mean nothing apart: an empty list
     #: beside `0` is an organization that has defined nothing, and an empty list
@@ -358,8 +367,17 @@ async def create_conversation(
         )
 
 
-async def list_conversations(*, org_id: uuid.UUID, user_id: uuid.UUID) -> list[ConversationView]:
-    """This caller's conversations, newest first, with enough to render a list."""
+async def list_conversations(
+    *, org_id: uuid.UUID, user_id: uuid.UUID, archived: bool = False
+) -> list[ConversationView]:
+    """This caller's conversations, newest first, with enough to render a list.
+
+    ``archived`` selects **one** of the two lists rather than widening the first
+    into both: an archived thread that stayed in the default list would make the
+    button appear broken, and a screen that mixed them would need a badge on
+    every row to say which is which. The archived ones are a place you go, not
+    noise you filter.
+    """
     async with org_session(org_id) as session:
         counts = (
             select(Message.conversation_id, func.count(Message.id).label("message_count"))
@@ -371,6 +389,11 @@ async def list_conversations(*, org_id: uuid.UUID, user_id: uuid.UUID) -> list[C
             .outerjoin(counts, counts.c.conversation_id == Conversation.id)
             .outerjoin(DataSource, DataSource.id == Conversation.data_source_id)
             .where(Conversation.user_id == user_id)
+            .where(
+                Conversation.archived_at.is_not(None)
+                if archived
+                else Conversation.archived_at.is_(None)
+            )
             .order_by(Conversation.created_at.desc())
         )
         return [
@@ -382,9 +405,60 @@ async def list_conversations(*, org_id: uuid.UUID, user_id: uuid.UUID) -> list[C
                 message_count=count,
                 data_source_id=conversation.data_source_id,
                 data_source_name=source_name,
+                archived_at=conversation.archived_at,
             )
             for conversation, count, source_name in rows.all()
         ]
+
+
+async def rename_conversation(
+    *, org_id: uuid.UUID, user_id: uuid.UUID, conversation_id: uuid.UUID, title: str
+) -> ConversationView:
+    """Give a thread a name its owner will recognise later (plan WP11.2).
+
+    Only the owner's own, through `_owned_conversation` — the same rule the rest
+    of this module follows, and the reason a colleague's thread is a 404 even to
+    an Admin (**B-037**).
+
+    The title is what the list shows, so an empty one is stored as NULL rather
+    than as a blank string: the list already renders a thread with no title by
+    falling back to its first question, and a row of empty space would look like
+    a rendering fault instead of a thread nobody named.
+    """
+    cleaned = title.strip()
+    async with org_session(org_id) as session:
+        row = await _owned_conversation(session, conversation_id=conversation_id, user_id=user_id)
+        row.title = cleaned or None
+        await session.flush()
+    return await get_conversation(org_id=org_id, user_id=user_id, conversation_id=conversation_id)
+
+
+async def set_conversation_archived(
+    *, org_id: uuid.UUID, user_id: uuid.UUID, conversation_id: uuid.UUID, archived: bool
+) -> ConversationView:
+    """Put a thread away, or bring it back (**D-039**).
+
+    **Not a delete, and the screen says so.** A conversation is the root of its
+    runs, their events, their findings and their query executions — the trace
+    architecture 0.2.4 makes durable and `agent_events` holds append-only by
+    grant. Removing that from a list screen would destroy the evidence behind
+    answers somebody may already have acted on, at the surface where a misclick
+    is cheapest. True erasure is Phase 12's retention story: every table, a
+    receipt, a window.
+
+    Idempotent in both directions. Archiving an archived thread keeps the
+    original timestamp rather than moving it, because *when it was put away* is
+    the question the column exists to answer and a repeated call is not a new
+    event.
+    """
+    async with org_session(org_id) as session:
+        row = await _owned_conversation(session, conversation_id=conversation_id, user_id=user_id)
+        if archived and row.archived_at is None:
+            row.archived_at = datetime.now(UTC)
+        elif not archived:
+            row.archived_at = None
+        await session.flush()
+    return await get_conversation(org_id=org_id, user_id=user_id, conversation_id=conversation_id)
 
 
 async def get_conversation(
@@ -419,6 +493,7 @@ async def get_conversation(
             last_run_id=latest,
             data_source_id=row.data_source_id,
             data_source_name=source_name,
+            archived_at=row.archived_at,
         )
 
 
@@ -676,6 +751,7 @@ async def _run_view(session: AsyncSession, run: AgentRun) -> RunView:
         cost_estimate=run.cost_estimate,
         model_usage=dict(run.model_usage),
         limitations=[str(note) for note in run.limitations],
+        method=run.method or "",
         chart=dict(run.chart) if run.chart else None,
         # Read off the run's own persisted state rather than recomputed: what
         # matters is what governed *this* run, and re-matching now would answer
@@ -883,6 +959,7 @@ async def record_answer(
     content: str,
     limitations: Sequence[str] = (),
     chart: Mapping[str, object] | None = None,
+    method: str = "",
 ) -> MessageView:
     """Write the assistant's reply for a run, and what it does not establish.
 
@@ -898,6 +975,13 @@ async def record_answer(
     spec **or** the sentence saying why there is none, and a refusal that had
     nowhere to live would leave a picture silently absent — which looks like a
     broken page rather than a decision. `None` means no chart was asked for.
+
+    ``method`` is the fourth part of architecture 4.2's answer and the last to
+    get a home (**B-100**). `composer.method_note` has built it on every run
+    since Phase 9 and nothing stored it, so the one line written for a reader who
+    will not open the SQL was the one that never reached them. Empty string
+    rather than a sentinel: a caller that has nothing to say writes nothing, and
+    the column stays NULL.
     """
     async with org_session(org_id) as session:
         run = await _owned_run(session, run_id=run_id, user_id=None)
@@ -910,6 +994,8 @@ async def record_answer(
         )
         session.add(message)
         run.limitations = list(limitations)
+        if method:
+            run.method = method
         if chart is not None:
             run.chart = dict(chart)
         await session.flush()

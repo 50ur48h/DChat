@@ -48,6 +48,7 @@ __all__ = [
     "Chart",
     "ChartRequest",
     "Frame",
+    "axis_title",
     "decide",
 ]
 
@@ -222,6 +223,38 @@ def decide(frame: Frame, request: ChartRequest) -> Chart:
     return Chart(spec=_spec(frame, request, x_kind))
 
 
+#: Words a de-snake-cased column name should not start a sentence with in
+#: lowercase, and abbreviations that look wrong capitalised. Small and blunt on
+#: purpose: the catalog's own description is the good answer, and this is only
+#: the fallback for a column nobody has described.
+_ALWAYS_UPPER = {"id", "sku", "vat", "gst", "usd", "eur", "gbp", "myr", "kpi"}
+
+
+def axis_title(column: str) -> str:
+    """A column name in the reader's vocabulary rather than the database's (**B-098**).
+
+    `order_month` becomes *Order month*. Deliberately a de-snake-casing and not
+    a dictionary: the picture is captioned for a person, and a caption that is
+    merely *tidier* than the raw name is already the whole of the improvement.
+    Anything cleverer — expanding `qty`, guessing that `dt` means date — would be
+    the platform inventing meaning it does not have, which is the failure this
+    codebase keeps filing bugs about.
+
+    An empty or already-spaced name is returned unchanged rather than mangled: a
+    column called `Total Revenue` is a caption already.
+    """
+    if not column or " " in column:
+        return column
+    words = [word for word in column.replace("-", "_").split("_") if word]
+    if not words:
+        return column
+    rendered = [word.upper() if word.lower() in _ALWAYS_UPPER else word.lower() for word in words]
+    first = rendered[0]
+    if first.lower() not in _ALWAYS_UPPER:
+        first = first[:1].upper() + first[1:]
+    return " ".join([first, *rendered[1:]])
+
+
 def _spec(
     frame: Frame,
     request: ChartRequest,
@@ -237,12 +270,20 @@ def _spec(
     this way the only inputs are a mark from `MARKS`, names checked against
     `frame.columns`, and values already masked by the DAL.
     """
+    # **B-098.** The axes used to carry the raw column names, so the picture was
+    # captioned in the database's vocabulary — `order_month`, `order_count` — to
+    # a reader who never chose those words. The title is one field on the
+    # encoding, and it is built server-side like everything else here.
     encoding: dict[str, object] = {
-        "x": {"field": request.x, "type": x_kind},
-        "y": {"field": request.y, "type": "quantitative"},
+        "x": {"field": request.x, "type": x_kind, "title": axis_title(request.x)},
+        "y": {"field": request.y, "type": "quantitative", "title": axis_title(request.y)},
     }
     if request.series is not None:
-        encoding["color"] = {"field": request.series, "type": "nominal"}
+        encoding["color"] = {
+            "field": request.series,
+            "type": "nominal",
+            "title": axis_title(request.series),
+        }
 
     spec: dict[str, object] = {
         "$schema": "https://vega.github.io/schema/vega-lite/v5.json",

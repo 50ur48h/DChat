@@ -806,6 +806,12 @@ async def _write_ending(
         run_id=context.run_id,
         content=final.answer,
         limitations=list(composed.limitations),
+        # **B-100.** `assemble` has built this since Phase 9 and this call
+        # dropped it, so architecture 4.2's four parts of an answer shipped as
+        # three. It is stored rather than recomputed on read for the reason
+        # `_grounding` gives about definitions: what a reader is owed is what
+        # *this* run did, not what today's code would say about it.
+        method=composed.method,
         chart=chart,
     )
 

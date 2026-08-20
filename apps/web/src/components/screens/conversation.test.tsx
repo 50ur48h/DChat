@@ -392,6 +392,30 @@ describe("what the answer does not establish", () => {
   });
 });
 
+describe("how the answer was reached", () => {
+  // **B-100.** Architecture 4.2's fourth part of an answer. The API built this
+  // sentence on every run from Phase 9 and no screen ever showed it, so the one
+  // line meant for a reader who will not open the SQL was the one nobody saw.
+  it("shows the method line with the answer", async () => {
+    routeFetch({ run: { ...ANSWERED, method: "2 queries over 2 steps, against orders." } });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    expect(await screen.findByText(/2 queries over 2 steps, against orders/i)).toBeInTheDocument();
+  });
+
+  it("says nothing when the run recorded no method", async () => {
+    // A run answered before the column existed, or one that never composed.
+    // Absent rather than an empty label, which would be a heading over nothing.
+    routeFetch({ run: { ...ANSWERED, method: "" } });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    await screen.findByText(/answered/i);
+    expect(screen.queryByText(/^How:/)).not.toBeInTheDocument();
+  });
+});
+
 // jsdom has no canvas, so the real vega would try to draw, fail asynchronously
 // and resolve after the assertions — which made this file flake once in a full
 // run. What these tests claim is that the card offers the spec and renders the

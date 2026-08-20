@@ -86,6 +86,7 @@ __all__ = [
     "KnowledgeDocument",
     "Message",
     "OrgMembership",
+    "OrgRecoveryGrant",
     "Organization",
     "QueryExecution",
     "ResultArtifact",
@@ -275,6 +276,44 @@ class Invitation(Base):
         ForeignKey("users.id", ondelete="SET NULL")
     )
     created_at: Mapped[CreatedAt]
+
+
+class OrgRecoveryGrant(Base):
+    """A way back into an organization whose Admins can no longer sign in (**B-017**).
+
+    An Admin arms one in advance and keeps the token somewhere outside the
+    product; whoever holds it can make themselves Admin of that one organization.
+    That is a bearer credential and is treated like one — hashed at rest, shown
+    once, single-use, revocable, and listed on the members screen so it cannot be
+    quietly forgotten.
+
+    **Not an invitation, though it is nearly one.** `accept_invitation` adds a
+    membership only when there is not one already, so an existing Reader
+    redeeming an Admin invitation stays a Reader — and the locked-out person is
+    usually already a member. Invitations also expire in a week, which is no use
+    for a credential whose entire purpose is to be waiting years later.
+
+    **No DELETE grant** (revision 0027). That a recovery happened, when, and by
+    whom is exactly what an organization needs to be able to show afterwards.
+    """
+
+    __tablename__ = "org_recovery_grants"
+    __table_args__ = (Index("ix_org_recovery_grants_org_id", "org_id"),)
+
+    id: Mapped[UuidPk]
+    org_id: Mapped[OrgId] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"))
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    #: What this grant is for, in the Admin's own words. A list of identical rows
+    #: is a list nobody audits.
+    label: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[CreatedAt]
+    expires_at: Mapped[datetime] = mapped_column(nullable=False)
+    used_at: Mapped[datetime | None]
+    used_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    revoked_at: Mapped[datetime | None]
 
 
 class DataSource(Base):
@@ -888,6 +927,7 @@ class Conversation(Base):
     __table_args__ = (
         Index("ix_conversations_org_id_created_at", "org_id", text("created_at DESC")),
         Index("ix_conversations_data_source_id", "data_source_id"),
+        Index("ix_conversations_user_archived", "user_id", "archived_at"),
     )
 
     id: Mapped[UuidPk]
@@ -897,6 +937,14 @@ class Conversation(Base):
         ForeignKey("data_sources.id", ondelete="SET NULL")
     )
     title: Mapped[str | None] = mapped_column(String(300))
+    #: When this thread was put away, or NULL while it is still in the list
+    #: (revision 0026, **D-039**). An archive rather than a delete, because a
+    #: conversation is the root of its runs, their events and their executions —
+    #: the trace architecture 0.2.4 makes durable and `agent_events` holds
+    #: append-only by grant. Destroying that from a list screen would remove the
+    #: evidence behind answers somebody may already have acted on. A timestamp
+    #: rather than a flag: the question worth answering later is *when*.
+    archived_at: Mapped[datetime | None]
     created_at: Mapped[CreatedAt]
 
 
@@ -972,6 +1020,14 @@ class AgentRun(Base):
     limitations: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
+    #: One line on how the answer was reached, for the reader who will not open
+    #: the SQL (architecture 4.2's fourth part of an answer; **B-100**, revision
+    #: 0025). Built deterministically from the run's own counts by
+    #: `composer.method_note` — never from a model's account of its reasoning,
+    #: which would be a story about the work rather than a record of it. NULL for
+    #: runs composed before the column existed, because a sentence invented for
+    #: them now would be a claim nobody made.
+    method: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None]
     finished_at: Mapped[datetime | None]
     #: Sanitized before it arrives, like every other error column here.
@@ -1450,4 +1506,5 @@ TENANT_TABLES: dict[str, str] = {
     "semantic_definitions": "org_id",
     "semantic_definition_versions": "org_id",
     "verified_queries": "org_id",
+    "org_recovery_grants": "org_id",
 }

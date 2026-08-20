@@ -20,7 +20,9 @@ import {
   isDefinitionVersion,
   isExecution,
   isHealth,
+  isArmedRecoveryGrant,
   isInvitation,
+  isRecoveryGrant,
   isKnowledgeDocument,
   isMe,
   isMember,
@@ -41,7 +43,9 @@ import {
   type DefinitionVersion,
   type Execution,
   type Health,
+  type ArmedRecoveryGrant,
   type Invitation,
+  type RecoveryGrant,
   type KnowledgeDocument,
   type Me,
   type Member,
@@ -154,6 +158,10 @@ export interface Api {
   createOrg(name: string): Promise<void>;
   members(orgId: string): Promise<Member[]>;
   invite(orgId: string, email: string, role: string): Promise<Invitation>;
+  /** B-017. The token comes back once, here, and is never retrievable again. */
+  armRecoveryGrant(orgId: string, label: string): Promise<ArmedRecoveryGrant>;
+  recoveryGrants(orgId: string): Promise<RecoveryGrant[]>;
+  revokeRecoveryGrant(orgId: string, grantId: string): Promise<RecoveryGrant>;
   acceptInvitation(token: string): Promise<Accepted>;
   changeRole(orgId: string, userId: string, role: string): Promise<void>;
   removeMember(orgId: string, userId: string): Promise<void>;
@@ -281,7 +289,15 @@ export interface Api {
     dataSourceId: string,
     definitionId: string,
   ): Promise<DefinitionVersion[]>;
-  conversations(orgId: string): Promise<Conversation[]>;
+  /** `archived` picks one list or the other, never both (D-039). */
+  conversations(orgId: string, options?: { archived?: boolean }): Promise<Conversation[]>;
+  renameConversation(orgId: string, conversationId: string, title: string): Promise<Conversation>;
+  /** Put a thread away, or bring it back. Never destroys its runs or its trace. */
+  archiveConversation(
+    orgId: string,
+    conversationId: string,
+    archived: boolean,
+  ): Promise<Conversation>;
   createConversation(
     orgId: string,
     options?: { title?: string | undefined; dataSourceId?: string | undefined },
@@ -332,6 +348,33 @@ export function createApi(getToken: () => Promise<string | null>): Api {
         await call(`/v1/orgs/${orgId}/invitations`, { method: "POST", body: { email, role } }),
         isInvitation,
         "invitation",
+      );
+    },
+    async armRecoveryGrant(orgId, label) {
+      return narrow(
+        await call(`/v1/orgs/${orgId}/recovery-grants`, { method: "POST", body: { label } }),
+        isArmedRecoveryGrant,
+        "recovery grant",
+      );
+    },
+    async recoveryGrants(orgId) {
+      const payload = await call(`/v1/orgs/${orgId}/recovery-grants`);
+      if (!Array.isArray(payload) || !payload.every(isRecoveryGrant)) {
+        throw new ApiError(
+          "The API's recovery-grants response did not match the expected shape",
+          200,
+        );
+      }
+      return payload;
+    },
+    async revokeRecoveryGrant(orgId, grantId) {
+      return narrow(
+        await call(`/v1/orgs/${orgId}/recovery-grants/${grantId}/revoke`, {
+          method: "POST",
+          body: {},
+        }),
+        isRecoveryGrant,
+        "recovery grant",
       );
     },
     async acceptInvitation(token) {
@@ -557,12 +600,35 @@ export function createApi(getToken: () => Promise<string | null>): Api {
         body: decision,
       });
     },
-    async conversations(orgId) {
-      const payload = await call(`/v1/orgs/${orgId}/conversations`);
+    async conversations(orgId, options = {}) {
+      const query = options.archived ? "?archived=true" : "";
+      const payload = await call(`/v1/orgs/${orgId}/conversations${query}`);
       if (!Array.isArray(payload) || !payload.every(isConversation)) {
         throw new ApiError("The API's conversations response did not match the expected shape", 200);
       }
       return payload;
+    },
+    async renameConversation(orgId, conversationId, title) {
+      return narrow(
+        await call(`/v1/orgs/${orgId}/conversations/${conversationId}`, {
+          method: "PATCH",
+          body: { title },
+        }),
+        isConversation,
+        "conversation",
+      );
+    },
+    // A POST to `…/archive` rather than a DELETE, mirroring the API: nothing is
+    // removed, and the reverse direction exists, which a DELETE could not offer.
+    async archiveConversation(orgId, conversationId, archived) {
+      return narrow(
+        await call(`/v1/orgs/${orgId}/conversations/${conversationId}/archive`, {
+          method: "POST",
+          body: { archived },
+        }),
+        isConversation,
+        "conversation",
+      );
     },
     // `data_source_id` is what makes a thread answerable in an organization with
     // more than one database (D-022). Omitting it is legal and means "the single

@@ -42,6 +42,30 @@ export interface Invitation {
 }
 
 /**
+ * A way back into an organization whose Admins can no longer sign in (B-017).
+ *
+ * An Admin arms one in advance and keeps the token outside the product. It is a
+ * bearer credential: whoever holds it can make themselves an Admin of this one
+ * organization, which is why the raw token appears exactly once, at the moment
+ * it is armed, and never in a listing.
+ */
+export interface RecoveryGrant {
+  id: string;
+  label: string;
+  created_at: string;
+  expires_at: string;
+  /** armed | used | revoked | expired */
+  state: string;
+  used_at?: string | null;
+  revoked_at?: string | null;
+}
+
+/** What arming answers with: the grant, plus the one and only sight of its token. */
+export interface ArmedRecoveryGrant extends RecoveryGrant {
+  token: string;
+}
+
+/**
  * A registered customer database.
  *
  * What is missing is the point: there is no `password` and no `username`. The
@@ -313,6 +337,15 @@ export interface Conversation {
   last_run_id: string | null;
   data_source_id: string | null;
   data_source_name: string | null;
+  /**
+   * When this thread was archived, or null while it is in the list (D-039).
+   *
+   * Archiving hides a conversation; it never removes the runs, events, findings
+   * or query executions underneath it. That is why the control says *Archive*
+   * and not *Delete* — a button that says delete and hides instead is a lie to
+   * the person clicking it.
+   */
+  archived_at?: string | null;
 }
 
 export interface ConversationMessage {
@@ -369,6 +402,18 @@ export interface Run {
    * the common case and a good one.
    */
   limitations: string[];
+  /**
+   * One line on how the answer was reached — how many queries, over how many
+   * steps, against which tables (B-100).
+   *
+   * Architecture 4.2's fourth part of an answer, and the last to be shown: it
+   * was built on every run from Phase 9 and stored on none, so the one sentence
+   * written for a reader who will not open the SQL never reached them. Built
+   * from the run's own counts, never from a model's account of its reasoning.
+   * Empty for runs answered before it was recorded, and for runs that never
+   * composed.
+   */
+  method?: string;
   /**
    * Which semantic definitions governed this answer, and how many there were to
    * match (B-087).
@@ -687,6 +732,21 @@ export function isInvitation(value: unknown): value is Invitation {
   );
 }
 
+export function isRecoveryGrant(value: unknown): value is RecoveryGrant {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.label === "string" &&
+    typeof value.created_at === "string" &&
+    typeof value.expires_at === "string" &&
+    typeof value.state === "string"
+  );
+}
+
+export function isArmedRecoveryGrant(value: unknown): value is ArmedRecoveryGrant {
+  return isRecoveryGrant(value) && typeof (value as { token?: unknown }).token === "string";
+}
+
 export function isConversation(value: unknown): value is Conversation {
   return (
     isRecord(value) &&
@@ -694,7 +754,8 @@ export function isConversation(value: unknown): value is Conversation {
     isNullableString(value.title) &&
     typeof value.created_at === "string" &&
     isNullableString(value.data_source_id) &&
-    isNullableString(value.data_source_name)
+    isNullableString(value.data_source_name) &&
+    (value.archived_at === undefined || isNullableString(value.archived_at))
   );
 }
 
@@ -751,6 +812,7 @@ export function isRun(value: unknown): value is Run {
       (Array.isArray(value.limitations) &&
         value.limitations.every((note) => typeof note === "string"))) &&
     isOptionalStringArray(value.definitions_applied) &&
+    (value.method === undefined || typeof value.method === "string") &&
     (value.chart === undefined || value.chart === null || isRecord(value.chart)) &&
     (value.definitions_available === undefined || typeof value.definitions_available === "number")
   );

@@ -48,6 +48,11 @@ NOT_ORG_SCOPED = {
     ("GET", "/v1/me"),
     ("POST", "/v1/orgs"),
     ("POST", "/v1/invitations/accept"),
+    # **B-017.** Claiming a recovery grant cannot be org-scoped: the claimant is
+    # either not a member at all, or is a member without the role any org-scoped
+    # guard would demand — which is the whole situation the grant exists for.
+    # The token is the authorization, exactly as for an invitation.
+    ("POST", "/v1/recovery-grants/claim"),
     ("GET", "/dev/token"),
     ("GET", "/dev/jwks.json"),
     ("GET", "/dev/.well-known/openid-configuration"),
@@ -67,6 +72,18 @@ PROBES: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
         "POST",
         "/v1/orgs/{org_id}/invitations",
         {"email": "invitee@example.com", "role": "reader"},
+    ),
+    # **B-017.** A recovery grant makes whoever holds its token an Admin of this
+    # organization, so all three of these are Admin-only for the same reason
+    # `PATCH members` is: anyone who could arm or read one could promote
+    # themselves. The claim route is not here — it is deliberately not
+    # org-scoped, and is listed in `NOT_ORG_SCOPED` with the reason.
+    ("POST", "/v1/orgs/{org_id}/recovery-grants", {"label": "Probe"}),
+    ("GET", "/v1/orgs/{org_id}/recovery-grants", None),
+    (
+        "POST",
+        "/v1/orgs/{org_id}/recovery-grants/{grant_id}/revoke",
+        {},
     ),
     ("GET", "/v1/orgs/{org_id}/data-sources", None),
     (
@@ -112,6 +129,15 @@ PROBES: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
     ("POST", "/v1/orgs/{org_id}/conversations", {"title": "Probe"}),
     ("GET", "/v1/orgs/{org_id}/conversations", None),
     ("GET", "/v1/orgs/{org_id}/conversations/{conversation_id}", None),
+    # Every role has its own conversations (arch 6.2), so these are member-level
+    # and the *ownership* rule does the rest: a colleague's thread is a 404 even
+    # to an Admin (B-037), which is a different check from this matrix.
+    ("PATCH", "/v1/orgs/{org_id}/conversations/{conversation_id}", {"title": "Renamed"}),
+    (
+        "POST",
+        "/v1/orgs/{org_id}/conversations/{conversation_id}/archive",
+        {"archived": False},
+    ),
     ("GET", "/v1/orgs/{org_id}/conversations/{conversation_id}/messages", None),
     (
         "POST",
@@ -289,6 +315,9 @@ class Matrix:
     #: One approved example per role, for the same reason the proposals are per
     #: role: the DELETE probe retires the row it is handed.
     verified: dict[str, uuid.UUID]
+    #: One recovery grant for the organization (**B-017**). Not per-role,
+    #: because revoking is idempotent and nothing here is owned by a caller.
+    recovery_grant_id: uuid.UUID
     #: A document **per role**, and for a blunter reason than the conversations:
     #: documents are org-scoped, so one would be visible to all three — but the
     #: DELETE probe *removes* it, and roles are probed in order, so the second
@@ -502,6 +531,20 @@ async def matrix_app(
                 {"i": example_id, "o": org_id, "d": data_source_id, "q": f"probe {role}?"},
             )
 
+        # **B-017.** One grant serves all three roles: revoking is idempotent, so
+        # unlike the conversations these do not need to be per-role. It has to
+        # *exist* though — probing revoke against an invented id would earn the
+        # Admin a 409 and record a role decision that never happened.
+        recovery_grant_id = uuid.uuid4()
+        await connection.execute(
+            text(
+                "INSERT INTO org_recovery_grants "
+                "(id, org_id, token_hash, label, expires_at) "
+                "VALUES (:i, :o, :h, 'probe', now() + interval '365 days')"
+            ),
+            {"i": recovery_grant_id, "o": org_id, "h": f"probe-hash-{recovery_grant_id}"},
+        )
+
     app = create_app(settings=Settings(auth_mode="dev", env="ci", build_env="dev"))
     app.state.token_validator = _SubjectAsToken()
 
@@ -518,6 +561,7 @@ async def matrix_app(
             documents=documents,
             proposals=proposals,
             verified=verified,
+            recovery_grant_id=recovery_grant_id,
         )
     finally:
         await owner.dispose()
@@ -581,6 +625,7 @@ async def test_the_role_matrix_matches_its_snapshot(matrix_app: Matrix) -> None:
                 document_id=matrix_app.documents[role],
                 definition_id=matrix_app.proposals[_pool(method, template)][role],
                 verified_query_id=matrix_app.verified[role],
+                grant_id=matrix_app.recovery_grant_id,
             ) + QUERIES.get(template, "")
             status = await _probe(matrix_app.app, method, path, role, body, UPLOADS.get(template))
             observed[key][role] = "allow" if status < 400 else f"deny({status})"

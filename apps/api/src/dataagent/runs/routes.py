@@ -72,6 +72,34 @@ class ConversationOut(BaseModel):
         default=None,
         description="Null when none was named, or when the source has since been removed.",
     )
+    archived_at: datetime | None = Field(
+        default=None,
+        description=(
+            "When this conversation was archived, or null while it is in the "
+            "list. Archiving hides a thread; it never removes the runs, events "
+            "or query executions underneath it, which stay reachable and "
+            "auditable (D-039)."
+        ),
+    )
+
+
+class RenameConversationIn(BaseModel):
+    title: str = Field(
+        max_length=300,
+        description=(
+            "The new title. Blank clears it, and the list falls back to the "
+            "thread's first question."
+        ),
+    )
+
+
+class ArchiveConversationIn(BaseModel):
+    archived: bool = Field(
+        description=(
+            "True puts the thread away, false brings it back. Not a delete: "
+            "nothing under the conversation is removed (D-039)."
+        )
+    )
 
 
 class MessageOut(BaseModel):
@@ -151,6 +179,17 @@ class RunOut(BaseModel):
             "stopped the search, a reviewer's warning, a period the data does not "
             "cover. Shown with the answer, never instead of it. Empty is the "
             "common case."
+        ),
+    )
+    method: str = Field(
+        default="",
+        description=(
+            "One line on how the answer was reached — how many queries, over how "
+            "many steps, against which tables. Architecture 4.2's fourth part of "
+            "an answer, for a reader who will not open the SQL. Built from the "
+            "run's own counts, never from a model's account of its reasoning. "
+            "Empty for runs composed before it was recorded, and for runs that "
+            "never composed an answer."
         ),
     )
     chart: dict[str, object] | None = Field(
@@ -249,6 +288,7 @@ def _conversation_out(view: service.ConversationView) -> ConversationOut:
         last_run_id=view.last_run_id,
         data_source_id=view.data_source_id,
         data_source_name=view.data_source_name,
+        archived_at=view.archived_at,
     )
 
 
@@ -291,11 +331,86 @@ async def create_conversation(
 )
 async def list_conversations(
     context: Annotated[RequestContext, Depends(require_member)],
+    archived: Annotated[
+        bool,
+        Query(
+            description=(
+                "False (the default) lists the threads in play; true lists the "
+                "archived ones. One or the other, never both — an archived "
+                "thread left in the default list would make the button look "
+                "broken."
+            )
+        ),
+    ] = False,
 ) -> list[ConversationOut]:
     return [
         _conversation_out(view)
-        for view in await service.list_conversations(org_id=context.org_id, user_id=context.user_id)
+        for view in await service.list_conversations(
+            org_id=context.org_id, user_id=context.user_id, archived=archived
+        )
     ]
+
+
+@router.patch(
+    "/orgs/{org_id}/conversations/{conversation_id}",
+    response_model=ConversationOut,
+    summary="Rename a conversation",
+)
+async def rename_conversation(
+    body: RenameConversationIn,
+    context: Annotated[RequestContext, Depends(require_member)],
+    conversation_id: ConversationId,
+) -> ConversationOut:
+    """Retitle your own thread.
+
+    Any member may be here — architecture 6.2 gives every role its own
+    conversations — and `service` enforces that "your own" is literal: a
+    colleague's thread is a 404 even to an Admin (**B-037**).
+    """
+    try:
+        return _conversation_out(
+            await service.rename_conversation(
+                org_id=context.org_id,
+                user_id=context.user_id,
+                conversation_id=conversation_id,
+                title=body.title,
+            )
+        )
+    except NotFoundError as error:
+        raise _not_found("conversation") from error
+
+
+@router.post(
+    "/orgs/{org_id}/conversations/{conversation_id}/archive",
+    response_model=ConversationOut,
+    summary="Archive a conversation, or bring it back",
+)
+async def archive_conversation(
+    body: ArchiveConversationIn,
+    context: Annotated[RequestContext, Depends(require_member)],
+    conversation_id: ConversationId,
+) -> ConversationOut:
+    """Put a thread away without destroying what it produced (**D-039**).
+
+    A POST rather than a DELETE, and the noun in the path says `archive` rather
+    than the method implying removal — because nothing is removed. The runs,
+    their events, their findings and their query executions all stay exactly
+    where they were, which is what makes the trace worth having.
+
+    It is also the honest shape for the reverse: `archived: false` brings the
+    thread back, and there is no such thing as an un-DELETE.
+    """
+    try:
+        return _conversation_out(
+            await service.set_conversation_archived(
+                org_id=context.org_id,
+                user_id=context.user_id,
+                conversation_id=conversation_id,
+                archived=body.archived,
+            )
+        )
+    except NotFoundError as error:
+        raise _not_found("conversation") from error
 
 
 @router.get(
@@ -423,6 +538,7 @@ async def get_run(
         cost_estimate=view.cost_estimate,
         model_usage=view.model_usage,
         limitations=view.limitations,
+        method=view.method,
         chart=view.chart,
         definitions_applied=view.definitions_applied,
         definitions_available=view.definitions_available,

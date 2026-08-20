@@ -6,22 +6,35 @@ Current position: **Phases 0–5 and 7–11's first four items are done. Phase 6
                   be corrected and retired), B-090 (the environment guard),
                   B-060 (reproduced, diagnosed, and its two chosen fixes built as
                   B-092 and B-093), B-094 (a retired definition can be brought
-                  back), **WP11.1 — charts** and **B-095** (a run whose queries
-                  all failed is refused, not answered) are all merged. What
-                  remains is **WP11.2**, the phase gate.
+                  back), **WP11.1 — charts**, **B-095** (a run whose queries
+                  all failed is refused, not answered) and **WP11.2a** (polish,
+                  B-017, B-100, B-098) are all merged. What remains is
+                  **WP11.2b**, the phase gate.
                   The session of 2026-08-19 was unusually productive for a reason
                   worth repeating: **six defects were found by the owner walking
                   the product by hand**, not by the suite — B-094, B-095, B-096,
                   B-097, B-098, and the two screen defects in B-088's web half.
                   Every one was invisible to a green build.
-Next step:        **WP11.2 — the phase gate**, carrying **B-017** (recovery when
-                  an org has no Admin who can sign in), **B-061** and **B-020**,
-                  with **B-097** (prose enumerating what the chart already shows
-                  — assessed, see its row) and **B-098** (raw column names on
-                  chart axes) as polish candidates in scope. The gate is
-                  *"show me the revenue trend by month" → chart renders;
-                  Playwright green; a non-developer can run the demo from the
-                  README quickstart alone*.
+Next step:        **WP11.2b — the phase gate** (`p11.2b-smoke`). Three things and
+                  they are in order: the **compose-based Playwright smoke** with
+                  its `web-e2e` CI job; the **README quickstart** rewritten so a
+                  non-developer reaches a real answer rather than a health check;
+                  and the **gate walk**.
+                  The model for the smoke is a **scripted provider selected by
+                  environment, refused at boot in prod** (owner, 2026-08-20).
+                  Two conditions came with that choice and both are binding.
+                  **The prod refusal gets a test that actually boots** with prod
+                  settings and the scripted provider selected — *“an assertion in
+                  a docstring is not a guard”*, and this is a path in the shipped
+                  image that answers questions without a model. And **the gate
+                  wording now says the CI smoke proves the stack wires up end to
+                  end, not that the agent answered**: the chart criterion is met
+                  by the live walk against a real model, because a gate signed
+                  off on a canned answer would be B-087 at the level of the gate.
+                  **B-097** (prose enumerating what the chart already shows) is
+                  the remaining polish candidate. **B-101 — the small-screen and
+                  catalog/members pass — is deliberately *not* in the gate**, so
+                  the sign-off must not be read as covering phones.
 Merge policy: ASK
 Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  (owner, 2026-08-17), so `nightly-evals.yml` can run — keep its
@@ -29,9 +42,78 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 11.
-Last updated: 2026-08-20 by Claude Code (B-095 — a run whose every query failed is refused rather than answered, and says which failure; D-038 records the owner's choice)
+Last updated: 2026-08-20 by Claude Code (WP11.2a — conversation rename/archive, B-017's recovery grants, B-100's method line and B-098's axis titles; D-039 records archive-not-delete)
 
 ---
+
+## WP11.2a — polish, B-017, B-100, B-098 (2026-08-20)
+
+**The work package was split first.** WP11.2 carried seven workstreams into one
+gate PR, which is a diff nobody reviews properly. The owner split it: **11.2a**
+is the product work, **11.2b** is the smoke and the gate, and sign-off is on the
+second. **B-020 and B-061 were dropped** — B-020's own entry had already decided
+it needs its own reviewed PR, since it is a `dal/validator.py` change carrying a
+collision rule and dal/ requires human review; B-061's currency half has no
+honest route until B-059 or a per-source setting exists.
+
+**B-017 — a way back in.** An Admin arms a recovery grant, keeps the token
+outside the product, and whoever holds it can claim Admin of that one
+organization. The plan preferred this over a break-glass platform-operator role
+because it adds **no new privilege**: the organization creates its own way back
+and the platform gains nothing to defend. It is deliberately *not* an ordinary
+invitation, and that is the whole feature — `accept_invitation` adds a membership
+only where there is none, so a Reader redeeming an Admin invitation stays a
+Reader, and the locked-out person is usually already a member. The test that
+carries it reproduces the bricked state (every Admin demoted, the product
+refusing the remaining Reader an invitation) rather than asserting a 200.
+`ops/scripts/set_role.sh` now says in its own header that it is no longer the
+answer.
+
+**D-039 — archive, not delete.** A conversation is the root of its runs, their
+events, their findings and their query executions. Two conditions came with the
+owner's decision and both are in the code: the control **says Archive**, with a
+test asserting the word and asserting no control says "delete" — *"a button that
+says delete and hides instead is a lie to the user"* — and **true erasure is
+named as a Phase 12 retention story** rather than left implied. The test that
+carries the decision asserts against the *record*, because `archived_at is not
+None` would pass just as happily on an implementation that had cascaded
+everything away.
+
+**B-100 — the method line, surfaced.** Migration 0025, written from what
+`assemble` already built, rendered above the limitations and styled quieter:
+"how did you get this" is not a doubt about the answer, and a method line that
+read like a caveat would make every answer look qualified.
+
+**B-098 — axis titles.** A de-snake-casing, and deliberately not a dictionary:
+expanding `qty` or deciding `dt` means date would be the platform inventing
+meaning it does not have. The catalog's column description was considered and
+**not** used — it is prose written for another purpose and is often a paragraph,
+which is not an axis label.
+
+**One empty-state defect found while working.** The conversations list started at
+`[]`, so every visitor was told *"Nothing yet"* for as long as the fetch took —
+an empty state standing in for a loading one, which reads as "you have no
+conversations" rather than "wait". Fixed, with a test that holds the fetch open.
+
+### What is not in 11.2a, and is not in the gate either — B-101
+
+The catalog and members **rounding** and the **mobile layout pass** named in the
+plan are *not* done. Members gained the recovery panel and both screens gained
+their loading states, but nobody has sat down with these screens at 375px — the
+app has three `@media` rules in total.
+
+**This is now B-101, and it is deliberately not in WP11.2b** (owner,
+2026-08-20), on the reasoning that dropped B-020: the gate PR already carries a
+new CI job, a scripted provider in the shipped image and the sign-off walk, and a
+layout pass touching every screen reviews badly beside that. The sharper half of
+the reason is that it is *"the one item where done is my judgement in a browser
+rather than a test"* — a responsive pass has almost no assertable surface, so
+unlike everything else in 11.2a it cannot ride along on a green build.
+
+> **The Phase 11 gate does not cover small screens.** Sign-off on WP11.2b says
+> the demo works, the chart renders and the stack wires up end to end. It says
+> nothing about whether any of it is usable on a phone. That is B-101, and it is
+> open.
 
 ## The session of 2026-08-20 — B-095
 

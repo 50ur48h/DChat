@@ -4,6 +4,39 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-039 — A conversation is archived, never deleted
+Date: 2026-08-20 · Phase: 11 · PR: #86 (WP11.2a) · Migration 0026
+Context: Plan WP11.2 lists "conversation history list + rename/**delete**". A
+conversation is the root of everything the product promises to be able to show
+afterwards: its runs, their events, their findings, their query executions.
+Architecture 0.2.4 makes that trace durable and revision 0002 holds
+`agent_events` append-only *by grant* — the application role cannot rewrite it.
+A cascading delete would destroy the evidence behind answers a person may
+already have acted on, and it would do it from a list screen, which is the
+surface where a misclick is cheapest to make.
+Options: (a) delete the row and let the cascade run; (b) archive — a timestamp,
+hidden from the list, everything underneath untouched; (c) archive now and add
+true erasure later.
+Decision: **(b)**, taken by the owner on 2026-08-20, with two conditions.
+**The UI must say Archive, not Delete** — in the owner's words, *"a button that
+says delete and hides instead is a lie to the user"*. A test asserts the word and
+asserts that no control says "delete", because the word is the promise.
+**True erasure is named as a Phase 12 retention story** rather than left as an
+implied someday: a customer asking for their data to be gone needs every table,
+a receipt that it happened, and a retention window — none of which is a button on
+a list screen.
+Consequences: revision 0026 adds `conversations.archived_at`, nullable, a
+timestamp rather than a flag because the question worth answering later is
+*when*. `list_conversations` takes `archived` and returns one list or the other,
+never both — an archived thread left in the default list would make the button
+look broken. The route is `POST …/conversations/{id}/archive` rather than
+`DELETE`: nothing is removed, and the reverse direction exists, which a DELETE
+could not offer. Archiving is idempotent and keeps the first timestamp. The test
+that carries this decision asserts against the *record* — that the run, its
+answer, its method and its events all survive — because asserting `archived_at is
+not None` would pass just as happily on an implementation that had cascaded
+everything away. **Plan §6 WP11.2's wording is corrected in this PR.**
+
 ## D-038 — A run whose every query failed is refused, not answered
 Date: 2026-08-20 · Phase: 11 · PR: #85 (B-095) · Migration: none
 Context: **B-095.** Both executions of a live run ended in `gaierror` — the

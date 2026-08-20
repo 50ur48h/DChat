@@ -270,6 +270,32 @@ function AnswerChart({ chart }: { chart: RunChart | null | undefined }) {
   );
 }
 
+/**
+ * How the answer was reached, in one line (**B-100**).
+ *
+ * Architecture 4.2 makes an answer four things — the words, the evidence, the
+ * method, the limitations — and this was the part built on every run since
+ * Phase 9 and shown on none. It is for the reader who wants to know *how*
+ * without opening the SQL, which is a different question from the one the
+ * evidence panel answers and a much more common one.
+ *
+ * Above the limitations and styled quieter, deliberately. "How did you get
+ * this" is not a doubt about the answer, and a method line that read like a
+ * caveat would make every answer look qualified.
+ *
+ * Absent rather than blank when there is nothing to say: a run answered before
+ * the column existed, or one that never composed.
+ */
+function Method({ method }: { method?: string | undefined }) {
+  if (!method) return null;
+  return (
+    <p className={styles.method}>
+      <span className={styles.methodLabel}>How: </span>
+      {method}
+    </p>
+  );
+}
+
 function Limitations({ notes }: { notes: string[] }) {
   if (notes.length === 0) return null;
   return (
@@ -446,6 +472,7 @@ function AnswerCard({
               gate found this card showing a citation and no words at all. */}
           {!replied && run.answer && <p className={styles.findingStatement}>{run.answer}</p>}
           <AnswerChart chart={run.chart} />
+          <Method method={run.method} />
           <Limitations notes={run.limitations ?? []} />
           <Findings orgId={orgId} runId={run.id} findings={run.findings} answer={run.answer} />
           {/* Collapsed once the run is over — the answer is the point then — but

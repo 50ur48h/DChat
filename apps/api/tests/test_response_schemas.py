@@ -41,6 +41,15 @@ ALLOWED: dict[tuple[str, str], str] = {
         "The invitation token, shown once at creation and stored only as a hash. "
         "Withholding it would make invitations unusable."
     ),
+    ("ArmedRecoveryOut", "token"): (
+        "The recovery token (B-017), shown once when an Admin arms a grant and "
+        "stored only as a SHA-256 hash — the same trade as an invitation, and "
+        "withholding it would make the grant unusable, which is the whole "
+        "feature. It appears on this model alone: `RecoveryGrantOut`, which is "
+        "what the listing and the revoke route return, deliberately has no such "
+        "field, so the credential exists in exactly one response in the API and "
+        "only at the moment of creation."
+    ),
     ("DataSourceOut", "secret_ref"): (
         "A pointer to the credential, not the credential. Useless without the "
         "secrets backend it names (architecture Part 7.3)."
