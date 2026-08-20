@@ -540,11 +540,19 @@ export function ConversationThread({
         // **One request for every run in the thread** (**B-106**), not one per
         // assistant message: the cost of opening a conversation should not grow
         // with how much somebody has used it.
-        api.conversationRuns(orgId, conversationId),
+        //
+        // **And it cannot take the thread down with it.** The runs enrich the
+        // answers; the messages *are* the conversation. Sharing one `Promise.all`
+        // and one `catch` meant a failure here emptied the screen — words,
+        // questions and all — which CI caught against a stub that did not serve
+        // this route yet. Failing to null keeps whatever runs were already held,
+        // so a later refresh that fails leaves the cards it had rather than
+        // dropping every answer to a bare line of text.
+        api.conversationRuns(orgId, conversationId).catch(() => null),
       ]);
       setConversation(details);
       setMessages(thread);
-      setRuns(new Map(answered.map((found) => [found.id, found])));
+      if (answered !== null) setRuns(new Map(answered.map((found) => [found.id, found])));
       return details;
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : "This conversation could not be loaded.");

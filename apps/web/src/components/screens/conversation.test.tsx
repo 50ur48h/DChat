@@ -707,6 +707,44 @@ describe("an answer keeps its evidence when the next question is asked (B-106)",
     expect(calls.filter((call) => call.url.endsWith("/runs")).length).toBe(1);
   });
 
+  it("keeps the whole thread when the runs request fails outright", async () => {
+    /**
+     * **What CI caught and the unit tests did not.** The runs began life in the
+     * same `Promise.all` and the same `catch` as the conversation and its
+     * messages, so a failure there emptied the screen — questions, answers and
+     * all. The test above covers a run *missing from the list*; this covers the
+     * request not answering, which is the case that took the thread down.
+     *
+     * The runs enrich the answers. The messages **are** the conversation.
+     */
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string, init: RequestInit = {}) => {
+        if (url.endsWith("/runs")) return Promise.resolve(json({ nope: true }, 500));
+        if (url.includes("/executions/")) return Promise.resolve(json(EXECUTION));
+        if (url.includes("/events")) {
+          return Promise.resolve(json({ run_id: "r1", events: [], last_seq: 0 }));
+        }
+        if (url.includes("/runs/")) return Promise.resolve(json(ANSWERED));
+        if (url.includes("/messages")) {
+          if (init.method === "POST") {
+            return Promise.resolve(
+              json({ run_id: "r1", message_id: "m1", status: "queued", created: true }),
+            );
+          }
+          return Promise.resolve(json(TWO_TURNS));
+        }
+        return Promise.resolve(json(AFTER_TWO));
+      }),
+    );
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    expect(await screen.findByText("6,214 orders were placed in July 2026.")).toBeInTheDocument();
+    expect(screen.getByText("5,004 orders were placed in August 2026.")).toBeInTheDocument();
+    expect(screen.getByText("How many orders were placed in July 2026?")).toBeInTheDocument();
+  });
+
   it("falls back to the words when a run could not be fetched", async () => {
     /** The answer is what the reader came for. Losing it because a second
      *  request failed would be a worse trade than losing the picture. */

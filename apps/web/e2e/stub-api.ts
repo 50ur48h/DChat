@@ -215,10 +215,16 @@ data: ${body}
       return;
     }
 
-    if (url.includes("/runs/")) {
-      runPolls += 1;
+    /**
+     * One run, as both routes state it.
+     *
+     * Shared, because the API shares it: `_run_out` builds the single route's
+     * payload and the thread's list alike, and a stub that let the two drift
+     * would be testing a difference the product cannot produce.
+     */
+    const runPayload = () => {
       const done = finished();
-      send(200, {
+      return {
         id: RUN,
         conversation_id: CONVERSATION,
         status: done ? "completed" : "running",
@@ -233,7 +239,21 @@ data: ${body}
         started_at: "2026-08-15T09:00:01Z",
         finished_at: done ? "2026-08-15T09:00:20Z" : null,
         failure_reason: null,
-      });
+      };
+    };
+
+    // The thread's runs (**B-106**), which the screen reads so every answer is a
+    // card rather than only the newest one. Before the trailing-slash route
+    // below, because `/conversations/{id}/runs` has no slash after `runs` and
+    // would otherwise fall through to the messages branch.
+    if (url.endsWith("/runs")) {
+      send(200, finished() ? [runPayload()] : []);
+      return;
+    }
+
+    if (url.includes("/runs/")) {
+      runPolls += 1;
+      send(200, runPayload());
       return;
     }
 

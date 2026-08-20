@@ -141,6 +141,26 @@ later merge would rewrite a row whose event already said something else. Only fo
 findings that cite something: the empty set is shared by every uncited finding,
 and keying on evidence there would collapse them all into the first.
 
+### What the `web` job caught, and the gap that let it through
+
+**`loadThread` could take the whole conversation down with it.** B-106's runs
+request went into the same `Promise.all` and the same `catch` as the conversation
+and its messages, so a failure there emptied the screen — questions, answers and
+all. CI found it against the hermetic stub, which did not serve the new route
+yet; the effect would be the same against a network blip or an older API. The
+runs *enrich* the answers, the messages *are* the conversation, so the request now
+fails to null and keeps whatever runs were already held. A unit test covers it,
+and fails against the previous version.
+
+**The gap is `preflight`'s, and it is the more useful half.** That target says
+*"everything CI will run"* and prints *"safe to push"*, and it omitted
+`test.web.e2e` — the one suite this broke. Everything else was green locally.
+So the browser suite is in `preflight` now, which is the same rule the lint
+recipes are written for and state in as many words: *what a developer runs must be
+what CI runs, with nothing between them that could differ.* The compose smoke
+stays out — it builds images and seeds a database, which is minutes rather than a
+minute, and CI gives it its own job.
+
 ### What the `web-e2e` job caught on its first real run
 
 **Red, and correctly so.** `PermissionError: '/app/ops/.secrets/secrets.json.8.tmp'`
