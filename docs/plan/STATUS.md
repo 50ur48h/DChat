@@ -15,26 +15,17 @@ Current position: **Phases 0–5 and 7–11's first four items are done. Phase 6
                   the product by hand**, not by the suite — B-094, B-095, B-096,
                   B-097, B-098, and the two screen defects in B-088's web half.
                   Every one was invisible to a green build.
-Next step:        **WP11.2b — the phase gate** (`p11.2b-smoke`). Three things and
-                  they are in order: the **compose-based Playwright smoke** with
-                  its `web-e2e` CI job; the **README quickstart** rewritten so a
-                  non-developer reaches a real answer rather than a health check;
-                  and the **gate walk**.
-                  The model for the smoke is a **scripted provider selected by
-                  environment, refused at boot in prod** (owner, 2026-08-20).
-                  Two conditions came with that choice and both are binding.
-                  **The prod refusal gets a test that actually boots** with prod
-                  settings and the scripted provider selected — *“an assertion in
-                  a docstring is not a guard”*, and this is a path in the shipped
-                  image that answers questions without a model. And **the gate
-                  wording now says the CI smoke proves the stack wires up end to
-                  end, not that the agent answered**: the chart criterion is met
-                  by the live walk against a real model, because a gate signed
-                  off on a canned answer would be B-087 at the level of the gate.
-                  **B-097** (prose enumerating what the chart already shows) is
-                  the remaining polish candidate. **B-101 — the small-screen and
-                  catalog/members pass — is deliberately *not* in the gate**, so
-                  the sign-off must not be read as covering phones.
+Next step:        **Finish WP11.2b** on `p11.2b-smoke` (#87, draft). Four things
+                  remain: the **compose-based Playwright smoke**, its
+                  **`web-e2e` CI job**, the **manual test script**, and
+                  **STATUS/DECISIONS** for the scripted-provider decision — then
+                  the **gate walk** and sign-off. **The GATE box stays unticked
+                  until that walk happens.**
+                  What is already true: **B-103 is fixed and the gate's chart
+                  criterion has been met live** — real model, money column,
+                  chart drawn. That was the blocker.
+                  **B-101** (small screens, catalog/members rounding) is
+                  deliberately outside the gate, so no sign-off covers phones.
 Merge policy: ASK
 Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  (owner, 2026-08-17), so `nightly-evals.yml` can run — keep its
@@ -42,9 +33,108 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 11.
-Last updated: 2026-08-20 by Claude Code (WP11.2a — conversation rename/archive, B-017's recovery grants, B-100's method line and B-098's axis titles; D-039 records archive-not-delete)
+Last updated: 2026-08-20 by Claude Code (WP11.2b in draft — B-103 fixed and the chart criterion met live; the smoke, the CI job and the gate walk remain)
 
 ---
+
+## WP11.2b so far — the record (2026-08-20, draft #87)
+
+**Nothing here is a to-do list.** What is outstanding is the **Next step** field
+above. This exists because two of the findings below are not recoverable from the
+diff, and one of them is about how the work was done rather than what it changed.
+
+### B-103 — the blocker, cleared
+
+**The gate criterion has been met live for the first time.** A clean stack, a
+fresh `.env`, a real model, and a money column:
+
+```
+status : completed
+method : 2 queries over 2 steps, against orders, payments, staff, stores and customers.
+CHART  : DRAWN, mark = line   axes: Revenue month / Monthly revenue
+  points: 18 -> {'revenue_month': '2025-02-01', 'monthly_revenue': 119558.51}
+```
+
+`monthly_revenue` is a number, not `"119558.51"`. Before this, charts had only
+ever been demonstrated on a `count(*)` — WP11.1's live proof in #82 was *number
+of orders by month*, and the demo had chosen the one shape that worked.
+
+The cause was at the artifact seam: a `Decimal` crossed JSON as text, so
+`_is_number` said no. The fix records `column_types` where the writer still has
+the Python objects, and the chart rebuilds the Decimal from that declaration
+rather than deciding that numeric-looking text is a number — which would make a
+measure of a postcode.
+
+### The second failure, which the suite could not see
+
+**Worth keeping, because it is the more useful half.** The first re-walk got
+*further* and still failed:
+
+```
+TypeError: Object of type Decimal is not JSON serializable
+[SQL: UPDATE agent_runs SET chart=$1::JSONB ...]
+```
+
+Rebuilding Decimals in the frame put them into the spec's inline values, which
+are stored as JSONB. **The fix had moved the defect one seam later and would have
+shipped.** It is the same shape as the original defect, one layer along — and the
+round-trip tests written *for* the original stop at `decide` and never store what
+it returns. A corpus that had just learned to cross one seam stopped one seam
+short of the truth.
+
+### The quickstart, and what walking it proved
+
+An OpenAI key is now stated as required, with rough cost and where to put it: a
+keyless path would answer from a script, and the product is the agent.
+
+Walking it found **five** defects, four of them in prose written minutes earlier
+by someone who had just read the code:
+
+1. **B-102** — `make db.setup` crashed from a clean state. Sourcing `.env` strips
+   quotes, so `LLM_ROLE_MAP={"compose":"small"}` arrived as `{compose:small}`, and
+   environment beats dotenv in pydantic's order. **Step 2 of the documented path.**
+2. `docker compose restart api` does not re-read the env file, so the secrets key
+   never arrives and registering a database 500s. **This predates the rewrite** —
+   the old quickstart said "restart the api" too.
+3. A **"Discover" button that does not exist**; the controls are *Refresh
+   catalog* and *Profile columns*.
+4. **Test connection** omitted, and it is required: until it passes, refreshing
+   the catalog refuses.
+5. B-103 itself.
+
+**B-102's lesson is the durable one.** That crash stayed hidden because
+`make migrate` was a *second route around the broken one* — and it is what
+everybody actually ran, because it is what you reach for mid-development. The
+documented path had a working shortcut beside it, so the broken one was never
+taken and never reported, and the people the documented path exists for are by
+definition not the people who know the shortcut. **Walking the documented path is
+the only thing that has ever caught this class**: not one of these five was found
+by a test, a review or a re-reading.
+
+### Local state, and the traps that are still traps
+
+**Run `make migrate` before anything.** Three revisions landed in WP11.2a and are
+on `main`: **0025** (`agent_runs.method`), **0026** (`conversations.archived_at`)
+and **0027** (`org_recovery_grants`). A missing revision surfaces as a CHECK
+violation mid-run rather than as a migration error.
+
+**The scripted provider is a stub in the shipped image.** `LLM_PROVIDERS=scripted`
+selects it; two guards refuse it in production, one at boot and one at first use.
+Do not weaken either without reading why they are separate — the boot check reads
+configuration and cannot see a runtime registration; the other reads the instance
+and cannot see configuration that is never built.
+
+**The owner's demo fixtures survived both walks and are still here**: `waste_cost`
+active at v6 with its full history, five chart-carrying runs, 366 conversations.
+Both walks ran under a **parallel compose project** (`-p dataagent-clean`) with
+`make down` first, so the volumes were never touched. That method has one cost
+worth knowing: `db_setup.sh`'s grant step targets the default project, so it
+fails under a parallel one and has to be applied by hand. That is the method, not
+a defect.
+
+**B-028 fired again** during the second walk — `make db.setup` died on
+`ConnectionResetError [WinError 64]` and succeeded on a retry. Its traceback and
+the cheap innocence check are in its row.
 
 ## WP11.2a — polish, B-017, B-100, B-098 (2026-08-20)
 
