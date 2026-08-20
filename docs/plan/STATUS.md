@@ -15,23 +15,24 @@ Current position: **Phases 0–5 and 7–11's first four items are done. Phase 6
                   the product by hand**, not by the suite — B-094, B-095, B-096,
                   B-097, B-098, and the two screen defects in B-088's web half.
                   Every one was invisible to a green build.
-Next step:        **Re-walk steps 2–4 of the manual test script.** The owner
-                  walked the gate on 2026-08-20 and **did not tick it**, on two
-                  defects. **B-105 is fixed in #87** — a monthly aggregate was
-                  drawn on a continuous day axis, so four bars sat on a weekly
-                  calendar and the gaps read as zero. **B-106** (every answer but
-                  the newest loses its chart, method, findings, evidence and
-                  trace) and **B-107** (two findings on one query, because
-                  B-096's rule was applied to one of its two call sites) are
-                  **filed and deliberately not in the gate PR** — B-106 needs its
-                  own work package.
-                  So: re-ask the money question, confirm the bars are banded by
-                  month, and decide whether **B-106 blocks the gate** — it is the
-                  one where a signed-off demo still loses a chart on the second
-                  question.
-                  **The GATE box stays unticked**, and `[~]` stays on WP11.2b.
-                  **B-101** (small screens) is outside the gate too, so no
-                  sign-off covers phones.
+Next step:        **Re-walk the manual test script, and sign off or don't.**
+                  The owner walked the gate on 2026-08-20, did not tick it, and
+                  found three things. All three are now fixed in #87.
+                  **B-105** — a monthly aggregate drawn on a continuous day axis,
+                  four bars on a weekly calendar with the gaps reading as zero.
+                  **B-106** — every answer but the newest lost its chart, method,
+                  limitations, findings, evidence and trace; **raised to a gate
+                  blocker by the owner**, on the demo: *"a chart that disappears
+                  on the second question fails in front of an audience."*
+                  **B-107** — two findings on one query, because B-096's rule had
+                  been applied to one of its two call sites.
+                  The script in #87 now has a **step 3b** (the bar chart) and a
+                  **step 4b** (ask again; both answers keep their evidence).
+                  **The GATE box stays unticked**, and `[~]` stays on WP11.2b,
+                  until that walk happens.
+                  **B-101** (small screens) is outside the gate, so no sign-off
+                  covers phones. **B-108** — the local stack's uid hole — cannot
+                  be tested from this host at all.
 Merge policy: ASK
 Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  (owner, 2026-08-17), so `nightly-evals.yml` can run — keep its
@@ -39,7 +40,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 11.
-Last updated: 2026-08-20 by Claude Code (the gate was walked and not ticked — B-105 fixed, B-106 and B-107 filed; CI fully green, web-e2e 2m23s)
+Last updated: 2026-08-20 by Claude Code (the gate was walked and not ticked; B-105, B-106 and B-107 all fixed — B-106 was the blocker, and the card is now the assistant turn)
 
 ---
 
@@ -75,7 +76,7 @@ but what a bar chart's axis is; a `line` over the same values stays continuous,
 because spacing a working day's readings evenly would misstate when they
 happened.
 
-### B-106 — the answer card is a panel for the newest run, not part of the answer
+### B-106 — the answer card is a panel for the newest run — **the gate blocker, fixed**
 
 The owner read the chart vanishing on the next message as the Phase 7
 suppression rule outliving its reason. That is true of the card's *sentence* and
@@ -93,7 +94,25 @@ carry `content` and `run_id` and nothing else, so a chart in a bubble means
 fetching the run anyway; and it puts the chart *outside* the card, which is what
 B-048 refused. The sharper form: the bubble and the card are two renderings of
 one thing, which is the only reason `replied` exists and was the root of the
-Phase 7 gate defect. **Its own work package** (owner, 2026-08-20).
+Phase 7 gate defect.
+
+**The owner made it a gate blocker** on 2026-08-20, on the demo rather than on
+the code: *"a chart that disappears on the second question fails in front of an
+audience, and 'chart renders' is not met by one that survives only until the next
+message."* Built here. `GET …/conversations/{id}/runs` returns every run in the
+thread oldest first; the screen holds them by id; each assistant message renders
+as its run's card. **`replied` is gone rather than re-tuned** — it existed only
+because an answer had two renderings, and now it has one. The plain bubble
+survives as the fallback for a run that could not be fetched: the words are what
+the reader came for, and losing them because a second request failed would be a
+worse trade than losing the picture.
+
+Two things worth keeping about how it was checked. **Three of the five new web
+tests fail against the old screen**, and the two that pass are guarding the new
+design rather than reproducing the defect — worth saying, because "five new
+tests" and "five tests that would have caught it" are not the same claim. And the
+counts are what is asserted, in the unit tests and in the smoke: *presence* passed
+against the broken screen, because the newest answer always had its card.
 
 ### B-107 — a rule fixed at one of its two call sites is fixed nowhere in particular
 
@@ -103,10 +122,24 @@ wording of the same numbers — was correctly not added. Both findings came from
 the **loop**, where `state.add_finding` still compares characters. That is the
 guard B-096 was filed against, one layer up, in the copy nobody changed.
 
-Not simply the rule copied across, and that is why it is filed rather than
-fixed: those two findings are arguably two claims — the numbers, and the trend —
-where the composer's case was one claim restated, and set-equality with
-first-wins would keep the enumeration and discard the interpretation.
+**Copying the rule across would have dropped the better sentence, and the owner
+asked to be told that rather than shipped it.** The two arrived from **one**
+reflection — the events read `finding_added → finding_added → reflection` — in
+the order enumeration-then-shape. First-wins keeps the numbers and discards the
+trend, which is the worse of the two by **B-097**'s own rule that the prose
+should give the shape and let a chart carry the detail; last-wins would be right
+here and wrong the moment a model emitted them the other way round.
+
+So the guard detects rather than chooses. `merge_by_evidence` **joins** findings
+from one reflection that rest on the same executions into one claim — one
+citation, one badge, the weakest of their confidences — and `state.add_finding`
+takes the citation-set rejection for the other half, a *later* reflection
+restating on evidence already concluded from, where the earlier finding stands
+and the iteration counts as barren. Merged **before** anything is persisted,
+because a finding row and its `finding_added` event are written together and a
+later merge would rewrite a row whose event already said something else. Only for
+findings that cite something: the empty set is shared by every uncited finding,
+and keying on evidence there would collapse them all into the first.
 
 ### What the `web-e2e` job caught on its first real run
 
@@ -135,6 +168,17 @@ the other, and an image that does not admit to it leaves every mount over it a
 coin flip. It does nothing for a bind mount, which never inherits image
 ownership — **so the local stack has the same hole for any Linux developer whose
 uid is not 1001**, which cannot be tested from this host.
+
+> **`make up` may not work on Linux, and nobody here can find out.** `ops/.secrets`
+> and `ops/artifacts` are gitignored, so a fresh clone has neither; Docker creates
+> a missing bind-mount source as root; the api container runs as uid **1001**. On
+> a host where those directories do not already exist and the developer's uid
+> differs — a typical Linux desktop user is 1000 — registering a data source dies
+> with `PermissionError` and every successful query dies writing its artifact.
+> **Two conditions have hidden this**: development has been on Windows, where
+> Docker Desktop's bind mounts ignore ownership entirely, and both directories
+> have existed on that machine for weeks. Filed as **B-108** with the candidate
+> fixes and what each costs. It wants somebody on Linux, not more thought here.
 
 **Green afterwards: `web-e2e` in 2m23s, the walk itself 15.6s** — inside the
 plan's ~5 minute budget, on a runner building both images from nothing.
@@ -2758,8 +2802,14 @@ unexplained.
       to prove none of it was held in the page. The `web-e2e` CI job runs it
       path-filtered. The model is a **stub in the shipped image** selected by
       environment and refused twice outside CI (**D-040**). **B-103** is fixed
-      and the chart criterion has been met live. What remains is the owner's
-      walk, and the GATE line below stays unticked until it happens
+      and the chart criterion has been met live.
+      **Walked by the owner on 2026-08-20 and not signed off**, on three
+      defects, all now fixed here: **B-105** (a monthly aggregate on a continuous
+      day axis — wrong rather than plain), **B-106** (every answer but the newest
+      lost its chart and its evidence — raised to a gate blocker by the owner,
+      and the card is now the assistant turn) and **B-107** (B-096's rule applied
+      to one of its two call sites). What remains is the owner's second walk, and
+      the GATE line below stays unticked until it happens
 - [ ] ~~WP11.2 History/catalog/members polish + Playwright smoke~~ *(split into
       11.2a and 11.2b on 2026-08-20 — seven workstreams in one gate PR is a diff
       nobody can review properly)*
