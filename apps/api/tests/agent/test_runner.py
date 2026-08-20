@@ -463,6 +463,58 @@ async def test_a_failure_rewriting_cannot_fix_stops_the_loop(
     assert outcome.llm_calls == 1
 
 
+async def test_a_run_whose_every_query_failed_refuses_instead_of_describing_the_absence(
+    context: ToolContext, fake_llm: FakeLLM, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**B-095**, and the owner's decision (**D-038**).
+
+    The run above stops the *loop*; this one is about what the runner then does
+    with it. A failed execution is still an execution, so the "nothing ran" test
+    did not catch it and the run went on to compose — handing a model a list of
+    refusals, no results, and an instruction to answer. A model given no
+    evidence does not decline; it describes the absence as a finding, and the
+    live run read *"no data was returned from the queries"*: a claim about the
+    customer's data when the truth was about the platform.
+
+    The assertions that carry the fix are the **status** and the **call count**.
+    No `compose` is scripted here, so a run that composes raises inside the
+    FakeLLM and ends `failed` — which is exactly how this path behaved before,
+    invisibly, because the older test asserted `answered` and never `status`.
+    """
+    from dataagent.agent.tools import registry as registry_module
+
+    async def unreachable(self: object, *args: object, **kwargs: object) -> object:
+        from dataagent.agent.tools.base import ToolResult
+
+        return ToolResult(
+            tool="run_sql",
+            ok=False,
+            error="could not connect to the data source",
+            code="engine_error",
+            repairable=False,
+        )
+
+    monkeypatch.setattr(registry_module.ToolRegistry, "call", unreachable)
+    fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql")
+    run_id = await _run_for(context, "How many shops are there?")
+
+    outcome = await _execute(context, run_id)
+
+    assert outcome.status == "completed", "an honest refusal is an ending, not a failure"
+    assert outcome.answered is False, "nothing reached the database, so nothing was answered"
+    assert outcome.llm_calls == 1, "no composing call: there was nothing to compose from"
+
+    view = await runs.get_run(org_id=context.org_id, run_id=run_id)
+    assert view.answer is not None
+    assert "could not connect to the data source" in view.answer, (
+        "the reader is told what actually failed, in the connector's own words"
+    )
+    assert any("failed to run" in note for note in view.limitations), (
+        "the run knew every query had failed; before B-095 it said nothing"
+    )
+    assert view.findings == [], "there is no evidence, so there is nothing to stand behind"
+
+
 # ---------------------------------------------------------------------------
 # Refused before anything ran
 # ---------------------------------------------------------------------------

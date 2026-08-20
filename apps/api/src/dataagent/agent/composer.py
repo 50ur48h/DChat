@@ -30,10 +30,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from dataagent.agent.critic import CriticVerdict
-from dataagent.agent.state import ResearchState
+from dataagent.agent.state import ExecutionRef, ResearchState
 from dataagent.agent.tools.finalize import FinalizeIn
 
-__all__ = ["ComposedAnswer", "assemble", "limitations_for"]
+__all__ = [
+    "ComposedAnswer",
+    "assemble",
+    "failed_executions",
+    "failure_detail",
+    "limitations_for",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +69,15 @@ def method_note(state: ResearchState) -> str:
     """
     queries = sum(1 for reference in state.executions if reference.ok)
     if not queries:
+        if state.executions:
+            # **B-095.** A run that tried and was never answered is not a run
+            # that chose not to ask. Saying "answered without running a query"
+            # over two failed executions describes the failure as a decision,
+            # which is the same substitution the limitations below exist to stop
+            # — one field further up the card.
+            attempted = len(state.executions)
+            plural = "query" if attempted == 1 else "queries"
+            return f"{attempted} {plural} tried against {_source_phrase(state)}; nothing came back."
         return "Answered without running a query."
     steps = max(state.iteration, 1)
     plural = "query" if queries == 1 else "queries"
@@ -147,6 +162,36 @@ def _unused_sources(state: ResearchState) -> tuple[tuple[str, ...], tuple[str, .
     return used, unused
 
 
+def failed_executions(state: ResearchState) -> tuple[ExecutionRef, ...]:
+    """Queries that failed for a reason no rewrite could have fixed (**B-095**).
+
+    Keyed on `error` rather than on `ok`, and the difference is what keeps this
+    note worth reading. The loop records a *refused* statement as a failed
+    execution too — that is how the next planner learns what was wrong — and one
+    of those is routinely followed by the corrected query that answers the
+    question. A limitation on every run that took one repair would be a caveat
+    about a self-correction, and the module has learned twice already
+    (`_prose_definitions`, `_unused_sources`) that a note on every answer is a
+    note nobody reads. `error` is set only where rewriting could not have helped.
+    """
+    return tuple(
+        reference for reference in state.executions if not reference.ok and reference.error
+    )
+
+
+def failure_detail(state: ResearchState) -> str:
+    """What the platform said went wrong, in its own already-sanitized words.
+
+    The last one, because the loop stops on an unrepairable failure: it is both
+    the most recent and, today, the only one. Quoted rather than paraphrased for
+    the reason the critic's findings are — the connector's message names what
+    failed, and never an address or a credential, so the reader gets the sentence
+    that tells them whose problem this is.
+    """
+    failures = failed_executions(state)
+    return failures[-1].error if failures else ""
+
+
 def limitations_for(
     state: ResearchState,
     verdict: CriticVerdict | None,
@@ -157,8 +202,11 @@ def limitations_for(
 
     Assembled from what the run knows, never asked of the model. Order matters:
     a ceiling that stopped the search changes how much of the answer to trust and
-    comes first; a reviewer's warning is next; the thin-evidence note is last,
-    because it qualifies rather than undercuts.
+    comes first, and a query that never reached the database goes with it, since
+    both say the investigation is *smaller* than it looks; a reviewer's warning
+    is next, because it is about what the answer claims rather than about how
+    much of it there is; the thin-evidence note is last, because it qualifies
+    rather than undercuts.
 
     Deduplicated, and empty when there is nothing to say — a clean run should not
     be made to sound uncertain by a component that always finds something.
@@ -189,6 +237,38 @@ def limitations_for(
     if caveat:
         # The budget's own words. Already written for a person (`Exhaustion.reason`).
         notes.append(f"The investigation stopped before it was finished: {caveat}")
+
+    if failures := failed_executions(state):
+        # **B-095, and it is B-087's distinction inverted.** The thin-evidence
+        # rule at the end of this function notes a query that *succeeded* and
+        # returned nothing — `reference.ok and row_count == 0` — so a query that
+        # never reached the database matched no rule at all, and a live run
+        # whose every execution ended in `gaierror` carried `limitations: []`
+        # over an answer reading *"no data was returned from the queries"*. The
+        # reader was told their data was empty when in truth nothing had been
+        # asked of it: a claim about the customer's data where the fact was
+        # about the platform.
+        #
+        # Ahead of the critic's warnings because it is not a doubt about what
+        # the answer says. It is a statement that part of the investigation
+        # never happened — the same class of fact as the ceiling above it, and
+        # for a reader the more actionable of the two, since a connector that
+        # cannot be reached is a thing someone can go and fix.
+        attempted = len(state.executions)
+        if attempted == 1:
+            count = "The one query this run tried failed to run"
+        elif len(failures) == attempted:
+            count = "Every query this run tried failed to run"
+        else:
+            count = f"{len(failures)} of the {attempted} queries this run tried failed to run"
+        # Agreeing with the number that *failed*, which is not always the number
+        # the opening clause names: "1 of the 3 queries" is one query. Caught by
+        # the live run rather than by the tests, which assert on the opening.
+        subject = "it" if len(failures) == 1 else "they"
+        notes.append(
+            f"{count}, so nothing here rests on what {subject} would have returned: "
+            f"{failure_detail(state)}"
+        )
 
     if verdict is not None:
         notes.extend(finding.detail for finding in verdict.warnings)

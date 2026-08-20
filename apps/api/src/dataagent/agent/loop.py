@@ -404,6 +404,14 @@ async def research(
                     purpose=plan.purpose,
                     sql_hash=digest,
                     summary=f"refused ({result.code or 'unknown'}): {result.error}",
+                    # Kept apart from `summary`, and only for a failure no
+                    # rewrite could fix (**B-095**). `summary` is what the next
+                    # planner reads, so it carries every refusal in the tool
+                    # layer's framing; this is what a *reader* is shown when the
+                    # answer has to admit a query never ran, so it carries the
+                    # connector's sentence alone and stays empty for the
+                    # repairable refusals the loop is expected to correct.
+                    error="" if result.repairable else (result.error or ""),
                     ok=False,
                 )
             )
