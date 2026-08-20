@@ -234,12 +234,27 @@ test("the stack answers a question asked in a browser", async ({ page }) => {
     // rather than held in the page: none of the above is allowed to have been a
     // client-side illusion.
     //
-    // The one deliberate full page load in the walk, and the timeout is sized
-    // for what that costs rather than for what the assertion is about: the
-    // session is thrown away and re-minted, and until it comes back this screen
-    // shows a signed-in visitor a sign-in form (**B-104**). `running` cannot
-    // help here — the health widget lives on the home page only.
-    await page.goto(conversation);
-    await expect(page.getByText(SCRIPTED_ANSWER)).toBeVisible({ timeout: 90_000 });
+    // **Two assertions, because two different things can be wrong here and only
+    // one of them is the product's.** A full load throws the session away and
+    // re-mints it, and until it comes back this screen shows a signed-in visitor
+    // a sign-in form (**B-104**); `running` cannot help, since the health widget
+    // is on the home page only. Separately, `next dev` serves this route's
+    // client bundle on demand, and once in this file's history a chunk request
+    // simply failed on a cold container — the page then sits at the sign-in card
+    // forever, and asserting the answer first reports that as *the answer never
+    // arrived*, which is the one thing it does not mean.
+    //
+    // So: reload until the page is actually running, bounded, and only then ask
+    // about the answer. The retry is scoped to a named non-product failure — a
+    // dev server that did not serve a file — and the assertion it guards is
+    // still a single shot.
+    await expect(async () => {
+      await page.goto(conversation);
+      await expect(page.getByRole("button", { name: "Continue" })).toHaveCount(0, {
+        timeout: 30_000,
+      });
+    }).toPass({ timeout: 120_000 });
+
+    await expect(page.getByText(SCRIPTED_ANSWER)).toBeVisible({ timeout: 30_000 });
   });
 });
