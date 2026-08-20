@@ -28,6 +28,8 @@ Next step:        **Re-walk the manual test script, and sign off or don't.**
                   been applied to one of its two call sites.
                   The script in #87 now has a **step 3b** (the bar chart) and a
                   **step 4b** (ask again; both answers keep their evidence).
+                  **CI is fully green on the branch** — `web` 1m31s, `web-e2e`
+                  2m19s, `api` 12m32s — so the walk is against a validated tree.
                   **The GATE box stays unticked**, and `[~]` stays on WP11.2b,
                   until that walk happens.
                   **B-101** (small screens) is outside the gate, so no sign-off
@@ -40,7 +42,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 11.
-Last updated: 2026-08-20 by Claude Code (the gate was walked and not ticked; B-105, B-106 and B-107 all fixed — B-106 was the blocker, and the card is now the assistant turn)
+Last updated: 2026-08-20 by Claude Code (B-105, B-106 and B-107 fixed and CI fully green — web 1m31s, web-e2e 2m19s; the second walk is the owner's)
 
 ---
 
