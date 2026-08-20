@@ -131,13 +131,19 @@ export PLATFORM_DB_PORT=$SMOKE_PG_PORT
 export SEED_PIZZA_PORT=$SMOKE_PIZZA_PORT
 export SEED_FNB_PORT=$SMOKE_FNB_PORT
 
-COMPOSE="docker compose -p $PROJECT --env-file .env -f ops/docker-compose.yml"
+# The smoke overlay replaces the two host bind mounts with named volumes; see
+# ops/docker-compose.smoke.yml for what that is worth and what it cost to learn.
+COMPOSE="docker compose -p $PROJECT --env-file .env -f ops/docker-compose.yml -f ops/docker-compose.smoke.yml"
 
 teardown() {
   if [ "${SMOKE_KEEP:-}" = "1" ]; then
     echo
     echo "Stack left up as $PROJECT: web http://localhost:${SMOKE_WEB_PORT}"
-    echo "Take it down with: docker compose -p $PROJECT -f ops/docker-compose.yml down --volumes"
+    # `--env-file .env` is not optional in that command: compose resolves
+    # `${PLATFORM_DB_PASSWORD:?...}` for every service in the file before it
+    # will do anything at all, including stopping things.
+    echo "Take it down with:"
+    echo "  docker compose -p $PROJECT --env-file .env -f ops/docker-compose.yml -f ops/docker-compose.smoke.yml down --volumes"
     return
   fi
   echo
@@ -183,10 +189,10 @@ if SMOKE_BASE_URL="http://localhost:${SMOKE_WEB_PORT}" \
   exit 0
 fi
 
-# **Say what the containers saw, here rather than in the caller.** The trap below
-# takes the stack down on the way out, so anything that wanted these logs after
-# the fact would find nothing left to ask. A browser-side failure is very often a
-# server-side one seen from the far end.
+# **Say what the containers saw, here rather than in the caller.** The trap set
+# above takes the stack down on the way out, so a CI step that wanted these logs
+# afterwards would find nothing left to ask. A browser-side failure is very often
+# a server-side one seen from the far end.
 echo
 echo "--- api, last 100 lines -------------------------------------------------"
 $COMPOSE logs --tail 100 api || true
