@@ -39,7 +39,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 11.
-Last updated: 2026-08-20 by Claude Code (the gate was walked and not ticked — B-105 fixed, B-106 and B-107 filed)
+Last updated: 2026-08-20 by Claude Code (the gate was walked and not ticked — B-105 fixed, B-106 and B-107 filed; CI fully green, web-e2e 2m23s)
 
 ---
 
@@ -123,6 +123,41 @@ the smoke stack only. The container creates them, so its own user owns them and
 no host uid has to match; they go with `down --volumes`; and the walk stops
 writing a credential into the developer's `ops/.secrets/secrets.json`, which it
 never had a reason to touch.
+
+**The overlay alone did not fix it, and the way it failed was the useful part.**
+Docker seeds a named volume from the image's content and ownership *only when the
+path exists in the image*; when it does not, the volume is empty and owned by
+root. Same error, different mount type — and now reproducible on Windows, where
+the bind-mount version never was. The api image therefore creates
+`/app/ops/.secrets` and `/app/ops/artifacts` before its `chown`, which is where
+that declaration belongs: the API writes credentials to one and stored results to
+the other, and an image that does not admit to it leaves every mount over it a
+coin flip. It does nothing for a bind mount, which never inherits image
+ownership — **so the local stack has the same hole for any Linux developer whose
+uid is not 1001**, which cannot be tested from this host.
+
+**Green afterwards: `web-e2e` in 2m23s, the walk itself 15.6s** — inside the
+plan's ~5 minute budget, on a runner building both images from nothing.
+
+### The one thing this host says and CI does not
+
+Cold runs here are intermittent: **two of eight failed with `next dev` not
+serving a framework chunk**, leaving the page unhydrated and parked on B-104's
+sign-in card. Warm runs were 3/3, and the first clean CI run had none of it. So
+the flake looks like this Windows host rather than the smoke, and the dev target
+stays — changing what the smoke exercises on the strength of a symptom that does
+not appear where it runs would be trading fidelity for nothing.
+
+Two things were done rather than assumed. The walk's last step now **reloads
+until the page is running** before it asks about the answer, so an unhydrated
+page reports as one instead of as *"the answer never arrived"* — which is the one
+thing it does not mean. And if CI ever does show this, the answer is already
+written down: the hermetic suite chose `next build && next start` over `next dev`
+for exactly this symptom, and its config says why.
+
+One cold run also died on **B-028** (`ConnectionResetError [WinError 64]` inside
+`alembic upgrade head`) before reaching a browser — the known Windows flake that
+hit the second README walk too, and unrelated to anything in this work package.
 
 ---
 
