@@ -15,18 +15,23 @@ Current position: **Phases 0–5 and 7–11's first four items are done. Phase 6
                   the product by hand**, not by the suite — B-094, B-095, B-096,
                   B-097, B-098, and the two screen defects in B-088's web half.
                   Every one was invisible to a green build.
-Next step:        **The owner's gate walk.** WP11.2b is built and #87 is ready
-                  for review: the **compose smoke**, its **`web-e2e` CI job**,
-                  the **manual test script** (in the PR body), **D-040** and
-                  **B-104** are all in. Nothing is left to build.
-                  What remains is the one thing that cannot be done for you —
-                  **walk the manual test script against a real model** and
-                  sign off. **The GATE box stays unticked until that happens**,
-                  and so does `[~]` on WP11.2b.
-                  Already true: **B-103 is fixed and the gate's chart criterion
-                  has been met live** — real model, money column, chart drawn.
-                  **B-101** (small screens, catalog/members rounding) is
-                  deliberately outside the gate, so no sign-off covers phones.
+Next step:        **Re-walk steps 2–4 of the manual test script.** The owner
+                  walked the gate on 2026-08-20 and **did not tick it**, on two
+                  defects. **B-105 is fixed in #87** — a monthly aggregate was
+                  drawn on a continuous day axis, so four bars sat on a weekly
+                  calendar and the gaps read as zero. **B-106** (every answer but
+                  the newest loses its chart, method, findings, evidence and
+                  trace) and **B-107** (two findings on one query, because
+                  B-096's rule was applied to one of its two call sites) are
+                  **filed and deliberately not in the gate PR** — B-106 needs its
+                  own work package.
+                  So: re-ask the money question, confirm the bars are banded by
+                  month, and decide whether **B-106 blocks the gate** — it is the
+                  one where a signed-off demo still loses a chart on the second
+                  question.
+                  **The GATE box stays unticked**, and `[~]` stays on WP11.2b.
+                  **B-101** (small screens) is outside the gate too, so no
+                  sign-off covers phones.
 Merge policy: ASK
 Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  (owner, 2026-08-17), so `nightly-evals.yml` can run — keep its
@@ -34,7 +39,90 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 11.
-Last updated: 2026-08-20 by Claude Code (WP11.2b built — smoke, `web-e2e`, D-040, B-104; the gate walk is the owner's and the GATE stays unticked)
+Last updated: 2026-08-20 by Claude Code (the gate was walked and not ticked — B-105 fixed, B-106 and B-107 filed)
+
+---
+
+## The gate walk, 2026-08-20 — two defects, and the gate not ticked
+
+**The walk did what three suites and a green build did not.** Everything in the
+work package was passing when the owner sat down with it.
+
+### B-105 — the chart was wrong rather than plain, and it is fixed here
+
+Four monthly bars, April to July 2026, drawn on a **continuous** temporal axis:
+Vega ticked it by week — `Apr 05`, `Apr 12`, `Apr 19` — so four thin spikes sat
+on a daily calendar and the space between them read as zero revenue. Confirmed
+from the stored spec: `mark: bar`, `x: {"type": "temporal", "field": "month"}`,
+four values on month-firsts, **no `timeUnit`**.
+
+The owner's framing is the rule: *"this is the Q1/Q2 rule with real dates —
+wrong is worse than absent, and `charts.decide` refuses the one and drew the
+other."*
+
+**The line chart from step 2 of the same walk had the identical encoding.** It
+passed inspection only because a line implies no width, and so claims nothing
+about the space between two points. One defect, one visible form and one not —
+which is why the fix is keyed on the data rather than on the mark.
+
+The grain is now read **off the values**: the coarsest unit every present value
+sits exactly on becomes `timeUnit`. Off the values and never off the name, which
+is the line this module holds everywhere else — `_kind` judges `order_date` by
+what is in it, `axis_title` de-snake-cases rather than translating, `_is_number`
+refuses to parse a numeric-looking string. Where there is no grain because the
+dates carry a time, a `bar` gets an **ordinal** axis, which is not a compromise
+but what a bar chart's axis is; a `line` over the same values stays continuous,
+because spacing a working day's readings evenly would misstate when they
+happened.
+
+### B-106 — the answer card is a panel for the newest run, not part of the answer
+
+The owner read the chart vanishing on the next message as the Phase 7
+suppression rule outliving its reason. That is true of the card's *sentence* and
+understates the rest: `replied` suppresses only the duplicated sentence, and the
+disappearance is one layer up — `ConversationThread` holds **one** `run` and
+renders **one** card, so a previous run's card is not suppressed, it is never
+rendered. Chart, method line, limitations, findings, evidence controls **and the
+trace** all become unreachable from the screen while remaining durable rows.
+
+**The answer to the owner's question — card or bubble — is the card, and it
+should become the assistant turn.** Moving the chart into the bubble fixes a
+quarter of the problem, since architecture 4.2 makes an answer four things and
+three of them still vanish; it saves no work, because the thread's messages
+carry `content` and `run_id` and nothing else, so a chart in a bubble means
+fetching the run anyway; and it puts the chart *outside* the card, which is what
+B-048 refused. The sharper form: the bubble and the card are two renderings of
+one thing, which is the only reason `replied` exists and was the root of the
+Phase 7 gate defect. **Its own work package** (owner, 2026-08-20).
+
+### B-107 — a rule fixed at one of its two call sites is fixed nowhere in particular
+
+Two findings on one execution, and **B-096's guard worked**: it keys on the
+citation set, it lives in `_write_ending`, and the composed answer — a third
+wording of the same numbers — was correctly not added. Both findings came from
+the **loop**, where `state.add_finding` still compares characters. That is the
+guard B-096 was filed against, one layer up, in the copy nobody changed.
+
+Not simply the rule copied across, and that is why it is filed rather than
+fixed: those two findings are arguably two claims — the numbers, and the trend —
+where the composer's case was one claim restated, and set-equality with
+first-wins would keep the enumeration and discard the interpretation.
+
+### What the `web-e2e` job caught on its first real run
+
+**Red, and correctly so.** `PermissionError: '/app/ops/.secrets/secrets.json.8.tmp'`
+— on a fresh checkout those bind-mounted directories do not exist, because they
+are gitignored, so Docker created them as **root** and the api image runs as uid
+1001. Invisible on the machine the smoke was written on twice over: Docker
+Desktop ignores bind-mount ownership, and the directories had been there for
+weeks. **B-102's shape again** — a precondition every existing machine already
+satisfies, so nobody walks the path where it is missing.
+
+`ops/docker-compose.smoke.yml` replaces those two mounts with named volumes for
+the smoke stack only. The container creates them, so its own user owns them and
+no host uid has to match; they go with `down --volumes`; and the walk stops
+writing a credential into the developer's `ops/.secrets/secrets.json`, which it
+never had a reason to touch.
 
 ---
 

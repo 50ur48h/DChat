@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
+from typing import cast
 
 import pytest
 
@@ -85,7 +86,132 @@ def test_a_date_column_gets_a_time_axis() -> None:
     assert chart.spec is not None
     encoding = chart.spec["encoding"]
     assert isinstance(encoding, dict)
-    assert encoding["x"] == {"field": "day", "type": "temporal", "title": "Day"}
+    # Banded by month, because both values are the first of one (**B-105**).
+    assert encoding["x"] == {
+        "field": "day",
+        "type": "temporal",
+        "title": "Day",
+        "timeUnit": "yearmonth",
+    }
+
+
+# ---------------------------------------------------------------------------
+# How coarse the time axis is (B-105)
+# ---------------------------------------------------------------------------
+
+
+def _x(chart: Chart) -> dict[str, object]:
+    """The x encoding, narrowed. `spec` is `dict[str, object]` by design — it is
+    a document, not a model — so a test that reads into it has to say so."""
+    assert chart.spec is not None
+    raw = chart.spec["encoding"]
+    assert isinstance(raw, dict)
+    x = cast("dict[str, object]", raw)["x"]
+    assert isinstance(x, dict)
+    return cast("dict[str, object]", x)
+
+
+def test_monthly_bars_are_banded_by_month_not_scattered_on_a_calendar() -> None:
+    """**The frame from the gate walk, verbatim** (**B-105**).
+
+    Four monthly bars on a bare temporal axis are four instants on a continuous
+    four-month domain: Vega ticks it by week, the bars are drawn at their default
+    width, and the space between them reads as zero revenue. Wrong rather than
+    plain, which is the failure `decide` refuses for Q1/Q2 and then drew here
+    with real dates.
+    """
+    frame = _frame(
+        [
+            ("2026-04-01", 135950.59),
+            ("2026-05-01", 145341.12),
+            ("2026-06-01", 123650.61),
+            ("2026-07-01", 122712.33),
+        ],
+        columns=("month", "revenue"),
+    )
+
+    chart = decide(frame, ChartRequest(mark="bar", x="month", y="revenue"))
+
+    assert _x(chart)["timeUnit"] == "yearmonth"
+
+
+def test_the_line_chart_had_the_same_defect_and_it_only_looked_fine() -> None:
+    """The encoding that shipped for the trend question was identical to the bar
+    one — a bare `temporal` x. It read as correct only because a line implies no
+    width, so nothing in the picture claimed the space between two points."""
+    frame = _frame([("2026-04-01", 1.0), ("2026-05-01", 2.0)], columns=("month", "revenue"))
+
+    chart = decide(frame, ChartRequest(mark="line", x="month", y="revenue"))
+
+    assert _x(chart)["timeUnit"] == "yearmonth"
+
+
+def test_daily_data_is_not_rounded_up_to_months() -> None:
+    """The grain is the coarsest unit every value **sits exactly on**, so a
+    column with real days keeps them. Coarsening here would put three days in
+    one band and silently sum them into a bar nobody asked for."""
+    frame = _frame(
+        [("2026-04-01", 1.0), ("2026-04-02", 2.0), ("2026-04-03", 3.0)],
+        columns=("day", "amount"),
+    )
+
+    chart = decide(frame, ChartRequest(mark="bar", x="day", y="amount"))
+
+    assert _x(chart)["timeUnit"] == "yearmonthdate"
+
+
+def test_january_firsts_are_years() -> None:
+    frame = _frame([("2024-01-01", 1.0), ("2025-01-01", 2.0)], columns=("year", "amount"))
+
+    chart = decide(frame, ChartRequest(mark="bar", x="year", y="amount"))
+
+    assert _x(chart)["timeUnit"] == "year"
+
+
+def test_a_bar_on_timestamps_gets_a_discrete_axis_rather_than_instants() -> None:
+    """No unit to band by, and a bar at an instant is the same defect in its
+    general form. Ordinal is not a compromise for a bar chart — one band per
+    thing compared is what a bar chart's axis is."""
+    frame = _frame(
+        [("2026-04-01T09:30:00", 1.0), ("2026-04-01T10:15:00", 2.0)],
+        columns=("at", "amount"),
+    )
+
+    chart = decide(frame, ChartRequest(mark="bar", x="at", y="amount"))
+
+    x = _x(chart)
+    assert x["type"] == "ordinal"
+    assert "timeUnit" not in x
+
+
+def test_a_line_on_timestamps_stays_continuous() -> None:
+    """A line over a working day is exactly the case a continuous time axis is
+    for, and spacing the points evenly would misstate when they happened."""
+    frame = _frame(
+        [("2026-04-01T09:30:00", 1.0), ("2026-04-01T10:15:00", 2.0)],
+        columns=("at", "amount"),
+    )
+
+    chart = decide(frame, ChartRequest(mark="line", x="at", y="amount"))
+
+    x = _x(chart)
+    assert x["type"] == "temporal"
+    assert "timeUnit" not in x
+
+
+def test_dates_and_strings_agree_about_the_grain() -> None:
+    """Both representations reach `decide` — a driver that returned `date`
+    objects, and the ISO strings a stored artifact carries. If they disagreed,
+    the same result would chart differently depending on which side it came
+    from, which is the seam B-103 was found at."""
+    from datetime import date as _date
+
+    as_objects = _frame([(_date(2026, 4, 1), 1.0), (_date(2026, 5, 1), 2.0)], columns=("m", "v"))
+    as_text = _frame([("2026-04-01", 1.0), ("2026-05-01", 2.0)], columns=("m", "v"))
+
+    request = ChartRequest(mark="bar", x="m", y="v")
+
+    assert _x(decide(as_objects, request)) == _x(decide(as_text, request))
 
 
 # ---------------------------------------------------------------------------

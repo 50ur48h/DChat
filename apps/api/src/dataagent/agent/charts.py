@@ -133,6 +133,91 @@ def _is_temporal(value: object) -> bool:
     return isinstance(value, str) and bool(_ISO_DATE.match(value))
 
 
+#: The same shape `_ISO_DATE` admits, taken apart so the grain can be read off
+#: it. Kept separate from that pattern rather than replacing it: one answers
+#: "is this a date at all", which guards the axis type, and this one answers
+#: "how coarse is it", which only decorates an axis already known to be temporal.
+_ISO_PARTS = re.compile(
+    r"^(?P<year>\d{4})-(?P<month>\d{2})(?:-(?P<day>\d{2}))?"
+    r"(?:[T ](?P<hour>\d{2}):(?P<minute>\d{2})(?::(?P<second>\d{2}))?)?"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _Instant:
+    """A temporal value reduced to the fields that decide its grain."""
+
+    month: int
+    day: int | None
+    #: Whether anything below a day is set to something other than midnight.
+    within_day: bool
+
+
+def _instant(value: object) -> _Instant | None:
+    """One temporal value taken apart, or None if it is not one.
+
+    Both representations reach here — a driver that returned `date`/`datetime`
+    objects, and the ISO strings a stored artifact carries — and they have to
+    agree, or the same result would chart differently depending on whether it
+    came from the database or from the store.
+    """
+    if isinstance(value, datetime):
+        return _Instant(
+            month=value.month,
+            day=value.day,
+            within_day=bool(value.hour or value.minute or value.second or value.microsecond),
+        )
+    if isinstance(value, date):
+        return _Instant(month=value.month, day=value.day, within_day=False)
+    if not isinstance(value, str):
+        return None
+    found = _ISO_PARTS.match(value)
+    if found is None:
+        return None
+    clock = (found.group("hour"), found.group("minute"), found.group("second"))
+    day = found.group("day")
+    return _Instant(
+        month=int(found.group("month")),
+        day=int(day) if day is not None else None,
+        within_day=any(part is not None and int(part) != 0 for part in clock),
+    )
+
+
+def _time_grain(values: Sequence[object]) -> str | None:
+    """The coarsest Vega-Lite `timeUnit` every value sits exactly on, or None.
+
+    **A monthly aggregate on a continuous day axis is a wrong chart, not a plain
+    one.** Four monthly bars drawn without this landed at four instants on a
+    four-month domain: thin spikes on a calendar ticked by week, with the gaps
+    between them reading as zero revenue. The Q1/Q2 rule with real dates —
+    `decide` refuses the values that are not dates and then drew this.
+
+    **Read off the values, never off the column's name.** That is the line this
+    module holds everywhere else: `_kind` judges `order_date` by what is in it,
+    `axis_title` de-snake-cases rather than translating, and `_is_number` will
+    not parse a string that looks numeric. A name like `month` proves nothing;
+    every value falling on the first of one is a fact about the data.
+
+    It is deliberately conservative in one direction only. Daily data that
+    happens to contain nothing but firsts-of-month is banded by month, which
+    places every point correctly and merely draws it coarser than it had to be.
+    Nothing here can move a point to a time it is not.
+    """
+    instants = [_instant(value) for value in _present(values)]
+    if not instants or any(instant is None for instant in instants):
+        return None
+    known = [instant for instant in instants if instant is not None]
+    if any(instant.within_day for instant in known):
+        # Something below a day is set, so a day is not the unit — leave the
+        # axis continuous rather than collapsing points onto the same band.
+        return None
+    if any(instant.day not in (None, 1) for instant in known):
+        return "yearmonthdate"
+    if all(instant.month == 1 for instant in known):
+        return "year"
+    return "yearmonth"
+
+
 def _stale_numeric(frame: Frame, name: str) -> bool:
     """Whether this column is unjudgeable rather than non-numeric (**B-103**).
 
@@ -345,8 +430,29 @@ def _spec(
     # captioned in the database's vocabulary — `order_month`, `order_count` — to
     # a reader who never chose those words. The title is one field on the
     # encoding, and it is built server-side like everything else here.
+    x: dict[str, object] = {
+        "field": request.x,
+        "type": x_kind,
+        "title": axis_title(request.x),
+    }
+    if x_kind == "temporal":
+        # **B-105.** A temporal axis with no unit is a continuous one, and Vega
+        # then ticks it by whatever suits the *span* rather than the data: four
+        # monthly bars over four months got weekly gridlines, four thin spikes,
+        # and gaps a reader is entitled to read as zero. The unit is read off the
+        # values, so it says what the data is rather than what a column is called.
+        grain = _time_grain(_column_values(frame, request.x))
+        if grain is not None:
+            x["timeUnit"] = grain
+        elif request.mark == "bar":
+            # Dates with a time on them, and a bar for each. There is no unit to
+            # band by, and a bar at an instant on a continuous axis is the defect
+            # above in its general form — so the axis becomes discrete, which is
+            # what a bar chart's axis is anyway: one band per thing compared.
+            x["type"] = "ordinal"
+
     encoding: dict[str, object] = {
-        "x": {"field": request.x, "type": x_kind, "title": axis_title(request.x)},
+        "x": x,
         "y": {"field": request.y, "type": "quantitative", "title": axis_title(request.y)},
     }
     if request.series is not None:
