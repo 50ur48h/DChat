@@ -483,6 +483,42 @@ class Settings(BaseSettings):
                 "sits beside it. Production uses Key Vault (DECISIONS D-001)."
             )
 
+    def assert_llm_providers_are_production_safe(self) -> None:
+        """Refuse to start a production build that is configured to fabricate.
+
+        WP11.2b ships a `scripted` provider so CI can drive the real product in a
+        browser without a model. `ProviderCaps.is_stub` already names the hazard:
+        a stub reaching production would not fail — it would answer, confidently
+        and from nothing, in a product whose entire claim is that its answers are
+        evidenced. That is worse than an outage, because an outage is visible.
+
+        Checked at startup for the reason the two assertions above are, and it is
+        the reason worth repeating: `registry.get_provider` refuses a stub too,
+        but it does so at the **first call that needs a model**. A service that
+        boots healthy, serves its health check, accepts a question and only then
+        refuses has already told an operator it was fine. This one refuses before
+        anything is served.
+
+        Both guards stay. They catch different things: this reads configuration
+        and so cannot see a provider registered at runtime; that reads the
+        instance and so cannot see one that is configured but never built.
+        """
+        from dataagent.llm.registry import STUB_PROVIDERS
+
+        if not self.is_production:
+            return
+        stubs = [name for name in self.llm_providers if name in STUB_PROVIDERS]
+        if stubs:
+            named = ", ".join(sorted(stubs))
+            raise RuntimeError(
+                f"LLM_PROVIDERS names {named}, which answers without a model behind "
+                "it, and this is a production build or environment. A stub here "
+                "would not fail — it would fabricate answers in a product whose "
+                "whole claim is that answers are evidenced. It exists so CI can "
+                "drive the real product in a browser (WP11.2b) and belongs "
+                "nowhere else."
+            )
+
     def require_local_secrets_key(self) -> str:
         """The Fernet key, or a failure that names the command that makes one."""
         if self.local_secrets_key is None:

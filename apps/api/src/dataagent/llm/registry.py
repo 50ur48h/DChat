@@ -35,6 +35,7 @@ from dataagent.config import Settings, get_settings
 from dataagent.llm.base import DEFAULT_ROLE_TIERS, TIERS, LLMError, LLMProvider, Role, Tier
 
 __all__ = [
+    "STUB_PROVIDERS",
     "ModelChoice",
     "ProviderNotConfiguredError",
     "aclose_providers",
@@ -83,7 +84,36 @@ def _openai() -> LLMProvider:
 #: A table of *factories* rather than instances, so that importing the registry
 #: does not open an HTTP client, and so a provider whose key is absent fails when
 #: something tries to use it rather than at import time.
-_BUILTIN_FACTORIES: dict[str, Callable[[], LLMProvider]] = {"openai": _openai}
+def _scripted() -> LLMProvider:
+    from dataagent.llm.scripted import ScriptedProvider
+
+    return ScriptedProvider()
+
+
+_BUILTIN_FACTORIES: dict[str, Callable[[], LLMProvider]] = {
+    "openai": _openai,
+    # **A stub, shipped deliberately** (WP11.2b). The phase gate wants a browser
+    # driving the real product in CI, and the model is the only part of that
+    # chain that cannot run there for free and deterministically. It is named
+    # here rather than registered by a test harness because CI selects it
+    # through `LLM_PROVIDERS`, in a container built from the ordinary image.
+    #
+    # What keeps it out of production is not this table. `STUB_PROVIDERS` below
+    # refuses it at boot, and `get_provider` refuses any stub at first use.
+    "scripted": _scripted,
+}
+
+#: The built-in providers that answer without a model behind them. Named, so the
+#: boot check can refuse a configured stub **without constructing** every
+#: provider at startup — building one is cheap but not free, and a boot path that
+#: opens an HTTP client per configured provider merely to ask whether it is fake
+#: would be a worse trade than a list somebody has to keep honest.
+#:
+#: A belt to `get_provider`'s braces, and the two catch different things: this
+#: one sees a stub named in *configuration*, before anything serves traffic; that
+#: one sees any stub *instance*, including one `register_provider` supplied at
+#: runtime, which no configuration mentions.
+STUB_PROVIDERS: frozenset[str] = frozenset({"scripted"})
 
 #: Registered at runtime — by tests, and by anything that wants to substitute a
 #: provider without editing this module. Checked before the built-ins, so an

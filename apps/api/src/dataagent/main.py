@@ -62,6 +62,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # indistinguishable from one that works until somebody looks.
     resolved.assert_auth_is_production_safe()
     resolved.assert_secrets_backend_is_production_safe()
+    # **WP11.2b.** The third of these, and the same shape as the first two: a
+    # weaker-mode-for-convenience switch that must not survive into production.
+    resolved.assert_llm_providers_are_production_safe()
 
     app = FastAPI(
         title="data-agent API",
