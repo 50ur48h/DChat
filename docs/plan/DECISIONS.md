@@ -4,6 +4,43 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-038 — A run whose every query failed is refused, not answered
+Date: 2026-08-20 · Phase: 11 · PR: #85 (B-095) · Migration: none
+Context: **B-095.** Both executions of a live run ended in `gaierror` — the
+platform never reached the database — and the answer read *"I couldn't show
+total net sales by month because **no data was returned** from the queries"*
+with `limitations: []`. The reader was told their data was empty when nothing
+had been asked of it: a claim about the customer's data where the fact was about
+the platform. Tracing it turned up a second, sharper half. The loop had **already
+written the true sentence**, quoting the connector's own sanitized message, and
+the runner discarded it: the test guarding the no-compose path asks whether
+anything *ran* (`not state.executions`), and a failed execution is still an
+execution, so the run fell through to `_compose` — where a model is handed a list
+of refusals, no results, and an instruction to answer.
+Options: (a) refuse without composing, ending on the sentence the loop wrote;
+(b) still compose, so the prose is question-shaped, and have the platform force
+`answered=false` the way `_confidence` caps a disputed draft; (c) leave
+`answered` to the model and only add the missing limitation.
+Decision: **(a)**, taken by the owner on 2026-08-20.
+(c) was refused because it fixes the silence and leaves the misdirection: a run
+that reached the database zero times could still present itself as answered.
+(b) buys question-shaped prose for a model call, and buys it in the one situation
+where the model has nothing to write from — the case that produced the
+confabulation in the first place. A model given no evidence does not decline; it
+describes the absence as a finding. (a) is also the only option that is *cheaper*
+than the defect: it spends no composing call at all.
+Consequences: `every_query_failed()` on `ResearchState` is the predicate, and it
+is deliberately not "nothing ran" — a run that answered from the catalog or from
+a document without querying is a legitimate ending and still composes. The
+refusal carries the budget caveat through `_finalize_refusal`, which it did not
+need to before this decision gave that path a second caller. `ExecutionRef` gains
+`error`, set **only** for a failure no rewrite could fix, because the loop records
+policy refusals as failed executions too and those are routinely corrected by the
+next iteration — a limitation on every repaired run would be a caveat about a
+self-correction. The pre-existing test of this path asserted `answered` but never
+`status`, so it had been passing while the run ended `failed`; the new one asserts
+both.
+
 ## D-037 — A chart is asked for with the answer, kept with the answer, and refused in the answer's own place
 Date: 2026-08-19 · Phase: 11 · PR: #82 (WP11.1) · Migration 0024
 Context: WP11.1 had three placement questions and none of them is visible in the

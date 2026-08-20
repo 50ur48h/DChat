@@ -33,6 +33,22 @@ def _ref(name: str = "e1", *, rows: int | None = 3, ok: bool = True) -> Executio
     return ExecutionRef(execution_id=name, row_count=rows, ok=ok, summary="a row")
 
 
+UNREACHABLE = "could not connect to the data source"
+
+
+def _failed(*, error: str = UNREACHABLE) -> ExecutionRef:
+    """A query that was sent and never came back.
+
+    `error` empty is the *repairable* refusal — a statement the policy rejected,
+    which the next planner is told about and routinely corrects. The loop makes
+    that distinction when it records the execution; these tests are what holds
+    it in place.
+    """
+    return ExecutionRef(
+        execution_id="", ok=False, summary=f"refused (engine_error): {error}", error=error
+    )
+
+
 def _draft(*, answered: bool = True, confidence: str = "high") -> FinalizeIn:
     return FinalizeIn(
         answer="Revenue was 1,234.00.",
@@ -222,6 +238,80 @@ def test_every_query_returning_nothing_is_the_critic_s_business_not_a_footnote()
     assert limitations_for(_state(_ref("e1", rows=0), _ref("e2", rows=0)), None) == ()
 
 
+# ---------------------------------------------------------------------------
+# Queries that never reached the database (**B-095**)
+# ---------------------------------------------------------------------------
+
+
+def test_a_run_whose_queries_all_failed_says_so_instead_of_saying_nothing() -> None:
+    """**B-095.** Seen live: both executions ended in `gaierror` — the platform
+    never reached the database — and the answer read *"no data was returned from
+    the queries"* over `limitations: []`. A reader was told their data was empty
+    when nothing had been asked of it.
+
+    The thin-evidence rule could not see it, and correctly so: it asks about a
+    query that *succeeded* and returned no rows. A failed one matched no rule at
+    all, which is how a run that knew ended up saying nothing.
+    """
+    notes = limitations_for(_state(_failed(), _failed()), None)
+
+    assert len(notes) == 1
+    assert notes[0].startswith("Every query this run tried failed to run")
+    assert UNREACHABLE in notes[0], "the connector's own words, so the reader can act on them"
+
+
+def test_the_note_names_how_many_failed_when_some_succeeded() -> None:
+    """The partial case is the one a reader most needs the count for: part of the
+    answer stands on data and part of it was never asked."""
+    notes = limitations_for(_state(_ref("e1"), _ref("e2"), _failed()), None)
+
+    assert len(notes) == 1
+    assert notes[0].startswith("1 of the 3 queries this run tried failed to run")
+    assert "what it would have returned" in notes[0], "one query is not a they"
+
+
+def test_one_query_that_failed_is_not_described_as_all_of_them() -> None:
+    notes = limitations_for(_state(_failed()), None)
+
+    assert notes[0].startswith("The one query this run tried failed to run")
+    assert "what it would have returned" in notes[0]
+
+
+def test_the_note_agrees_with_the_number_that_failed_not_the_number_tried() -> None:
+    """The two differ, and the live run is what noticed: the opening clause of
+    *"1 of the 3 queries…"* names three and the sentence is about one."""
+    notes = limitations_for(_state(_failed(), _failed()), None)
+
+    assert "what they would have returned" in notes[0]
+
+
+def test_a_refusal_the_loop_was_meant_to_repair_is_not_a_limitation() -> None:
+    """**The reason `error` exists apart from `ok`.** A statement the policy
+    refused is recorded as a failed execution too — that is how the next planner
+    learns what was wrong — and it is routinely followed by the corrected query
+    that answers the question. Caveating that would put a warning about a
+    self-correction on a large share of healthy runs, which is how a reader
+    learns to skip warnings.
+    """
+    state = _state(_failed(error=""), _ref("e2"))
+
+    assert limitations_for(state, None) == ()
+
+
+def test_a_query_that_never_ran_is_said_before_a_reviewer_s_warning() -> None:
+    """Order, and the two are different kinds of doubt. A warning is about what
+    the answer *claims*; a query that never reached the database is about how
+    much of the investigation happened at all — and it is the more actionable,
+    because an unreachable connector is something a person can go and fix."""
+    verdict = CriticVerdict(verdict="pass", findings=(CriticFinding("n", WARN, "a caveat"),))
+
+    notes = limitations_for(_state(_ref("e1"), _failed()), verdict)
+
+    assert len(notes) == 2
+    assert notes[0].startswith("1 of the 2 queries")
+    assert notes[1] == "a caveat"
+
+
 def test_the_same_note_is_not_said_twice() -> None:
     repeated = CriticFinding("numbers", WARN, "the same worry")
     verdict = CriticVerdict(verdict="pass", findings=(repeated, repeated))
@@ -254,6 +344,15 @@ def test_several_tables_read_as_a_list() -> None:
 
 def test_a_refusal_that_ran_nothing_says_so() -> None:
     assert method_note(_state()) == "Answered without running a query."
+
+
+def test_a_run_that_tried_and_failed_is_not_a_run_that_chose_not_to_ask() -> None:
+    """**B-095, one field further up the card.** "Answered without running a
+    query" over two failed executions describes a failure as a decision — the
+    same substitution the limitations exist to stop."""
+    note = method_note(_state(_failed(), _failed()))
+
+    assert note == "2 queries tried against orders; nothing came back."
 
 
 def test_a_failed_execution_is_not_a_query_that_answered_anything() -> None:

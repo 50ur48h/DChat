@@ -37,6 +37,13 @@ under "Unreleased", only for changes a user would notice.
   knowing its address.
 
 ### Fixed
+- When the platform cannot reach your database, the answer now says so instead
+  of reporting that your data is empty. A question whose queries all failed to
+  run used to come back as an answer — "no data was returned from the queries" —
+  which describes your data when the problem was on our side and nothing had
+  been asked of it. Such a question is now declined, and says how many queries
+  failed and what went wrong. When only some of them failed, the answer still
+  stands on the ones that worked and names the shortfall.
 - An answer no longer appears twice on its own card. A claim the agent reached
   during its work and the same claim restated in the final answer were recorded
   as two separate findings whenever the wording differed, so a single query

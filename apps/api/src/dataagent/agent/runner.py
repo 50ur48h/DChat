@@ -440,6 +440,26 @@ async def _investigate(
         # refusal it already wrote.
         return await _finalize_refusal(context, events, working, outcome.refusal)
 
+    if state.every_query_failed():
+        # **B-095**, and the owner's decision (**D-038**). The test above asks
+        # whether anything *ran*; a failed execution is still an execution, so a
+        # run whose every query failed fell past it into `_compose` — which
+        # hands a model a list of refusals, no result previews, and an
+        # instruction to answer. A model given no evidence does not decline. It
+        # describes the absence as a finding: the live run read *"no data was
+        # returned from the queries"*, a claim about the customer's data when
+        # the truth was about the platform, which never reached the database.
+        #
+        # The sharpest part is that the true sentence already existed. `research`
+        # stops on an unrepairable failure and writes the refusal there, quoting
+        # the connector's own sanitized message — and this function threw it away
+        # to buy a plausible one. So the decision is not only about honesty: it
+        # is also the cheaper path, by one model call, in the case where there
+        # was never anything to say.
+        return await _finalize_refusal(
+            context, events, working, _failed_refusal(state, outcome), caveat=outcome.caveat
+        )
+
     # Compose, criticise, and — at most once — go round again (arch M9).
     draft = await _compose(context, events, working, outcome, bundle, settings)
     verdict = await _validate(context, events, working, outcome, draft, bundle, settings)
@@ -710,16 +730,51 @@ async def _compose(
     return completion.parsed_as(FinalizeIn)
 
 
+def _failed_refusal(state: ResearchState, outcome: LoopOutcome) -> str:
+    """What to tell the reader when no query in the run came back (**B-095**).
+
+    The loop's own words wherever it has them, because it wrote the accurate
+    sentence at the moment it still had the connector's message in hand. It does
+    not always have them: `refusal` is set when `research` stops on an
+    unrepairable failure, and a run can reach here another way — a second pass
+    (M9) that ends on a ceiling, carrying the errored execution from the first.
+    So the fallback is rebuilt from the run's own record, which is where the
+    limitation beside it comes from too.
+    """
+    if outcome.refusal:
+        return outcome.refusal
+    if detail := composer.failure_detail(state):
+        return (
+            "I could not answer that from this data. No query in this run "
+            f"reached the database: {detail}"
+        )
+    # Every attempt was refused before it was sent and none was ever corrected —
+    # a policy refusal the loop ran out of room to repair. There is no
+    # connector message to quote, and the budget caveat carried alongside this
+    # says which ceiling ended it.
+    return "I could not answer that from this data. No query in this run returned a result."
+
+
 async def _finalize_refusal(
-    context: ToolContext, events: EventWriter, working: _Working, reason: str
+    context: ToolContext,
+    events: EventWriter,
+    working: _Working,
+    reason: str,
+    *,
+    caveat: str = "",
 ) -> RunOutcome:
     """End without a further model call.
 
     Deliberately not another round trip: the reason is already known, and
     spending a call to have a model rephrase a refusal is money for prose.
+
+    ``caveat`` is passed through rather than dropped because B-095 gave this
+    path a second caller: a run can now arrive here having also exhausted a
+    ceiling, and a refusal that fails to say the search was cut short would be
+    the partial-answer failure wearing a refusal's clothes.
     """
     final = FinalizeIn(answer=reason, answered=False, supported_by=[], confidence="high")
-    return await _write_ending(context, events, working, final, ())
+    return await _write_ending(context, events, working, final, (), caveat=caveat)
 
 
 async def _write_ending(

@@ -90,6 +90,17 @@ class ExecutionRef(BaseModel):
     row_count: int | None = None
     summary: str = ""
     ok: bool = True
+    #: Why this query never returned, in the connector's own sanitized words,
+    #: and **only when rewriting the SQL could not have fixed it** (**B-095**).
+    #: The condition is the whole point of the field. A statement the policy
+    #: refused is the loop working — the next planner is told what was wrong and
+    #: corrects it — so caveating that in the answer would be a warning about
+    #: nothing, on most runs, which is how a reader learns to skip warnings. A
+    #: database that could not be reached is a hole nothing filled, and the
+    #: person who asked is the one who has to be told. `summary` still carries
+    #: every failure either way, because the model needs to see the repairable
+    #: ones in order to repair them.
+    error: str = ""
 
 
 class StateFinding(BaseModel):
@@ -219,6 +230,17 @@ class ResearchState(BaseModel):
             for reference in self.executions
             if reference.ok and reference.execution_id
         )
+
+    def every_query_failed(self) -> bool:
+        """Queries were attempted and not one of them came back (**B-095**).
+
+        Deliberately not the same thing as "nothing ran". A run that answered
+        from the catalog or from a document without querying is a legitimate
+        ending and has always composed an answer. This is the run that *asked*
+        the database and never heard back, and the two differ in the only way
+        that matters here: whether there is any evidence to compose from.
+        """
+        return bool(self.executions) and not any(reference.ok for reference in self.executions)
 
     def has_run(self, sql_hash: str) -> bool:
         """Whether this exact statement has already been sent (4.4).

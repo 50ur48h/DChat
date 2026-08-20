@@ -6,27 +6,19 @@ Current position: **Phases 0–5 and 7–11's first four items are done. Phase 6
                   be corrected and retired), B-090 (the environment guard),
                   B-060 (reproduced, diagnosed, and its two chosen fixes built as
                   B-092 and B-093), B-094 (a retired definition can be brought
-                  back) and **WP11.1 — charts** are all merged. What remains is
-                  **B-095** and then **WP11.2**, the phase gate.
+                  back), **WP11.1 — charts** and **B-095** (a run whose queries
+                  all failed is refused, not answered) are all merged. What
+                  remains is **WP11.2**, the phase gate.
                   The session of 2026-08-19 was unusually productive for a reason
                   worth repeating: **six defects were found by the owner walking
                   the product by hand**, not by the suite — B-094, B-095, B-096,
                   B-097, B-098, and the two screen defects in B-088's web half.
                   Every one was invisible to a green build.
-Next step:        **B-095 first** (open P1). A run whose queries **all failed**
-                  carries no limitation at all, and the answer says *"no data was
-                  returned from the queries"* — a claim about the customer's data
-                  when the truth is about the platform, which never reached the
-                  database. One predicate is the whole of it: the thin-evidence
-                  note in `composer.limitations_for` only considers executions
-                  that **succeeded** (`reference.ok and row_count == 0`), so a
-                  failed one matches no rule. Worth deciding in the same pass
-                  whether such a run should be `answered` at all.
-                  **Then WP11.2 — the phase gate**, carrying **B-017** (recovery
-                  when an org has no Admin who can sign in), **B-061** and
-                  **B-020**, with **B-097** (prose enumerating what the chart
-                  already shows — assessed, see its row) and **B-098** (raw column
-                  names on chart axes) as polish candidates in scope. The gate is
+Next step:        **WP11.2 — the phase gate**, carrying **B-017** (recovery when
+                  an org has no Admin who can sign in), **B-061** and **B-020**,
+                  with **B-097** (prose enumerating what the chart already shows
+                  — assessed, see its row) and **B-098** (raw column names on
+                  chart axes) as polish candidates in scope. The gate is
                   *"show me the revenue trend by month" → chart renders;
                   Playwright green; a non-developer can run the demo from the
                   README quickstart alone*.
@@ -37,9 +29,82 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 11.
-Last updated: 2026-08-19 by Claude Code (session end — WP11.1, B-094 and B-096 merged; B-095 is the next P1; D-037 records the chart decisions)
+Last updated: 2026-08-20 by Claude Code (B-095 — a run whose every query failed is refused rather than answered, and says which failure; D-038 records the owner's choice)
 
 ---
+
+## The session of 2026-08-20 — B-095
+
+**One item, and the entry understated it.** B-095 was filed as a missing
+limitation: a run whose every query failed carried `limitations: []` while the
+answer described the failure as an empty result. That half is fixed — an answer
+now says how many of the run's queries failed and quotes the connector's own
+sanitized message. Tracing it found a second half the walk could not see.
+
+**The true sentence already existed, and the runner discarded it.** `research`
+stops on an unrepairable failure and writes the refusal there, naming what
+failed. The runner's no-compose test asks whether anything *ran*
+(`not state.executions`) — and a failed execution is still an execution, so the
+run fell past it into `_compose`, which hands a model a list of refusals, no
+results, and an instruction to answer. A model given no evidence does not
+decline; it describes the absence as a finding. So the platform knew, wrote it
+down, and paid a model call to replace it with a guess.
+
+**The owner's decision is D-038: refuse it, do not compose.** The alternatives
+were to force `answered=false` after composing anyway, or to add the limitation
+and leave `answered` to the model. The second fixes the silence and keeps the
+misdirection; the first buys question-shaped prose in the one case where the
+model has nothing to write from. Refusing is also a model call cheaper — the
+only one of the three that costs less than the defect.
+
+**A test was passing over a failed run.** The existing test of this path
+asserted `answered` and `llm_calls` but never `status`: composing raised inside
+the FakeLLM, so the run ended **`failed`** and the suite was green anyway. With a
+real model there is no exception — it composes, which is the live report. The
+new test asserts `status` first. Worth generalising: *a test that asserts on the
+shape of an outcome and not on the outcome itself will pass through the failure
+it was written for.*
+
+**Verified live, on the environment that produced the report.** The smoke
+script run from the **host** against the F&B demo — registered with the compose
+hostname `seed-fnb-pg`, which does not resolve there — is B-095's original
+trigger. It now ends `status completed`, `answered False`, **1 llm call** (the
+plan; no composing call), on *"I could not answer that from this data. The query
+could not be run: gaierror: [Errno 11001] getaddrinfo failed"*, with the
+limitation stored beside it. The healthy path was checked through the rebuilt
+api image against the pizza demo: a real answer, and the failure note correctly
+absent. The live run also caught what the tests did not — *"nothing here rests
+on what **they** would have returned"* over a single query. The assertions were
+on the opening clause; the agreement is on the count that failed.
+
+**One new entry: B-100.** Fixing `method_note` turned up that nothing reads what
+it produces. Architecture 4.2 makes the *method* one of the four parts of an
+answer — one line on how it was reached, for a reader who will not open the SQL —
+and `assemble` builds it, sets it on `ComposedAnswer.method`, and `_write_ending`
+drops it: no column, no field on the run view, nothing in the card. Filed rather
+than fixed, because the choice is the owner's: surface it, or accept that
+`supported_by` and B-034's evidence panel already answer *"how did you get this"*
+and **delete** it. Computed, tested and discarded is the one state it should not
+keep.
+
+**B-028's failure text, captured at last.** The full suite went red three times
+in this session, in three *disjoint* subsets, all inside whichever file was being
+torn down at the time. That is B-028 — open since 2026-08-14, whose entry records
+that the traceback had never been caught. It has been now:
+`OSError: [WinError 64] The specified network name is no longer available`,
+through `ConnectionResetError`, in `_temporary_database` at the line the entry
+guessed — the `DROP DATABASE … WITH (FORCE)`. So it is the **teardown connection**
+resetting, not the tests. Added to its row, along with the cheap way to prove a
+red local run innocent: `git stash && pytest <file>` reproduces it on clean code
+in a couple of minutes, which is what settled it here. Frequency tracks host
+load; these sightings followed a container rebuild and concurrent suite runs.
+
+**Two smaller things, in the same pass.** `method_note` said *"Answered without
+running a query"* over two failed executions — a failure described as a choice,
+one field above the limitations. And `ExecutionRef.error` is set **only** where
+rewriting could not have helped: the loop records a policy refusal as a failed
+execution too, and the next planner routinely corrects it, so keying the note on
+`ok` alone would caveat a self-correction on a large share of healthy runs.
 
 ## The session of 2026-08-19 — the record, not a to-do list
 
