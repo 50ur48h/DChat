@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from decimal import Decimal, InvalidOperation
 
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -109,7 +110,44 @@ async def _frame_for(
     stored = json.loads(payload)
     columns = tuple(str(name) for name in stored.get("columns", []))
     rows = tuple(tuple(row) for row in stored.get("rows", []))
-    return Frame(columns=columns, rows=rows, truncated=truncated)
+    # **B-103.** A `Decimal` cannot be a JSON number without either a raw-text
+    # injection the standard library will not do or a `float` that rounds a
+    # customer's money, so it is stored as a string — and the writer records
+    # what the column held. Rebuilding the Decimal from that string is exact at
+    # any size and precision, and it is *reading a declaration* rather than
+    # deciding that text which looks numeric is a number, which would turn a
+    # postcode into a measure.
+    #
+    # Absent for anything written before the type was recorded. Those stay
+    # strings and the chart declines — see `_stale_numeric` for why that is the
+    # honest outcome rather than an unlucky one.
+    types = tuple(str(kind) for kind in stored.get("column_types", ()))
+    if types:
+        rows = tuple(
+            tuple(
+                _as_number(value) if index < len(types) and types[index] == "number" else value
+                for index, value in enumerate(row)
+            )
+            for row in rows
+        )
+    return Frame(columns=columns, rows=rows, truncated=truncated, column_types=types)
+
+
+def _as_number(value: object) -> object:
+    """A stored numeric cell, back as a number. Exact, or left alone.
+
+    `Decimal` rather than `float`: this is money as often as not, and the whole
+    reason the value travelled as a string is that rounding it was unacceptable.
+    A value that will not parse is returned untouched rather than dropped — the
+    column's type says a number was intended, and a cell that is not one is a
+    fact the chart layer should see rather than a `None` it cannot explain.
+    """
+    if isinstance(value, str):
+        try:
+            return Decimal(value)
+        except InvalidOperation:
+            return value
+    return value
 
 
 async def _create_chart_spec(context: ToolContext, params: BaseModel) -> BaseModel:

@@ -39,6 +39,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Literal
 
 __all__ = [
@@ -80,6 +81,11 @@ class Frame:
     #: Whether the store holds more than these rows. A truncated result cannot
     #: be charted honestly — see the module docstring.
     truncated: bool = False
+    #: What the writer recorded each column as holding (**B-103**), or empty for
+    #: a result stored before that was written down. Empty is not "text": it is
+    #: *unknown*, and the difference decides whether a refusal blames the data or
+    #: admits the platform lost the information — which is B-087's rule.
+    column_types: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,13 +119,47 @@ def _decline(code: str, sentence: str) -> Chart:
 
 
 def _is_number(value: object) -> bool:
-    return isinstance(value, int | float) and not isinstance(value, bool)
+    """**Decimal counts** (**B-103**). A money column arrives as one, because a
+    `Decimal` cannot cross JSON as a number without rounding and is rebuilt from
+    the type the writer declared. What is deliberately *not* here is a string
+    that looks numeric: recognising one would draw a chart of an account number,
+    and a wrong chart is worse than an absent one."""
+    return isinstance(value, int | float | Decimal) and not isinstance(value, bool)
 
 
 def _is_temporal(value: object) -> bool:
     if isinstance(value, date | datetime):
         return True
     return isinstance(value, str) and bool(_ISO_DATE.match(value))
+
+
+def _stale_numeric(frame: Frame, name: str) -> bool:
+    """Whether this column is unjudgeable rather than non-numeric (**B-103**).
+
+    True only for a result stored before `column_types` existed, whose values
+    are all strings that would parse as numbers. Both halves are needed: without
+    the first this would fire on a genuine text column in a *new* result, where
+    the writer said "text" and meant it; without the second it would fire on
+    every old result, including the ones that really do hold words.
+
+    This is not the guess the fix refused to make. Nothing is charted on the
+    strength of it — it only chooses which true sentence to show, and the one it
+    chooses admits the platform lost the information instead of blaming the data.
+    """
+    if frame.column_types:
+        return False
+    values = _present(_column_values(frame, name))
+    if not values:
+        return False
+    return all(isinstance(value, str) and _parses_as_number(value) for value in values)
+
+
+def _parses_as_number(value: str) -> bool:
+    try:
+        Decimal(value)
+    except InvalidOperation:
+        return False
+    return True
 
 
 def _column_values(frame: Frame, name: str) -> tuple[object, ...]:
@@ -184,6 +224,19 @@ def decide(frame: Frame, request: ChartRequest) -> Chart:
 
     y_values = _column_values(frame, request.y)
     if _kind(y_values) != "quantitative":
+        if _stale_numeric(frame, request.y):
+            # **B-103, and B-087's rule applied to a storage format.** This
+            # result was written before column types were recorded, so the
+            # platform genuinely cannot tell money from a postcode here. Saying
+            # the column "does not hold numbers" would be a claim about the
+            # customer's data when the fact is about us.
+            return _decline(
+                "types_not_recorded",
+                "No chart was drawn: this result was stored before the platform "
+                "recorded what each column holds, so a number cannot be told "
+                "from text that looks like one. Ask the question again and the "
+                "new result will chart.",
+            )
         return _decline(
             "y_not_numeric",
             f"No chart was drawn: {request.y!r} does not hold numbers, so there is nothing "

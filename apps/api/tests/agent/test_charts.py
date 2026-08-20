@@ -12,6 +12,9 @@ the definition layer and what this repeats for charts.
 
 from __future__ import annotations
 
+import json
+from decimal import Decimal
+
 import pytest
 
 from dataagent.agent.charts import (
@@ -24,6 +27,8 @@ from dataagent.agent.charts import (
     axis_title,
     decide,
 )
+from dataagent.dal.artifacts import encode
+from dataagent.dal.masking import MaskedFrame
 
 
 def _frame(rows: list[tuple[object, ...]], columns: tuple[str, ...] = ("label", "amount")) -> Frame:
@@ -264,3 +269,127 @@ def test_a_name_that_is_already_a_caption_is_left_alone() -> None:
     that "fixed" it would be making the caption worse."""
     assert axis_title("Total Revenue") == "Total Revenue"
     assert axis_title("") == ""
+
+
+# ---------------------------------------------------------------------------
+# Through the seam, not around it (**B-103**)
+# ---------------------------------------------------------------------------
+
+
+def _round_tripped(rows: list[tuple[object, ...]], columns: tuple[str, ...]) -> Frame:
+    """A frame the way the chart tool really gets one: encoded, then read back.
+
+    **This helper is the point of the section.** Seventeen tests above build a
+    `Frame` by hand out of Python floats, and every one of them passed while
+    charting money was impossible — because the defect never lived in `decide`,
+    it lived in the round trip that `decide` is downstream of. A hand-built frame
+    cannot catch this class, so this one goes through `encode` and `json.loads`
+    exactly as `tools/chart.py::_frame_for` does.
+    """
+    payload = json.loads(
+        encode(
+            MaskedFrame(
+                columns=columns,
+                rows=tuple(rows),
+                truncated=False,
+                duration_ms=1,
+                masked_columns=(),
+            )
+        )
+    )
+    stored = tuple(tuple(row) for row in payload["rows"])
+    types = tuple(payload.get("column_types", ()))
+    rebuilt = tuple(
+        tuple(
+            Decimal(value) if types[index] == "number" and isinstance(value, str) else value
+            for index, value in enumerate(row)
+        )
+        for row in stored
+    )
+    return Frame(columns=columns, rows=rebuilt, column_types=types)
+
+
+def test_money_survives_the_round_trip_and_draws(  # B-103
+) -> None:
+    """**The gate's own question.** Revenue is a `Decimal`, which cannot cross
+    JSON as a number, so it travels as a string and is rebuilt from the type the
+    writer recorded. Before this, the chart refused: *"'revenue' does not hold
+    numbers"* — on a correct answer, about a column that is nothing but."""
+    frame = _round_tripped(
+        [("2026-05", Decimal("145341.12")), ("2026-06", Decimal("123650.61"))],
+        columns=("month", "revenue"),
+    )
+
+    chart = decide(frame, ChartRequest(mark="line", x="month", y="revenue"))
+
+    assert chart.declined is None, chart.declined
+    assert chart.spec is not None
+
+
+def test_the_digits_are_not_rounded_on_the_way(  # B-103
+) -> None:
+    """A float would round this, which is why the value travels as text. The
+    point of the declared type is that it comes back exact."""
+    frame = _round_tripped(
+        [("a", Decimal("12345678901234.567890")), ("b", Decimal("0.000000000001"))],
+        columns=("label", "amount"),
+    )
+
+    assert frame.rows[0][1] == Decimal("12345678901234.567890")
+    assert frame.rows[1][1] == Decimal("0.000000000001")
+
+
+def test_a_column_of_digits_that_is_text_is_still_text() -> None:
+    """**The guess this fix refused to make.** An account number survives the
+    round trip as text because the writer *said* text — and a chart layer that
+    decided digits meant a number would make it a measure."""
+    frame = _round_tripped([("north", "90210"), ("south", "10118")], columns=("region", "postcode"))
+
+    chart = decide(frame, ChartRequest(mark="bar", x="region", y="postcode"))
+
+    assert chart.code == "y_not_numeric"
+
+
+def test_an_integer_still_charts_because_it_never_needed_rescuing() -> None:
+    """The shape WP11.1 demoed, and the reason this went unnoticed: `int` crosses
+    JSON untouched, so the one live proof in #82 was a `count(*)`."""
+    frame = _round_tripped(
+        [("2026-01", 3624), ("2026-02", 3311)], columns=("order_month", "order_count")
+    )
+
+    chart = decide(frame, ChartRequest(mark="line", x="order_month", y="order_count"))
+
+    assert chart.declined is None
+
+
+def test_a_result_stored_before_types_were_recorded_says_so() -> None:
+    """**B-087's rule, applied to a storage format.** An old artifact carries no
+    `column_types`, so the platform genuinely cannot tell money from a postcode.
+    Saying the column "does not hold numbers" would blame the customer's data for
+    something we lost."""
+    old = Frame(
+        columns=("month", "revenue"),
+        rows=(("2026-05", "145341.12"), ("2026-06", "123650.61")),
+        column_types=(),
+    )
+
+    chart = decide(old, ChartRequest(mark="line", x="month", y="revenue"))
+
+    assert chart.code == "types_not_recorded"
+    assert chart.declined is not None
+    assert "stored before" in chart.declined
+    assert "Ask the question again" in chart.declined
+
+
+def test_an_old_result_that_really_is_text_is_not_excused() -> None:
+    """The other half of the pair. Without this, every pre-B-103 result would
+    claim the platform's fault, including the ones that genuinely hold words."""
+    old = Frame(
+        columns=("region", "name"),
+        rows=(("north", "Alice"), ("south", "Bob")),
+        column_types=(),
+    )
+
+    chart = decide(old, ChartRequest(mark="bar", x="region", y="name"))
+
+    assert chart.code == "y_not_numeric"

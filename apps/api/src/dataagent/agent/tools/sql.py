@@ -29,6 +29,7 @@ from dataagent.agent.tools.base import Tool, ToolContext, ToolError
 from dataagent.catalog.browse import NoCatalogError
 from dataagent.connectors.base import ConnectorError
 from dataagent.dal import run as dal_run
+from dataagent.dal.artifacts import encodable
 from dataagent.dal.errors import PolicyViolation
 from dataagent.datasources.service import NotFoundError
 
@@ -113,7 +114,7 @@ async def _run_sql(context: ToolContext, params: BaseModel) -> BaseModel:
     return RunSqlOut(
         execution_id=str(execution.execution_id) if execution.execution_id else "",
         columns=list(frame.columns),
-        rows=[[_plain(value) for value in row] for row in frame.rows[:PREVIEW_ROWS]],
+        rows=[[encodable(value) for value in row] for row in frame.rows[:PREVIEW_ROWS]],
         row_count=execution.row_count,
         truncated=execution.truncated or len(frame.rows) > PREVIEW_ROWS,
         masked_columns=list(frame.masked_columns),
@@ -123,18 +124,6 @@ async def _run_sql(context: ToolContext, params: BaseModel) -> BaseModel:
         # or casing the model wrote (B-093).
         tables=[str(table) for table in execution.validated.tables],
     )
-
-
-def _plain(value: object) -> object:
-    """JSON-safe, and a string when in doubt.
-
-    Dates and decimals are the common case; the model reads them as text either
-    way, and a repr that pydantic cannot serialise would fail at the envelope
-    rather than here.
-    """
-    if value is None or isinstance(value, str | int | float | bool):
-        return value
-    return str(value)
 
 
 RUN_SQL = Tool(
