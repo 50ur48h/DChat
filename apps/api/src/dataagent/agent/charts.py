@@ -308,6 +308,24 @@ def axis_title(column: str) -> str:
     return " ".join([first, *rendered[1:]])
 
 
+def _plottable(value: object) -> object:
+    """One cell, as the spec may carry it (**B-103**).
+
+    A `Decimal` becomes a `float` **here and only here**. The spec is stored as
+    JSONB and then rendered by Vega in a browser, whose only number type is a
+    double — so precision beyond a double cannot be displayed however carefully
+    it is carried, and carrying it anyway costs a `TypeError` at the point of
+    storage rather than buying anything a reader could see.
+
+    This is not a retreat from the exactness the rest of the fix is about. The
+    **artifact** keeps the Decimal, so anything that computes on the result gets
+    every digit; only the picture is approximate, and a picture always was.
+    """
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
+
+
 def _spec(
     frame: Frame,
     request: ChartRequest,
@@ -346,7 +364,11 @@ def _spec(
         # so an address in it is a request that browser would make.
         "data": {
             "values": [
-                {name: row[index] for index, name in enumerate(frame.columns) if index < len(row)}
+                {
+                    name: _plottable(row[index])
+                    for index, name in enumerate(frame.columns)
+                    if index < len(row)
+                }
                 for row in frame.rows
             ]
         },
