@@ -18,9 +18,12 @@ prompts.
 
 ## Status
 
-**Phase 0 — bootstrap.** The repository is being built phase by phase against a
-written plan; there is no runnable application yet. Current position is always in
-[docs/plan/STATUS.md](docs/plan/STATUS.md).
+**Under construction, and runnable.** The repository is built phase by phase
+against a written plan; the quickstart below works end to end today — you can
+register a database, let it read the schema, ask a question and open the query
+behind the answer. Deployment to Azure is Phase 12 and is not done, so there is
+nothing hosted to visit: local is the only way to see it. Current position is
+always in [docs/plan/STATUS.md](docs/plan/STATUS.md).
 
 ## What is here
 
@@ -99,7 +102,9 @@ Create an organization when asked. You are its Admin.
 
 ### 4. Register the demo database
 
-Go to **Data sources → Add**, and enter:
+The organization you just created is listed under **Your organizations** with a
+**Members** button — that button is the way in. From there choose **Data
+sources**, and fill in the **Register a database** form at the bottom:
 
 | Field | Value |
 |---|---|
@@ -110,6 +115,8 @@ Go to **Data sources → Add**, and enter:
 | Database | `pizza` |
 | Username | `pizza_readonly` |
 | Password | the `SEED_PIZZA_READONLY_PASSWORD` from your `.env` |
+
+Leave **Encryption** blank, and press **Register**.
 
 **The host is `seed-pizza-pg`, not `localhost`.** The API reaches the database
 across the Docker network, where that is its name; `localhost:6543` in the table
@@ -134,7 +141,8 @@ inventing a schema.
 
 ### 6. Ask something
 
-**Conversations → Start**, pick `Pizza demo`, and ask:
+Press **Back** to the organization, then **Ask**. Pick `Pizza demo` in the
+**Database** list, press **Start**, open the new conversation, and ask:
 
 > show me the revenue trend by month
 
