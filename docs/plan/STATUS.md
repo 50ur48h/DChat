@@ -15,15 +15,16 @@ Current position: **Phases 0–5 and 7–11's first four items are done. Phase 6
                   the product by hand**, not by the suite — B-094, B-095, B-096,
                   B-097, B-098, and the two screen defects in B-088's web half.
                   Every one was invisible to a green build.
-Next step:        **Finish WP11.2b** on `p11.2b-smoke` (#87, draft). Four things
-                  remain: the **compose-based Playwright smoke**, its
-                  **`web-e2e` CI job**, the **manual test script**, and
-                  **STATUS/DECISIONS** for the scripted-provider decision — then
-                  the **gate walk** and sign-off. **The GATE box stays unticked
-                  until that walk happens.**
-                  What is already true: **B-103 is fixed and the gate's chart
-                  criterion has been met live** — real model, money column,
-                  chart drawn. That was the blocker.
+Next step:        **The owner's gate walk.** WP11.2b is built and #87 is ready
+                  for review: the **compose smoke**, its **`web-e2e` CI job**,
+                  the **manual test script** (in the PR body), **D-040** and
+                  **B-104** are all in. Nothing is left to build.
+                  What remains is the one thing that cannot be done for you —
+                  **walk the manual test script against a real model** and
+                  sign off. **The GATE box stays unticked until that happens**,
+                  and so does `[~]` on WP11.2b.
+                  Already true: **B-103 is fixed and the gate's chart criterion
+                  has been met live** — real model, money column, chart drawn.
                   **B-101** (small screens, catalog/members rounding) is
                   deliberately outside the gate, so no sign-off covers phones.
 Merge policy: ASK
@@ -33,15 +34,103 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 11.
-Last updated: 2026-08-20 by Claude Code (WP11.2b in draft — B-103 fixed and the chart criterion met live; the smoke, the CI job and the gate walk remain)
+Last updated: 2026-08-20 by Claude Code (WP11.2b built — smoke, `web-e2e`, D-040, B-104; the gate walk is the owner's and the GATE stays unticked)
 
 ---
 
-## WP11.2b so far — the record (2026-08-20, draft #87)
+## WP11.2b — the record (2026-08-20, #87)
 
 **Nothing here is a to-do list.** What is outstanding is the **Next step** field
-above. This exists because two of the findings below are not recoverable from the
-diff, and one of them is about how the work was done rather than what it changed.
+above. This exists because several of the findings below are not recoverable from
+the diff, and one of them is about how the work was done rather than what it
+changed.
+
+### The compose smoke, and what it is allowed to mean
+
+`apps/web/e2e-compose/smoke.spec.ts` drives the whole product in Chromium against
+a stack `ops/scripts/web_smoke.sh` brings up: sign in through the dev issuer,
+create the organization, register the seeded database, prove the credentials
+cannot write, discover and profile the schema, ask, read the answer card, open
+the query behind it, open the trace, reload. Everything in that chain is real
+except the model.
+
+**Two assertions carry the whole thing, and they pull in opposite directions.**
+One is `71798` in the evidence table — the seeded fixture's own order count,
+which nothing but a real query against a real database could produce, and the
+only line in the file no stub could satisfy. The other is the scripted model's
+exact sentence, which **only** the stub can satisfy: it is there so that a stack
+brought up with a real key fails loudly instead of quietly spending the owner's
+money and reporting a model's variability as a broken product.
+
+**Its own compose project, on its own ports** (`dataagent-smoke`, web 3200, api
+8200). Not politeness: a developer's stack holds the demo fixtures both README
+walks depended on, and `down` on the shared project would take them with it. The
+script exports `LLM_PROVIDERS=scripted` and blanks `OPENAI_API_KEY`,
+`ANTHROPIC_API_KEY` and `EMBEDDINGS_PROVIDER` — an exported variable beats
+`--env-file` in compose's interpolation order, so the owner's `.env`, which says
+`openai` and `entra` and carries a live key, cannot reach it. Blanking the
+embedder matters as much as the model: **discovery embeds catalog cards**, so a
+smoke that left it alone would bill for the schema it just read.
+
+**Measured, cold, on this machine: 3m06 end to end** — build, migrate, grant,
+seed 71,798 orders, walk, tear down. The walk itself is 11.7s; most of the rest
+is `next dev` compiling each route on its first request. A warm re-run is 4.6s.
+
+### Three failures while writing it, and only the third was mine to keep
+
+**`DEV_ISSUER_URL` is not a browser address.** Pointed at the published port, the
+walk signed in, rendered the profile screen, and then every authenticated call
+came back 401 `jwks_unavailable` — because that variable is both the `iss` the
+dev issuer stamps *and* where the API fetches its own JWKS, and it does that
+**from inside its container**, where the only port that exists is 8000. A failure
+that looks like a bad token and is a wrong port.
+
+**A page can be served long before it is running.** `next dev` compiles a route's
+client bundle on first request, so the server's HTML sits on screen with no React
+attached: `fill` landed in a DOM nothing was listening to, the click reached a
+button with no handler, hydration then reset the field, and the report read
+*"signing in does not work"* over a screenshot of an untouched form. The walk now
+waits for the app's own proof of life — the health widget reaching a verdict,
+which is also the first thing that must be true anyway.
+
+**And the third is a product defect: B-104.** Navigating by `page.goto` — a full
+load each time — the walk reached a conversations page rendering the **sign-in
+card** and waited thirty seconds for a heading that was never coming. `who`
+starts null and is restored by a round trip, and all nine screens read null as
+*signed out* rather than as *not known yet*. This is exactly the defect WP11.2a
+fixed once, for the conversations list that said *"Nothing yet"* while it was
+still loading — except this one does not say *you have nothing*, it says *you are
+nobody*, and then heals if you use the form. Filed, not fixed, on B-101's
+reasoning. The smoke now clicks through the product the way a person does, which
+is both more faithful and steadier.
+
+### The `web-e2e` job, and one test that was checking its own wording
+
+The job is path-filtered on `apps/web`, `apps/api`, `ops` and the workflow — it
+is the one job that would notice the two halves disagreeing. Steps are gated, not
+the job (**D-007**), so the check always reports. The script prints the api and
+web logs itself when the walk fails, **before** the teardown: a workflow step
+could not, because by then there would be nothing left to ask.
+
+Writing it turned up that `test_it_answers_every_role_the_loop_asks_of_it`
+asserts on the scripted provider's own strings — `'"done": true' in reflect.text`
+— which is a check on this module's wording, not on the contract. It would pass
+unchanged while `Plan` gained a required field and every smoke run died in
+`structured.py`. There is now a test that **parses each reply with the model the
+loop actually passes as `schema=`**, imported from `agent/` on purpose: the
+contract is with those four classes, and a copy of the shape restated in the test
+would be free to agree with nothing.
+
+### Two more quickstart defects, from walking it once more
+
+Both in prose, both invisible to a reader who already knows the product. The
+**Status** section still said *"Phase 0 — bootstrap… there is no runnable
+application yet"* directly above a quickstart that works — a non-developer
+reading top to bottom would stop there. And step 4 said **"Data sources → Add"**;
+there is no Add, and there is no visible route to data sources at all until you
+know that the **Members** button is how you enter an organization. That is the
+third and fourth defect of the same family this work package has found, after the
+"Discover" button and the omitted **Test connection**.
 
 ### B-103 — the blocker, cleared
 
@@ -2511,7 +2600,7 @@ unexplained.
       exactly the same executions are one claim, whatever words they use — which
       is the rule `mark_cited` already followed one line below. Fixed in this
       WP, with a test that fails against the old guard
-- [ ] **B-095 (P1)** a run whose every query *failed* carries no limitation, and
+- [x] **B-095 (P1)** a run whose every query *failed* carries no limitation, and
       the answer calls the failure an empty result — *“no data was returned”*
       with `limitations: []`, while both executions had ended in a connector
       error. A reader is told their data is empty when nothing was asked of it.
@@ -2526,10 +2615,31 @@ unexplained.
       a model told "you are drawing a chart, do not list the numbers" can end up
       beside a refusal, leaving the reader neither. It becomes structural only
       if the prose should *refer* to the picture
-- [ ] B-098 (P3) chart axes are labelled with raw column names. Small, WP11.2's
+- [x] B-098 (P3) chart axes are labelled with raw column names. Small, WP11.2's
       polish pass; the axis title is one field on a spec the server already
-      assembles
-- [ ] WP11.2 History/catalog/members polish + Playwright smoke      ← gate PR
+      assembles — done in WP11.2a as a de-snake-casing and **deliberately not a
+      dictionary**: expanding `qty` or deciding `dt` means date would be the
+      platform inventing meaning it does not have
+- [x] WP11.2a History/catalog/members polish + B-017 + B-100 + B-098 (#86)
+      — conversation history with rename and **archive** (**D-039**, revision
+      0026: a button that says delete and hides instead is a lie to the person
+      clicking it); **B-017**'s recovery grant, which adds no new privilege
+      because the organization creates its own way back; **B-100**'s method line
+      surfaced rather than deleted (revision 0025). **B-101** carries out what is
+      not here — the small-screen pass and the catalog/members rounding
+- [~] WP11.2b Compose Playwright smoke + README quickstart          ← gate PR
+      — **built, not signed off.** `apps/web/e2e-compose/` drives the whole
+      product in Chromium against a real compose stack — sign in, register the
+      seeded database, prove it read-only, discover and profile the schema, ask,
+      read the answer card, open the query behind it, open the trace, and reload
+      to prove none of it was held in the page. The `web-e2e` CI job runs it
+      path-filtered. The model is a **stub in the shipped image** selected by
+      environment and refused twice outside CI (**D-040**). **B-103** is fixed
+      and the chart criterion has been met live. What remains is the owner's
+      walk, and the GATE line below stays unticked until it happens
+- [ ] ~~WP11.2 History/catalog/members polish + Playwright smoke~~ *(split into
+      11.2a and 11.2b on 2026-08-20 — seven workstreams in one gate PR is a diff
+      nobody can review properly)*
       — carries **B-017**: recovery when an org has no Admin who can sign in
       (owner's call 2026-08-12, moved forward from Phase 12)
       — and **B-061** with **B-020**: internal identifiers and the wrong
