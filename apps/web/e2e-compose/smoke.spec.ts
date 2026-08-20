@@ -229,6 +229,33 @@ test("the stack answers a question asked in a browser", async ({ page }) => {
     await expect(page.getByText("query_executed")).toHaveCount(0);
   });
 
+  await test.step("the first answer keeps its evidence when a second is asked", async () => {
+    /**
+     * **The gate walk's defect, in the place it was found** (**B-106**). The
+     * screen held one run and rendered one card, so a second question took the
+     * previous answer's chart, method line, limitations, findings, evidence
+     * controls and trace off the page — every one of them a durable row with no
+     * route back. A chart that survives only until the next message does not
+     * meet *"the trend question renders a chart"*.
+     *
+     * Asserted on the **count**, because presence passed against the broken
+     * screen: the newest answer always had its card.
+     */
+    await page.getByLabel("Ask a question").fill("and how many were cancelled?");
+    await page.getByRole("button", { name: "Send" }).click();
+
+    await expect(page.getByText(SCRIPTED_ANSWER)).toHaveCount(2, { timeout: 120_000 });
+    // **`Show|Hide`, not `Show`.** The step above opened the first answer's
+    // evidence and its trace, so those two controls now read *Hide*. Matching
+    // only "Show" counted one of two and reported the product as broken when it
+    // was not — which is the failure mode a smoke can least afford, because the
+    // next person to see it red will believe it.
+    await expect(page.getByRole("button", { name: /the query behind this/ })).toHaveCount(2, {
+      timeout: 60_000,
+    });
+    await expect(page.getByRole("button", { name: /how this was worked out/ })).toHaveCount(2);
+  });
+
   await test.step("a reload replays all of it from durable rows", async () => {
     // M8's criterion, and the cheapest possible check that the run was *stored*
     // rather than held in the page: none of the above is allowed to have been a
@@ -255,6 +282,9 @@ test("the stack answers a question asked in a browser", async ({ page }) => {
       });
     }).toPass({ timeout: 120_000 });
 
-    await expect(page.getByText(SCRIPTED_ANSWER)).toBeVisible({ timeout: 30_000 });
+    // **Both** answers, and both sets of evidence: a reload rebuilds the whole
+    // thread from durable rows, not just the last thing said.
+    await expect(page.getByText(SCRIPTED_ANSWER)).toHaveCount(2, { timeout: 30_000 });
+    await expect(page.getByRole("button", { name: /the query behind this/ })).toHaveCount(2);
   });
 });

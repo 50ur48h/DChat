@@ -123,6 +123,13 @@ function routeFetch(overrides: Partial<Record<string, unknown>> = {}) {
         return Promise.resolve(json({ run_id: "r1", events: [], last_seq: 0 }));
       }
       if (url.includes("/runs/")) return Promise.resolve(json(overrides.run ?? ANSWERED));
+      // The thread's runs (**B-106**). Defaults to the same run the messages
+      // name, so a test that says nothing about it gets a thread whose answer
+      // renders as its card — which is what the screen does now.
+      if (url.endsWith("/runs")) {
+        if ("runs" in overrides) return Promise.resolve(json(overrides.runs));
+        return Promise.resolve(json([overrides.run ?? ANSWERED]));
+      }
       if (url.includes("/messages")) {
         if (init.method === "POST") {
           return Promise.resolve(
@@ -336,6 +343,12 @@ describe("<ConversationThread />", () => {
     render(<ConversationThread orgId="o1" conversationId="c1" />);
     await screen.findByText("6,214 orders were placed in July 2026.");
 
+    // Let the opening fetches land before counting. Since **B-106** the answer
+    // renders from the thread's own runs, which can resolve before the live
+    // run's fetch does — so the text appearing no longer means every opening
+    // request is in. The property is that nothing *keeps* asking, and this is
+    // the honest way to snapshot it.
+    await new Promise((resolve) => setTimeout(resolve, POLL_QUIET_MS));
     const settled = calls.filter((call) => call.url.includes("/runs/")).length;
     await new Promise((resolve) => setTimeout(resolve, POLL_QUIET_MS));
 
@@ -582,5 +595,137 @@ describe("which findings are evidence", () => {
 
     expect(await screen.findByText(/6,214 orders/)).toBeInTheDocument();
     expect(screen.queryByText(/no definition matched/)).not.toBeInTheDocument();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// An answer keeps its evidence when the next question is asked (B-106)
+// ---------------------------------------------------------------------------
+
+/** The chart the first answer carries. Its own copy, because the one in the
+ *  chart suite is scoped to that describe and this is a different property. */
+const FIRST_CHART = {
+  $schema: "https://vega.github.io/schema/vega-lite/v5.json",
+  mark: "bar",
+  encoding: {
+    x: { field: "month", type: "temporal", timeUnit: "yearmonth" },
+    y: { field: "revenue", type: "quantitative" },
+  },
+  data: { values: [{ month: "2026-07-01", revenue: 6214 }] },
+};
+
+/** A second turn in the same thread, so there is an older answer to lose. */
+const TWO_TURNS = [
+  MESSAGES[0],
+  MESSAGES[1],
+  {
+    id: "m3",
+    role: "user",
+    content: "and in August?",
+    run_id: "r2",
+    created_at: "2026-08-15T09:01:00Z",
+  },
+  {
+    id: "m4",
+    role: "assistant",
+    content: "5,004 orders were placed in August 2026.",
+    run_id: "r2",
+    created_at: "2026-08-15T09:01:20Z",
+  },
+];
+
+/** After a second question, the conversation's last run is the second one — so
+ *  the live run the screen watches is r2 and r1 comes from the thread's list.
+ *  Getting this wrong made the first version of these tests assert against a
+ *  fixture that contradicted itself. */
+const AFTER_TWO = { ...CONVERSATION, last_run_id: "r2", message_count: 4 };
+
+const SECOND_RUN = {
+  ...ANSWERED,
+  id: "r2",
+  question: "and in August?",
+  answer: "5,004 orders were placed in August 2026.",
+  findings: [
+    { id: "f2", statement: "5,004 orders were placed in August 2026.", support: ["x1"], confidence: "high" },
+  ],
+};
+
+describe("an answer keeps its evidence when the next question is asked (B-106)", () => {
+  beforeEach(() => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://api.test");
+  });
+
+  it("draws the first answer's chart after a second question has been answered", async () => {
+    /**
+     * **The gate walk's defect.** The screen held one run and rendered one card,
+     * so asking again took the previous answer's chart off the page — along with
+     * its method line, its limitations, its findings, its evidence controls and
+     * its trace. Every one of those is a durable row; none of them had a route.
+     *
+     * A chart that survives only until the next message does not meet "the
+     * trend question renders a chart", which is why this blocked the phase gate
+     * rather than waiting for Phase 12.
+     */
+    routeFetch({
+      conversation: AFTER_TWO,
+      run: SECOND_RUN,
+      messages: TWO_TURNS,
+      runs: [{ ...ANSWERED, chart: { spec: FIRST_CHART } }, SECOND_RUN],
+    });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    // Both answers are on the screen...
+    expect(await screen.findByText("6,214 orders were placed in July 2026.")).toBeInTheDocument();
+    expect(screen.getByText("5,004 orders were placed in August 2026.")).toBeInTheDocument();
+    // ...and the older one still has its picture.
+    expect(await screen.findByTestId("chart")).toBeInTheDocument();
+  });
+
+  it("keeps the evidence control on every answer, not just the newest", async () => {
+    routeFetch({ conversation: AFTER_TWO, run: SECOND_RUN, messages: TWO_TURNS, runs: [ANSWERED, SECOND_RUN] });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    // One per answer. Anchored on the count rather than on presence, because
+    // presence passed against the broken screen — the newest answer always had
+    // one.
+    expect(
+      await screen.findAllByRole("button", { name: /Show the query behind this/ }),
+    ).toHaveLength(2);
+  });
+
+  it("asks for the thread's runs once, not once per answer", async () => {
+    /** A screen whose cost grows with how much somebody has used it is one that
+     *  gets slower the more they like it. */
+    const calls = routeFetch({ conversation: AFTER_TWO, run: SECOND_RUN, messages: TWO_TURNS, runs: [ANSWERED, SECOND_RUN] });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+    expect(await screen.findByText("5,004 orders were placed in August 2026.")).toBeInTheDocument();
+
+    expect(calls.filter((call) => call.url.endsWith("/runs")).length).toBe(1);
+  });
+
+  it("falls back to the words when a run could not be fetched", async () => {
+    /** The answer is what the reader came for. Losing it because a second
+     *  request failed would be a worse trade than losing the picture. */
+    routeFetch({ conversation: AFTER_TWO, run: SECOND_RUN, messages: TWO_TURNS, runs: [SECOND_RUN] });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    expect(await screen.findByText("6,214 orders were placed in July 2026.")).toBeInTheDocument();
+  });
+
+  it("shows an answer once, not once in a bubble and once in a card", async () => {
+    /** The Phase 7 rule, and the reason `replied` used to exist. With the card
+     *  as the turn there is one rendering of an answer and nothing to keep in
+     *  step. */
+    routeFetch({ conversation: AFTER_TWO, run: SECOND_RUN, messages: TWO_TURNS, runs: [ANSWERED, SECOND_RUN] });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    expect(await screen.findByText("6,214 orders were placed in July 2026.")).toBeInTheDocument();
+    expect(screen.getAllByText("6,214 orders were placed in July 2026.")).toHaveLength(1);
   });
 });

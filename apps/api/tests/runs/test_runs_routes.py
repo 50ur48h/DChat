@@ -291,6 +291,10 @@ async def test_a_colleague_cannot_read_your_conversation_even_knowing_its_id(api
     for path in (
         f"/v1/orgs/{org_id}/conversations/{conversation_id}",
         f"/v1/orgs/{org_id}/conversations/{conversation_id}/messages",
+        # **B-106's route belongs in this list, not beside it.** A thread's runs
+        # are the answers in it: a new way to read a conversation is a new way to
+        # read somebody's questions and every number they were given.
+        f"/v1/orgs/{org_id}/conversations/{conversation_id}/runs",
         f"/v1/orgs/{org_id}/runs/{run_id}",
         f"/v1/orgs/{org_id}/runs/{run_id}/events",
     ):
@@ -445,3 +449,83 @@ async def test_the_routes_need_a_token(api: Api) -> None:
     status, _ = await api.call("GET", f"/v1/orgs/{org_id}/conversations", "")
 
     assert status == 401
+
+
+# ---------------------------------------------------------------------------
+# Every run in a thread (B-106)
+# ---------------------------------------------------------------------------
+
+
+async def test_a_thread_lists_its_runs_oldest_first(api: Api) -> None:
+    """The route the screen reads to render a card per answer (**B-106**).
+
+    Oldest first, and the thread's own order: a screen that has to sort answers
+    by guessing is one that will eventually sort them wrong.
+    """
+    org_id = await _org(api)
+    conversation_id, first = await _ask(api, org_id)
+
+    _, second = await api.call(
+        "POST",
+        f"/v1/orgs/{org_id}/conversations/{conversation_id}/messages",
+        "alice",
+        {"content": "and in August?", "idempotency_key": "send-2"},
+    )
+
+    status, runs = await api.call(
+        "GET", f"/v1/orgs/{org_id}/conversations/{conversation_id}/runs", "alice"
+    )
+
+    assert status == 200
+    assert [run["id"] for run in runs] == [first, second["run_id"]]
+
+
+async def test_a_listed_run_is_the_same_shape_the_single_route_returns(api: Api) -> None:
+    """**One field added to one route and not the other** would make an answer
+    look different depending on which request fetched it — and the thread is
+    exactly where a reader compares two answers side by side. Both routes build
+    their payload from one function, and this is what holds that true."""
+    org_id = await _org(api)
+    conversation_id, run_id = await _ask(api, org_id)
+
+    _, listed = await api.call(
+        "GET", f"/v1/orgs/{org_id}/conversations/{conversation_id}/runs", "alice"
+    )
+    _, single = await api.call("GET", f"/v1/orgs/{org_id}/runs/{run_id}", "alice")
+
+    # Fields, not values. A run is being executed while this test reads it, so
+    # `status` legitimately differs between two requests a moment apart — and
+    # asserting on values here would be a flake that says nothing about shape.
+    assert len(listed) == 1
+    assert sorted(listed[0]) == sorted(single)
+    assert listed[0]["id"] == single["id"]
+
+
+async def test_a_thread_does_not_list_another_thread_s_runs(api: Api) -> None:
+    org_id = await _org(api)
+    mine, my_run = await _ask(api, org_id)
+
+    status, other = await api.call(
+        "POST", f"/v1/orgs/{org_id}/conversations", "alice", {"title": "Something else"}
+    )
+    assert status == 201
+    await api.call(
+        "POST",
+        f"/v1/orgs/{org_id}/conversations/{other['id']}/messages",
+        "alice",
+        {"content": "unrelated", "idempotency_key": "send-other"},
+    )
+
+    _, runs = await api.call("GET", f"/v1/orgs/{org_id}/conversations/{mine}/runs", "alice")
+
+    assert [run["id"] for run in runs] == [my_run]
+
+
+async def test_the_runs_of_a_conversation_that_does_not_exist_are_not_found(api: Api) -> None:
+    org_id = await _org(api)
+
+    status, _ = await api.call(
+        "GET", f"/v1/orgs/{org_id}/conversations/{uuid.uuid4()}/runs", "alice"
+    )
+
+    assert status == 404
