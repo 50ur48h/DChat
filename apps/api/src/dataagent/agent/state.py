@@ -41,6 +41,7 @@ require parsing a research state to answer.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -51,6 +52,7 @@ __all__ = [
     "ResearchState",
     "StateFinding",
     "Step",
+    "merge_by_evidence",
 ]
 
 #: Where the loop is. Named after 4.4's state diagram so the trace, the code and
@@ -111,6 +113,67 @@ class StateFinding(BaseModel):
     statement: str
     support: list[str] = Field(default_factory=list[str])
     confidence: str = "medium"
+
+
+#: Weakest first. A merged claim is only as strong as its least certain part.
+_CONFIDENCE_ORDER = ("low", "medium", "high")
+
+
+def merge_by_evidence(findings: Sequence[StateFinding]) -> list[StateFinding]:
+    """Findings from one reflection resting on the same executions, as one claim.
+
+    **The rule is B-107's; this is the half that keeps the better sentence.**
+    Keying on the citation set and dropping the loser is what the owner asked to
+    be checked before it was built, and checking it is what showed it choosing
+    badly: the run that prompted this recorded *"Monthly revenue for the last
+    four completed calendar months was $135,950.59 in April 2026, …"* and
+    *"Revenue peaked in May 2026 and then declined in both June and July"* — in
+    that order, from **one** reflection. First-wins keeps the enumeration and
+    discards the shape, which is the worse of the two by the codebase's own
+    reckoning: **B-097** says that when a chart is drawn the prose should give the
+    shape and let the picture carry the detail. Last-wins would keep the right one
+    here and the wrong one whenever a model happened to emit them the other way
+    round. A rule keyed on evidence has no basis for preferring either sentence,
+    so it should not be made to try.
+
+    So they are joined. One claim, one citation, one confidence badge — which is
+    the defect that was actually visible, two badges and two *"show the query"*
+    controls over a single query — and nothing a model wrote is thrown away.
+
+    **Before anything is persisted, and never after.** A finding row and its
+    `finding_added` event are written together, so a merge that happened later
+    would need to rewrite a row whose event already said something else. Merging
+    the candidates from one reflection needs no such path: what reaches
+    `add_finding` is already one claim per set of evidence.
+
+    Uncited findings are never merged. They share the empty set with each other,
+    and evidence is the only thing this function knows how to compare.
+    """
+    merged: list[StateFinding] = []
+    at: dict[tuple[str, ...], int] = {}
+    for finding in findings:
+        key = tuple(sorted(finding.support))
+        if not key or key not in at:
+            if key:
+                at[key] = len(merged)
+            merged.append(finding)
+            continue
+        held = merged[at[key]]
+        statement = held.statement.rstrip()
+        if not statement.endswith((".", "!", "?", ":", ";")):
+            statement += "."
+        merged[at[key]] = held.model_copy(
+            update={
+                "statement": f"{statement} {finding.statement.lstrip()}",
+                "confidence": min(
+                    (held.confidence, finding.confidence),
+                    key=lambda word: (
+                        _CONFIDENCE_ORDER.index(word) if word in _CONFIDENCE_ORDER else 1
+                    ),
+                ),
+            }
+        )
+    return merged
 
 
 class Hypothesis(BaseModel):
@@ -264,6 +327,23 @@ class ResearchState(BaseModel):
         progress rule counts. A finding whose every citation was invented is
         **not** kept: it would look like evidence, and 4.2 makes the support
         list the reason anyone should believe the answer.
+
+        **Two claims resting on exactly the same executions are one claim,
+        whatever words they use** (**B-107**). That is the Phase 7 rule, and
+        B-096 put it into `runner._write_ending` — where it stopped, because the
+        composer was the layer that had been caught. This is the other place a
+        finding is recorded, and it was still comparing characters: a model that
+        reflected twice on one query in different words kept both. The rule has
+        no exception for which layer wrote the sentence.
+
+        **Only for findings that cite something.** An uncited finding shares the
+        empty set with every other uncited finding, so keying on evidence there
+        would collapse every unsupported sentence in the run into the first one —
+        a rule about evidence, applied where there is none.
+
+        Findings that arrive *together*, from one reflection, are merged rather
+        than dropped: see `merge_by_evidence`, which the loop applies before
+        anything reaches here.
         """
         real = [item for item in finding.support if item in self.execution_ids()]
         if finding.support and not real:
@@ -273,6 +353,11 @@ class ResearchState(BaseModel):
         ):
             # The same sentence twice is not progress, and would let a model
             # keep the loop alive by repeating itself.
+            return False
+        if real and any(sorted(existing.support) == sorted(real) for existing in self.findings):
+            # Restated on evidence this run has already concluded from. The
+            # earlier finding stands, and the iteration counts as barren —
+            # which is the honest reading: nothing new was asked of the data.
             return False
         self.findings.append(finding.model_copy(update={"support": real}))
         return True

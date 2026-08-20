@@ -11,7 +11,14 @@ from __future__ import annotations
 
 import uuid
 
-from dataagent.agent.state import ExecutionRef, Hypothesis, ResearchState, StateFinding, Step
+from dataagent.agent.state import (
+    ExecutionRef,
+    Hypothesis,
+    ResearchState,
+    StateFinding,
+    Step,
+    merge_by_evidence,
+)
 
 ORG = uuid.UUID("11111111-1111-1111-1111-111111111111")
 RUN = uuid.UUID("22222222-2222-2222-2222-222222222222")
@@ -161,3 +168,140 @@ def test_rows_are_never_carried_in_the_state() -> None:
     assert "rows" not in fields
     assert "sample_rows" not in fields
     assert {"execution_id", "summary", "row_count"} <= fields
+
+
+# ---------------------------------------------------------------------------
+# One claim per set of evidence (B-107)
+# ---------------------------------------------------------------------------
+
+#: The two sentences one reflection recorded about one query, in the order the
+#: model emitted them, on the run that produced this rule.
+_ENUMERATION = (
+    "Monthly revenue for the last four completed calendar months was $135,950.59 in "
+    "April 2026, $145,341.12 in May, $123,650.61 in June, and $122,712.33 in July."
+)
+_SHAPE = "Revenue peaked in May 2026 and then declined in both June and July."
+
+
+def test_two_sentences_about_one_query_become_one_claim() -> None:
+    """**The visible defect**: two confidence badges and two "show the query"
+    controls over a single execution. B-096 fixed that between the loop and the
+    composer and stopped there; this is the other place a finding is recorded."""
+    merged = merge_by_evidence(
+        [
+            StateFinding(statement=_ENUMERATION, support=["x1"], confidence="high"),
+            StateFinding(statement=_SHAPE, support=["x1"], confidence="high"),
+        ]
+    )
+
+    assert len(merged) == 1
+    assert merged[0].support == ["x1"]
+
+
+def test_the_merge_keeps_both_sentences_rather_than_choosing() -> None:
+    """**Why this joins instead of dropping.** Keyed on evidence and keeping the
+    first, the rule would keep the enumeration and discard the shape — the worse
+    of the two by B-097's own reckoning, which says the prose should give the
+    shape and let a chart carry the detail. Keeping the *last* would be right
+    here and wrong the moment a model emitted them the other way round. Evidence
+    cannot rank two sentences, so it is not asked to."""
+    merged = merge_by_evidence(
+        [
+            StateFinding(statement=_ENUMERATION, support=["x1"]),
+            StateFinding(statement=_SHAPE, support=["x1"]),
+        ]
+    )
+
+    assert _ENUMERATION in merged[0].statement
+    assert _SHAPE in merged[0].statement
+
+
+def test_a_merged_claim_is_as_strong_as_its_weakest_part() -> None:
+    merged = merge_by_evidence(
+        [
+            StateFinding(statement="A.", support=["x1"], confidence="high"),
+            StateFinding(statement="B.", support=["x1"], confidence="low"),
+        ]
+    )
+
+    assert merged[0].confidence == "low"
+
+
+def test_findings_on_different_evidence_are_different_claims() -> None:
+    merged = merge_by_evidence(
+        [
+            StateFinding(statement="A.", support=["x1"]),
+            StateFinding(statement="B.", support=["x2"]),
+            # A synthesis over more evidence is nobody else's claim.
+            StateFinding(statement="C.", support=["x1", "x2"]),
+        ]
+    )
+
+    assert len(merged) == 3
+
+
+def test_uncited_findings_are_never_merged_into_each_other() -> None:
+    """They share the empty set with every other uncited finding, so keying on
+    evidence here would collapse every unsupported sentence in a run into the
+    first one — a rule about evidence, applied where there is none."""
+    merged = merge_by_evidence(
+        [
+            StateFinding(statement="No linking table exists.", support=[]),
+            StateFinding(statement="The catalog has six tables.", support=[]),
+        ]
+    )
+
+    assert len(merged) == 2
+
+
+def test_the_order_of_the_citations_does_not_make_a_second_claim() -> None:
+    merged = merge_by_evidence(
+        [
+            StateFinding(statement="A.", support=["x1", "x2"]),
+            StateFinding(statement="B.", support=["x2", "x1"]),
+        ]
+    )
+
+    assert len(merged) == 1
+
+
+def test_a_later_reflection_restating_on_the_same_evidence_is_not_progress() -> None:
+    """The cross-iteration half, where merging is not available: a finding row
+    and its `finding_added` event are written together, so a merge after the
+    fact would have to rewrite a row whose event already said something else.
+    The earlier finding stands, and the iteration counts as barren — which is
+    the honest reading, since nothing new was asked of the data."""
+    state = _state()
+    _ran(state, "x1", "abc")
+
+    assert state.add_finding(StateFinding(statement="3,718 orders in July.", support=["x1"]))
+    assert not state.add_finding(
+        StateFinding(statement="July saw three thousand orders.", support=["x1"])
+    )
+    assert len(state.findings) == 1
+
+
+def test_a_finding_over_more_evidence_is_a_new_claim() -> None:
+    """Equality of the citation set, never overlap: an answer that synthesises
+    two findings has a union nobody else cites, and `_write_ending` says so in as
+    many words. A rule keyed on overlap would silence exactly the claims worth
+    making."""
+    state = _state()
+    _ran(state, "x1", "a")
+    _ran(state, "x2", "b")
+
+    assert state.add_finding(StateFinding(statement="April was highest.", support=["x1"]))
+    assert state.add_finding(
+        StateFinding(statement="April beat every store.", support=["x1", "x2"])
+    )
+    assert len(state.findings) == 2
+
+
+def test_uncited_findings_still_accumulate_across_reflections() -> None:
+    """The guard above must not fire on the empty set, or the second observation
+    a run makes without a query behind it would silently vanish."""
+    state = _state()
+
+    assert state.add_finding(StateFinding(statement="No linking table exists.", support=[]))
+    assert state.add_finding(StateFinding(statement="The catalog has six tables.", support=[]))
+    assert len(state.findings) == 2
