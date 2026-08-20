@@ -200,7 +200,7 @@ lint.seed: ## ruff check the seed scripts
 # ---------------------------------------------------------------------------
 # apps/web
 # ---------------------------------------------------------------------------
-.PHONY: install.web lint.web typecheck.web test.web test.web.e2e web.dev build.web
+.PHONY: install.web lint.web typecheck.web test.web test.web.e2e test.web.smoke web.dev build.web
 install.web: ## Install web dependencies from the lockfile
 	$(PNPM_WEB) install --frozen-lockfile
 
@@ -215,6 +215,9 @@ test.web: ## vitest
 
 test.web.e2e: ## Playwright: the chat screen in a real browser, against a stub API
 	$(PNPM_WEB) test:e2e
+
+test.web.smoke: .env ## Playwright: the whole product in a browser, on its own compose stack
+	$(SHELL) ops/scripts/web_smoke.sh $(ARGS)
 
 web.dev: ## next dev on :3000
 	$(PNPM_WEB) dev

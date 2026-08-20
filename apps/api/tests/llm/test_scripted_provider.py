@@ -20,6 +20,10 @@ import uuid
 
 import pytest
 
+from dataagent.agent.critic import CriticOut
+from dataagent.agent.loop import Reflection
+from dataagent.agent.planner import Plan
+from dataagent.agent.runner import FinalizeIn
 from dataagent.config import Settings
 from dataagent.llm import registry
 from dataagent.llm.base import LLMRequest, Message, Tags
@@ -169,3 +173,37 @@ async def test_it_reports_no_usage_rather_than_inventing_a_price() -> None:
     completion = await ScriptedProvider().complete(_request("compose"))
 
     assert completion.usage.total_tokens == 0
+
+
+async def test_every_scripted_reply_satisfies_the_schema_the_loop_asks_with() -> None:
+    """**Against the real schemas, not against the strings.**
+
+    The test above asserts that each role's reply *contains* what it should,
+    which is a check on this module's own wording — it would pass unchanged
+    while `Plan` gained a required field and every smoke run died in
+    `structured.py` with a validation error. That is the failure this file exists
+    to prevent, one layer along: a stub whose replies the product cannot parse
+    turns a real defect somewhere else into a red smoke nobody trusts.
+
+    So the assertion is the parse itself, against the four models the loop
+    actually passes as `schema=`. Imported from `agent/` deliberately, even
+    though this is an `llm/` test: the contract is not with a JSON shape, it is
+    with those classes, and a test that restated the shape here would be a second
+    copy free to agree with nothing.
+    """
+    provider = ScriptedProvider()
+    execution_id = str(uuid.uuid4())
+
+    plan = Plan.model_validate_json((await provider.complete(_request("sql"))).text)
+    reflection = Reflection.model_validate_json((await provider.complete(_request("plan"))).text)
+    verdict = CriticOut.model_validate_json((await provider.complete(_request("critic"))).text)
+    final = FinalizeIn.model_validate_json(
+        (await provider.complete(_request("compose", prompt=f"- {execution_id}: 1 row"))).text
+    )
+
+    assert plan.sql == SCRIPTED_SQL
+    # One iteration, or the smoke spends its time on a search it is not testing.
+    assert reflection.done is True
+    assert verdict.verdict == "pass"
+    # Cited, so the answer arrives with evidence attached rather than bare.
+    assert final.supported_by == [execution_id]

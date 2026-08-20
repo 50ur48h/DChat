@@ -17,29 +17,11 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-# **Read three values; do not source the file.** This used to be
-# `set -a; . ./.env; set +a`, which exports every key — and a shell assignment
-# removes quotes, so `LLM_ROLE_MAP={"compose":"small"}` arrived in the
-# environment as `{compose:small}`. Environment beats dotenv in pydantic's
-# settings order, so the mangled value won over the correct one in the file and
-# `alembic upgrade head` died parsing it. That made **step 2 of the README
-# quickstart fail from a clean state**, on any machine whose .env came from
-# .env.example — which ships all three JSON keys uncommented (WP11.2b).
-#
-# Taking only what this script uses fixes the class rather than the instance: no
-# future JSON-valued key can break a migration by being present, and the Python
-# that follows reads .env itself, where a JSON parser handles it correctly.
-env_value() {
-  # Last assignment wins, as a shell would. The value is taken verbatim except
-  # for one pair of matching surrounding quotes, which a person may reasonably
-  # have written around a password containing spaces.
-  value=$(sed -n "s/^$1=//p" .env | tail -n 1)
-  case $value in
-  \"*\") value=${value#\"}; value=${value%\"} ;;
-  '*') value=${value#'}; value=${value%'} ;;
-  esac
-  printf '%s' "$value"
-}
+# **Read three values; do not source the file** (**B-102**). The reasoning, and
+# the reader that carries it, live in env_file.sh — shared with web_smoke.sh,
+# which needs the same values for the same reason. Two hand-rolled copies is how
+# the two would drift, and the drifted one would be whichever nobody was running.
+. "$(dirname "$0")/env_file.sh"
 
 PLATFORM_DB_USER=$(env_value PLATFORM_DB_USER)
 PLATFORM_DB_NAME=$(env_value PLATFORM_DB_NAME)
