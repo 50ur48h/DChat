@@ -345,6 +345,40 @@ async def test_the_answer_is_the_assistants_reply_and_the_trace_says_when_it_arr
     assert await _types(tenant, asked.run_id) == ["run_started", "answer_composed"]
 
 
+async def test_the_answer_carries_the_method_that_reached_it(tenant: Tenant) -> None:
+    """**B-100.** Architecture 4.2 makes an answer four things, and until this
+    column the method was the one built on every run and stored on none — so the
+    single line written for a reader who will not open the SQL was the one that
+    never reached them."""
+    asked = await _ask(tenant)
+    await service.transition(org_id=tenant.org_id, run_id=asked.run_id, status="running")
+
+    await service.record_answer(
+        org_id=tenant.org_id,
+        run_id=asked.run_id,
+        content="1,204 orders were placed in July 2026.",
+        method="1 query over one step, against orders.",
+    )
+
+    run = await service.get_run(org_id=tenant.org_id, run_id=asked.run_id)
+    assert run.method == "1 query over one step, against orders."
+
+
+async def test_an_answer_that_says_nothing_about_its_method_stores_nothing(
+    tenant: Tenant,
+) -> None:
+    """Empty rather than a sentence nobody wrote. A refusal composed before this
+    column existed has no method, and inventing one would be the platform
+    asserting something it cannot know."""
+    asked = await _ask(tenant)
+    await service.record_answer(
+        org_id=tenant.org_id, run_id=asked.run_id, content="I could not answer that."
+    )
+
+    run = await service.get_run(org_id=tenant.org_id, run_id=asked.run_id)
+    assert run.method == ""
+
+
 async def test_a_finding_carries_the_executions_that_back_it_up(tenant: Tenant) -> None:
     """The citation trail the M7 gate is about: a claim walks back to its SQL."""
     asked = await _ask(tenant)

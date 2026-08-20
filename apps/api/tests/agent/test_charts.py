@@ -21,6 +21,7 @@ from dataagent.agent.charts import (
     Chart,
     ChartRequest,
     Frame,
+    axis_title,
     decide,
 )
 
@@ -46,8 +47,8 @@ def test_a_category_and_a_number_make_a_bar_chart() -> None:
     assert chart.spec["mark"] == "bar"
     encoding = chart.spec["encoding"]
     assert isinstance(encoding, dict)
-    assert encoding["x"] == {"field": "label", "type": "nominal"}
-    assert encoding["y"] == {"field": "amount", "type": "quantitative"}
+    assert encoding["x"] == {"field": "label", "type": "nominal", "title": "Label"}
+    assert encoding["y"] == {"field": "amount", "type": "quantitative", "title": "Amount"}
 
 
 def test_values_travel_inline_and_no_url_can_appear_in_a_spec() -> None:
@@ -79,7 +80,7 @@ def test_a_date_column_gets_a_time_axis() -> None:
     assert chart.spec is not None
     encoding = chart.spec["encoding"]
     assert isinstance(encoding, dict)
-    assert encoding["x"] == {"field": "day", "type": "temporal"}
+    assert encoding["x"] == {"field": "day", "type": "temporal", "title": "Day"}
 
 
 # ---------------------------------------------------------------------------
@@ -216,3 +217,50 @@ def test_the_invariant_is_enforced_by_the_type_itself() -> None:
         Chart()
     with pytest.raises(ValueError, match="exactly one"):
         Chart(spec={"mark": "bar"}, declined="No chart was drawn: …")
+
+
+# ---------------------------------------------------------------------------
+# What the axes are called (**B-098**)
+# ---------------------------------------------------------------------------
+
+
+def test_an_axis_is_captioned_in_the_readers_words_not_the_databases() -> None:
+    """The picture used to be labelled `order_month` and `order_count` — the
+    database's vocabulary, shown to somebody who never chose it."""
+    frame = _frame([("2026-01", 3624)], columns=("order_month", "order_count"))
+
+    chart = decide(frame, ChartRequest(mark="line", x="order_month", y="order_count"))
+
+    assert chart.spec is not None
+    encoding = chart.spec["encoding"]
+    assert isinstance(encoding, dict)
+    assert encoding["x"]["title"] == "Order month"  # pyright: ignore[reportIndexIssue]
+    assert encoding["y"]["title"] == "Order count"  # pyright: ignore[reportIndexIssue]
+
+
+def test_the_series_gets_a_title_too() -> None:
+    frame = _frame(
+        [("2026-01", 10.0, "north"), ("2026-01", 12.0, "south")],
+        columns=("order_month", "amount", "store_region"),
+    )
+
+    chart = decide(
+        frame, ChartRequest(mark="line", x="order_month", y="amount", series="store_region")
+    )
+
+    assert chart.spec is not None
+    encoding = chart.spec["encoding"]
+    assert isinstance(encoding, dict)
+    assert encoding["color"]["title"] == "Store region"  # pyright: ignore[reportIndexIssue]
+
+
+def test_an_abbreviation_is_not_lowercased_into_nonsense() -> None:
+    assert axis_title("customer_id") == "Customer ID"
+    assert axis_title("total_usd") == "Total USD"
+
+
+def test_a_name_that_is_already_a_caption_is_left_alone() -> None:
+    """A column called `Total Revenue` needs nothing from us, and a de-snake-caser
+    that "fixed" it would be making the caption worse."""
+    assert axis_title("Total Revenue") == "Total Revenue"
+    assert axis_title("") == ""

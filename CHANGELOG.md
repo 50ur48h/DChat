@@ -36,6 +36,27 @@ under "Unreleased", only for changes a user would notice.
   started them — a colleague in the same organization cannot open one, even
   knowing its address.
 
+### Added
+- If everyone who can administer your organization loses access to their
+  account, there is now a way back in. An admin can arm a recovery grant ahead
+  of time and keep the token somewhere safe; whoever holds it can make
+  themselves an admin of that organization. It is shown once, can be used once,
+  can be revoked, and every arming and claim is recorded. Until now the only
+  repair was for someone with database access to edit it by hand.
+- Conversations can be renamed, and archived when you are done with them.
+  Archiving hides a thread from your list without removing anything — the
+  answers, the queries behind them and the record of how each was reached all
+  stay, and the thread can be brought back.
+- Answers now say how they were reached, in one line: how many queries, over how
+  many steps, against which tables. For anyone who wants to know how a number
+  was arrived at without reading the SQL.
+
+### Changed
+- Chart axes are labelled in readable words rather than raw column names, so a
+  chart of `order_month` against `order_count` is captioned *Order month* and
+  *Order count*.
+- Your conversation list no longer says "Nothing yet" while it is still loading.
+
 ### Fixed
 - When the platform cannot reach your database, the answer now says so instead
   of reporting that your data is empty. A question whose queries all failed to

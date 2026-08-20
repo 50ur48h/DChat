@@ -174,6 +174,11 @@ async def test_a_question_becomes_sql_rows_and_a_cited_answer(
     # The finding is the citation, and it names the row the DAL really wrote.
     assert len(view.findings) == 1
     assert view.findings[0].support == list(outcome.execution_ids)
+    # **B-100.** Architecture 4.2's fourth part of an answer. Asserted on the
+    # *view* rather than on the composer, because the composer has built this
+    # sentence correctly since Phase 9 and the run threw it away — the defect was
+    # never in the words, it was that nothing carried them this far.
+    assert view.method.startswith("1 query over one step"), view.method
 
 
 async def test_a_rephrased_answer_is_not_a_second_finding(

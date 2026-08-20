@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Path, status
@@ -13,6 +14,7 @@ from dataagent.auth.guards import current_principal, require_admin, require_memb
 from dataagent.auth.principal import Principal
 from dataagent.invitations.service import IssuedInvitation, create_invitation
 from dataagent.orgs import service
+from dataagent.orgs.recovery import GrantView, arm_grant, list_grants, revoke_grant
 from dataagent.orgs.service import ConflictError
 
 router = APIRouter(prefix="/v1", tags=["organizations"])
@@ -151,6 +153,129 @@ async def remove_member(
     try:
         await service.remove_member(
             org_id=context.org_id, actor_user_id=context.user_id, target_user_id=user_id
+        )
+    except ConflictError as error:
+        raise _conflict(error) from error
+
+
+class ArmRecoveryIn(BaseModel):
+    label: str = Field(
+        default="Recovery grant",
+        max_length=200,
+        description=(
+            "What this grant is for, in your own words — where the token will be "
+            "kept, or who holds it. A list of identical rows is a list nobody audits."
+        ),
+    )
+    days: int | None = Field(
+        default=None,
+        ge=1,
+        le=730,
+        description=(
+            "How long it stays valid. Defaults to 365 days. Long on purpose: it "
+            "has to still be there when something has gone wrong, and the "
+            "members screen shows the date so renewing is visible."
+        ),
+    )
+
+
+class RecoveryGrantOut(BaseModel):
+    id: uuid.UUID
+    label: str
+    created_at: datetime
+    expires_at: datetime
+    state: str = Field(description="armed | used | revoked | expired")
+    used_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
+class ArmedRecoveryOut(RecoveryGrantOut):
+    token: str = Field(
+        description=(
+            "The recovery token, shown exactly once and never recoverable "
+            "afterwards — only its hash is stored. Keep it somewhere outside "
+            "this product: it makes whoever holds it an Admin of this "
+            "organization."
+        )
+    )
+
+
+def _grant_out(view: GrantView) -> RecoveryGrantOut:
+    return RecoveryGrantOut(
+        id=view.id,
+        label=view.label,
+        created_at=view.created_at,
+        expires_at=view.expires_at,
+        state=view.state,
+        used_at=view.used_at,
+        revoked_at=view.revoked_at,
+    )
+
+
+@router.post(
+    "/orgs/{org_id}/recovery-grants",
+    response_model=ArmedRecoveryOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Arm a way back in, in case no Admin can sign in later",
+)
+async def arm_recovery(
+    body: ArmRecoveryIn, context: Annotated[RequestContext, Depends(require_admin)]
+) -> ArmedRecoveryOut:
+    """**B-017.** An organization whose only Admin loses their identity has no
+    way back: roles change through an Admin-only route, so nobody who can sign in
+    can repair it. This mints a token an Admin keeps outside the product.
+
+    Admin-only, and it grants the platform nothing — the alternative weighed was
+    a break-glass operator role that could reassign any organization's Admin,
+    which is a permanent cross-tenant privilege worth attacking precisely
+    because it exists.
+    """
+    try:
+        issued = await arm_grant(
+            org_id=context.org_id,
+            actor_user_id=context.user_id,
+            label=body.label,
+            validity=timedelta(days=body.days) if body.days else None,
+        )
+    except ConflictError as error:
+        raise _conflict(error) from error
+    return ArmedRecoveryOut(
+        id=issued.grant_id,
+        label=issued.label,
+        created_at=datetime.now(UTC),
+        expires_at=issued.expires_at,
+        state="armed",
+        token=issued.token,
+    )
+
+
+@router.get(
+    "/orgs/{org_id}/recovery-grants",
+    response_model=list[RecoveryGrantOut],
+    summary="Every recovery grant this organization has armed",
+)
+async def recovery_grants(
+    context: Annotated[RequestContext, Depends(require_admin)],
+) -> list[RecoveryGrantOut]:
+    """Used and revoked ones stay in the list. "Has anybody ever recovered this
+    organization, and when" is a question an Admin should be able to answer
+    without a database, and a credential nobody can see is one nobody renews."""
+    return [_grant_out(view) for view in await list_grants(org_id=context.org_id)]
+
+
+@router.post(
+    "/orgs/{org_id}/recovery-grants/{grant_id}/revoke",
+    response_model=RecoveryGrantOut,
+    summary="Revoke a recovery grant",
+)
+async def revoke_recovery(
+    grant_id: uuid.UUID, context: Annotated[RequestContext, Depends(require_admin)]
+) -> RecoveryGrantOut:
+    try:
+        return _grant_out(
+            await revoke_grant(
+                org_id=context.org_id, actor_user_id=context.user_id, grant_id=grant_id
+            )
         )
     except ConflictError as error:
         raise _conflict(error) from error

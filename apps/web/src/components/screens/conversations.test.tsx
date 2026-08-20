@@ -162,3 +162,73 @@ describe("<Conversations />", () => {
     expect(await screen.findByText("no database chosen")).toBeInTheDocument();
   });
 });
+
+const THREAD = {
+  id: "c1",
+  title: "Revenue by month",
+  created_at: "2026-08-20T09:00:00Z",
+  message_count: 4,
+  last_run_id: "r1",
+  data_source_id: "d1",
+  data_source_name: "Pizza (PostgreSQL)",
+  archived_at: null,
+};
+
+describe("putting a thread away", () => {
+  beforeEach(() => {
+    vi.stubEnv("NEXT_PUBLIC_API_URL", "http://api.test");
+  });
+
+  it("says Archive, never Delete", async () => {
+    // **D-039, and the owner's condition on it.** Nothing under this thread is
+    // removed — the runs, their events and their query executions all stay — so
+    // a control labelled "Delete" would be telling the person something the
+    // product does not do. This asserts the word, because the word is the promise.
+    routeFetch([PIZZA_PG], [THREAD]);
+
+    render(<Conversations orgId="o1" />);
+
+    expect(await screen.findByRole("button", { name: "Archive" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument();
+  });
+
+  it("archives through the API and asks for the list again", async () => {
+    const calls = routeFetch([PIZZA_PG], [THREAD]);
+
+    render(<Conversations orgId="o1" />);
+    (await screen.findByRole("button", { name: "Archive" })).click();
+
+    await vi.waitFor(() =>
+      expect(calls.some((call) => call.url.includes("/archive"))).toBe(true),
+    );
+    const archived = calls.find((call) => call.url.includes("/archive"));
+    expect(archived?.init.method).toBe("POST");
+    expect(JSON.parse(String(archived?.init.body))).toEqual({ archived: true });
+  });
+
+  it("does not report an empty list before it has loaded one", async () => {
+    // The list used to start at `[]`, so every visitor was told "Nothing yet"
+    // for as long as the fetch took — an empty state standing in for a loading
+    // one, which reads as "you have no conversations" rather than "wait".
+    let release: ((value: Response) => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        if (url.includes("/data-sources")) {
+          return Promise.resolve(json([PIZZA_PG]));
+        }
+        return new Promise<Response>((resolve) => {
+          release = resolve;
+        });
+      }),
+    );
+
+    render(<Conversations orgId="o1" />);
+
+    // Both cards are waiting on the same `Promise.all`, so both say so.
+    expect(await screen.findAllByText("Loading…")).not.toHaveLength(0);
+    expect(screen.queryByText(/Nothing yet/)).not.toBeInTheDocument();
+    release?.(json([]));
+    expect(await screen.findByText(/Nothing yet/)).toBeInTheDocument();
+  });
+});

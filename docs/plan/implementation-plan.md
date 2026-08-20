@@ -245,9 +245,10 @@ Last updated: <date> by Claude Code
 
 ## Phase 11 — Charts + polish (M11)
 - [ ] WP11.1 Chart tool (validated Vega-Lite) + client renderer
-- [ ] WP11.2 History/catalog/members polish + Playwright smoke      ← gate PR
+- [ ] WP11.2a History/catalog/members polish + B-017 + B-100 + B-098
       — carries **B-017**: recovery when an org has no Admin who can sign in
       (owner's call 2026-08-12, moved forward from Phase 12)
+- [ ] WP11.2b Compose Playwright smoke + README quickstart          ← gate PR
 - [ ] GATE: trend question → rendered chart; smoke green; sign-off
 
 ## Phase 12 — Azure deploy + hardening (M12)  ⚠ human review on every PR
@@ -837,11 +838,15 @@ Format per WP: **Branch → Build → Tests → Accept** (accept = commands/chec
 - Web: vega-embed renderer in the answer/trace cards with graceful fallback to table on invalid spec (defense in depth — server already validated).
 - **Tests:** spec validator corpus (valid, sneaky-url, unknown-mark, oversized); FakeLLM trend question end-to-end produces a rendered-spec event.
 
-### WP11.2 — Polish + smoke — `p11.2-polish-smoke` *(gate PR)*
-- Conversation history list + rename/delete; catalog and members pages rounded out; empty/loading/error states; mobile-usable layout pass.
+### WP11.2 — Polish + smoke *(split into 11.2a and 11.2b during the phase)*
+- **Split on 2026-08-20 by the owner**, because seven workstreams in one gate PR is a diff nobody can review properly, and the repo already splits work packages (WP7.2b, WP10.2c). **WP11.2a — `p11.2a-polish`**: the product work below, plus **B-017**, **B-100** and **B-098**. **WP11.2b — `p11.2b-smoke` *(gate PR)***: the compose-based Playwright smoke, its CI job, the README quickstart, and the gate walk. Sign-off is on 11.2b.
+- **B-020 and B-061 dropped from this work package** (owner, 2026-08-20). B-020's own backlog entry already decided it needs its own reviewed PR — it is a `dal/validator.py` change carrying a collision rule, and dal/ requires human review — and putting it in a gate PR beside a migration and a new CI job is what WP7.3a refused. B-061's currency half has no honest route until B-059 lands or a per-source setting exists.
+- Conversation history list + rename/**archive**; empty/loading/error states. **The catalog and members rounding and the mobile layout pass moved out to B-101** (owner, 2026-08-20) — the gate PR already carries a new CI job, a scripted provider in the shipped image and the sign-off walk, and a layout pass touching every screen reviews badly beside them; it is also the one item where "done" is a judgement in a browser rather than a test, so it cannot ride a green build. **The Phase 11 gate therefore does not cover small screens.**
+- *Corrected during WP11.2a (**D-039**)*: this said "rename/**delete**". A conversation is the root of its runs, their events, their findings and their query executions — the trace architecture 0.2.4 makes durable and revision 0002 holds append-only by grant — so a delete from a list screen would destroy the evidence behind answers somebody may already have acted on. It archives instead: hidden from the list, everything underneath intact, reversible. The control says *Archive*, because a button that says delete and hides instead is a lie to the person clicking it. **True erasure is a Phase 12 retention story** — every table, a receipt that it happened, a retention window — and not a button here.
 - **B-017 — recovery when an organization has no Admin who can sign in.** Scheduled here by the owner on 2026-08-12, moved forward from Phase 12: it is a product gap rather than a demo inconvenience, and this is already the members work package. Decide between a break-glass platform-operator role (audited, and itself a privileged surface to defend) and an ownership-transfer an Admin arms in advance; the second needs no new privilege and is the better default. Whatever ships, `ops/scripts/set_role.sh` stops being the answer and says so in its own header.
-- Playwright: compose-based smoke — dev-issuer login → register seed source (idempotent) → ask July-orders → answer card visible → open trace. Wired into CI as `web-e2e` job (path-filtered, allowed ~5 min).
-- **Accept/GATE (arch M11):** "show me the revenue trend by month" → chart renders; Playwright green in CI; a non-developer can run the demo from README quickstart alone; sign-off.
+- Playwright: compose-based smoke — dev-issuer login → register seed source (idempotent) → ask July-orders → answer card visible → open trace. Wired into CI as `web-e2e` job (path-filtered, allowed ~5 min). **The model for it is a scripted provider selected by environment, with a boot-time refusal in prod** (owner, 2026-08-20; the alternatives were a real key, which no fork PR can use, and keeping CI on the stub, which does not satisfy "green in CI"). That refusal gets a test which **actually boots with prod settings and the scripted provider selected** — it is a path in the shipped image that answers questions without a model, so an assertion in a docstring is not a guard.
+- **Accept/GATE (arch M11):** "show me the revenue trend by month" → chart renders **in a live walk against a real model**; Playwright green in CI; a non-developer can run the demo from README quickstart alone; sign-off.
+  - *Wording fixed by the owner on 2026-08-20*: **the CI smoke proves the stack wires up end to end, not that the agent answered.** It runs against a scripted model, so it can show that login, source registration, asking, the answer card and the trace all connect — and it can never show that a question was understood. The chart criterion is met by the live walk. A gate signed off on a canned answer would be the B-087 failure at the level of the gate itself.
 
 ---
 

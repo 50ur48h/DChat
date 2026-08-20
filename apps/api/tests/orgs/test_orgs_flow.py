@@ -3,101 +3,19 @@
 The M2 flow, run over real HTTP against a real database. Two orgs exist
 throughout so that every assertion about what someone can see is also an
 assertion about what they cannot.
+
+The harness — the app, the stub validator, the `api` fixture — is in
+`conftest.py`, shared with **B-017**'s recovery-grant suite.
 """
 
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator, Sequence
-from typing import Any
 
-import pytest
-from fastapi import FastAPI
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy import URL, Row, text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy import URL, text
+from sqlalchemy.ext.asyncio import create_async_engine
 
-from dataagent.auth.jwt_validator import TokenValidator
-from dataagent.auth.principal import Principal, TokenError
-from dataagent.config import Settings
-from dataagent.db import engine as engine_module
-from dataagent.main import create_app
-from dataagent.tenancy import session as session_module
-
-
-class _SubjectAsToken(TokenValidator):
-    """The bearer token *is* the subject, so these tests are about the flow."""
-
-    def __init__(self) -> None:
-        #: Subjects whose token carries no email claim — the Entra default until
-        #: an administrator adds the optional claim (B-009).
-        self.without_email: set[str] = set()
-
-    async def validate(self, token: str) -> Principal:
-        if not token or token == "invalid":  # noqa: S105
-            raise TokenError("bad_signature", "nope")
-        if token in self.without_email:
-            return Principal(subject=token, email=None, name=None)
-        return Principal(subject=token, email=f"{token}@example.com", name=token.title())
-
-
-class Api:
-    def __init__(self, app: FastAPI) -> None:
-        self.app = app
-
-    async def call(
-        self, method: str, path: str, who: str | None = None, body: dict[str, Any] | None = None
-    ) -> tuple[int, Any]:
-        headers = {"Authorization": f"Bearer {who}"} if who else {}
-        async with AsyncClient(
-            transport=ASGITransport(app=self.app), base_url="http://testserver"
-        ) as client:
-            response = await client.request(method, path, headers=headers, json=body)
-        payload = None if response.status_code == 204 else response.json()
-        return response.status_code, payload
-
-
-@pytest.fixture
-async def api(
-    app_database: URL, migrated_database: URL, monkeypatch: pytest.MonkeyPatch
-) -> AsyncIterator[Api]:
-    owner = create_async_engine(migrated_database)
-    app_engine = create_async_engine(app_database)
-    factory = async_sessionmaker(app_engine, expire_on_commit=False, autoflush=False)
-
-    monkeypatch.setattr(engine_module, "get_engine", lambda: owner)
-    monkeypatch.setattr(session_module, "_session_factory", lambda: factory)
-
-    app = create_app(settings=Settings(auth_mode="dev", env="ci", build_env="dev"))
-    app.state.token_validator = _SubjectAsToken()
-
-    try:
-        yield Api(app)
-    finally:
-        await owner.dispose()
-        await app_engine.dispose()
-
-
-def _validator(api: Api) -> _SubjectAsToken:
-    validator = api.app.state.token_validator
-    assert isinstance(validator, _SubjectAsToken)
-    return validator
-
-
-async def _audit(url: URL, org_id: uuid.UUID) -> Sequence[Row[Any]]:
-    engine = create_async_engine(url)
-    try:
-        async with engine.begin() as connection:
-            await connection.execute(
-                text("SELECT set_config('app.org_id', :org, true)"), {"org": str(org_id)}
-            )
-            rows = await connection.execute(
-                text("SELECT action, object_type, details FROM audit_log ORDER BY id")
-            )
-            return rows.fetchall()
-    finally:
-        await engine.dispose()
-
+from conftest import Api, audit_rows, subject_validator
 
 # ---------------------------------------------------------------------------
 
@@ -151,7 +69,7 @@ async def test_the_full_signup_invite_accept_flow(api: Api, app_database: URL) -
     assert sorted(m["role"] for m in members) == ["admin", "reader"]
 
     # 6. And the whole story is in the organization's audit log.
-    actions = [row[0] for row in await _audit(app_database, org_id)]
+    actions = [row[0] for row in await audit_rows(app_database, org_id)]
     assert actions == ["org.created", "invitation.created", "invitation.accepted"]
 
 
@@ -253,7 +171,7 @@ async def test_a_missing_email_claim_is_recorded_as_missing(
     api: Api, migrated_database: URL
 ) -> None:
     """Not as ``<subject>@unknown.invalid``, which is a lie a column would keep."""
-    _validator(api).without_email.add("erin")
+    subject_validator(api).without_email.add("erin")
 
     status, me = await api.call("GET", "/v1/me", who="erin")
 
@@ -278,7 +196,7 @@ async def test_a_missing_email_claim_is_recorded_as_missing(
 
 async def test_a_claim_that_arrives_later_is_recorded_then(api: Api) -> None:
     """The usual repair: an administrator adds the optional claim afterwards."""
-    validator = _validator(api)
+    validator = subject_validator(api)
     validator.without_email.add("frank")
     await api.call("GET", "/v1/me", who="frank")
 
@@ -291,7 +209,7 @@ async def test_a_claim_that_arrives_later_is_recorded_then(api: Api) -> None:
 
 async def test_a_member_without_an_email_still_appears_in_the_list(api: Api) -> None:
     """A missing claim must not make somebody invisible to their own admins."""
-    _validator(api).without_email.add("gwen")
+    subject_validator(api).without_email.add("gwen")
     _, org = await api.call("POST", "/v1/orgs", who="alice", body={"name": "Acme"})
     org_id = uuid.UUID(org["org_id"])
     _, invitation = await api.call(
@@ -396,8 +314,8 @@ async def test_each_orgs_audit_log_holds_only_its_own_events(api: Api, app_datab
     _, acme = await api.call("POST", "/v1/orgs", who="alice", body={"name": "Acme"})
     _, globex = await api.call("POST", "/v1/orgs", who="dave", body={"name": "Globex"})
 
-    acme_rows = await _audit(app_database, uuid.UUID(acme["org_id"]))
-    globex_rows = await _audit(app_database, uuid.UUID(globex["org_id"]))
+    acme_rows = await audit_rows(app_database, uuid.UUID(acme["org_id"]))
+    globex_rows = await audit_rows(app_database, uuid.UUID(globex["org_id"]))
 
     assert [row[0] for row in acme_rows] == ["org.created"]
     assert [row[0] for row in globex_rows] == ["org.created"]

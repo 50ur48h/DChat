@@ -363,6 +363,23 @@ async def _seed_two_orgs(owner_url: URL) -> SeededOrgs:
                         "question": f"how many orders has {name} taken?",
                     },
                 )
+                # **B-017.** A recovery grant makes its holder an Admin of one
+                # organization, so a leak across the boundary here would be the
+                # worst one in the schema: not a row of somebody's data, but the
+                # means to take their organization. `token_hash` is unique, so
+                # each org seeds its own.
+                await connection.execute(
+                    text(
+                        "INSERT INTO org_recovery_grants "
+                        "(id, org_id, token_hash, label, expires_at) VALUES "
+                        "(:id, :org, :hash, 'break glass', now() + interval '365 days')"
+                    ),
+                    {
+                        "id": uuid.uuid4(),
+                        "org": org_id,
+                        "hash": f"hash-of-{name}-recovery-token",
+                    },
+                )
                 if org_id == org_b:
                     catalog.update(
                         data_source=data_source_id,
@@ -520,6 +537,14 @@ def _forged_insert(table: str, seeded: SeededOrgs) -> str:
         "verified_queries": (
             "INSERT INTO verified_queries (org_id, data_source_id, question, sql) VALUES "
             f"('{other_org}', '{seeded.b_data_source}', 'forged question?', 'SELECT 1')"
+        ),
+        # A distinct hash, because `token_hash` is unique: a forged row colliding
+        # on that constraint would be refused before the policy was consulted,
+        # and the test would pass having proved nothing.
+        "org_recovery_grants": (
+            "INSERT INTO org_recovery_grants (id, org_id, token_hash, label, expires_at) VALUES "
+            f"('{uuid.uuid4()}', '{other_org}', 'hash-of-a-forged-token', 'forged', "
+            "now() + interval '1 day')"
         ),
     }
     return statements[table]
