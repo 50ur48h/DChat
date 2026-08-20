@@ -17,10 +17,33 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-# shellcheck disable=SC1091
-set -a
-. ./.env
-set +a
+# **Read three values; do not source the file.** This used to be
+# `set -a; . ./.env; set +a`, which exports every key — and a shell assignment
+# removes quotes, so `LLM_ROLE_MAP={"compose":"small"}` arrived in the
+# environment as `{compose:small}`. Environment beats dotenv in pydantic's
+# settings order, so the mangled value won over the correct one in the file and
+# `alembic upgrade head` died parsing it. That made **step 2 of the README
+# quickstart fail from a clean state**, on any machine whose .env came from
+# .env.example — which ships all three JSON keys uncommented (WP11.2b).
+#
+# Taking only what this script uses fixes the class rather than the instance: no
+# future JSON-valued key can break a migration by being present, and the Python
+# that follows reads .env itself, where a JSON parser handles it correctly.
+env_value() {
+  # Last assignment wins, as a shell would. The value is taken verbatim except
+  # for one pair of matching surrounding quotes, which a person may reasonably
+  # have written around a password containing spaces.
+  value=$(sed -n "s/^$1=//p" .env | tail -n 1)
+  case $value in
+  \"*\") value=${value#\"}; value=${value%\"} ;;
+  '*') value=${value#'}; value=${value%'} ;;
+  esac
+  printf '%s' "$value"
+}
+
+PLATFORM_DB_USER=$(env_value PLATFORM_DB_USER)
+PLATFORM_DB_NAME=$(env_value PLATFORM_DB_NAME)
+APP_DB_PASSWORD=$(env_value APP_DB_PASSWORD)
 
 : "${PLATFORM_DB_USER:?PLATFORM_DB_USER missing from .env}"
 : "${PLATFORM_DB_NAME:?PLATFORM_DB_NAME missing from .env}"
