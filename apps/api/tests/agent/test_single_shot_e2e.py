@@ -98,6 +98,30 @@ def _cite_what_actually_ran(request: LLMRequest) -> str:
     ).model_dump_json()
 
 
+def _cite_and_colour(request: LLMRequest) -> str:
+    """Compose, and ask for a chart coloured by the column already on the x axis.
+
+    The request the model actually made on the owner's walk, in the shape
+    `ChartAsk` now carries (**B-109**).
+    """
+    prompt = "\n".join(message.content for message in request.messages)
+    found = re.search(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", prompt)
+    assert found is not None
+    return FinalizeIn(
+        answer=f"{SHOPS_OPENED_IN_2021} shop opened in 2021.",
+        answered=True,
+        supported_by=[found.group(1)],
+        confidence="high",
+        chart=ChartAsk(
+            of=found.group(1),
+            mark="bar",
+            x="shops_opened",
+            y="shops_opened",
+            series="shops_opened",
+        ),
+    ).model_dump_json()
+
+
 def _cite_and_chart(request: LLMRequest) -> str:
     """Compose, and ask for a chart of the result just cited (WP11.1).
 
@@ -292,6 +316,55 @@ async def test_a_chart_that_cannot_be_drawn_says_so_on_the_run(
     # whether the answer is true, so it does not go in the list that is about
     # exactly that (the owner's call, and B-079's argument from the other side).
     assert not any("chart" in note.lower() for note in run["limitations"])
+
+
+async def test_the_colour_the_model_asked_for_reaches_the_chart_that_refuses_it(
+    context: ToolContext, fake_llm: FakeLLM, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**B-109's own defect, asserted end to end.**
+
+    The colour channel was built, tested and unreachable: `_spec` assembled it,
+    `ChartRequest` carried it, the tool accepted it, a unit test asserted its
+    axis title — and `ChartAsk`, the schema the model fills, had no field for it,
+    so nothing the model could say ever arrived. A unit test on `decide` cannot
+    see that, because it hands `decide` the request directly; only a run can.
+
+    So this asserts the **refusal**, and the refusal is the proof: `decide` can
+    only answer `colour_would_repeat_an_axis` if a series reached it. Without the
+    field travelling, the same run refuses for a different reason entirely.
+    """
+    fake_llm.script(
+        Plan(
+            sql=KNOWN_GOOD_SQL,
+            purpose="Count shops whose opening date falls in 2021",
+            answerable=True,
+            reason="",
+        ).model_dump_json(),
+        role="sql",
+    )
+    fake_llm.script(
+        Reflection(
+            findings=[],
+            open_questions=[],
+            next_purpose="",
+            done=True,
+            rationale="the count answers it",
+        ).model_dump_json(),
+        role="plan",
+    )
+    fake_llm.script(_cite_and_colour, role="compose")
+    fake_llm.script(CriticOut(verdict="pass", reasons=[]).model_dump_json(), role="critic")
+
+    accepted, scheduled = await _ask_over_http(context, monkeypatch)
+    await scheduled[0]  # pyright: ignore[reportGeneralTypeIssues]
+
+    status, run = await _get(context, f"/v1/orgs/{context.org_id}/runs/{accepted['run_id']}")
+
+    assert status == 200
+    chart = run["chart"]
+    assert chart is not None
+    assert chart["code"] == "colour_would_repeat_an_axis"
+    assert "already on the" in chart["declined"]
 
 
 async def test_the_answer_is_the_database_s_own_number(

@@ -22,10 +22,34 @@ Next step:        **Merge #87, then open Phase 12.** The gate is signed and the
                   approval, the GitHub-OIDC app registration, a budget alert
                   email and cap, which keys go to Key Vault, and any custom
                   domain (plan §3.2 / §6 Phase 12).
-                  **B-109 is scoped and not built** (owner, 2026-08-21): every
-                  chart is one flat colour, and the model apologised for it in
-                  the answer text. It can run ahead of WP12.1 while that input is
-                  outstanding, and does not reopen Phase 11.
+                  **B-113 is the sharpest thing this session found, and it is
+                  P1**: the product **refused a question its data answers
+                  completely**, because the composer sees 20 rows of 54. Every
+                  other refusal here is a feature; this one is the platform's own
+                  limit wearing a refusal's clothes, and a reader cannot tell the
+                  two apart. Filed with five options and their costs, and
+                  deliberately **not built** — which of them is right is a
+                  judgement about what the product is for.
+                  **The order matters**: the chart apology was sitting on top of
+                  it. Cleaning the prose is what let the real constraint say its
+                  own name.
+                  **B-109 is four parts of four and stays open only on B-113's
+                  discovery**: charts carry
+                  a validated eight-hue categorical ramp where colour means a
+                  split and refuse it where it would repeat an axis — verified
+                  live — and **the prose no longer narrates the chart**: the
+                  field description was measured reaching the model and ignored,
+                  so the same words moved into the composing prompt, which worked
+                  on one live run.
+                  **B-110** (a schema-correspondence check and a dead-function
+                  pass), **B-111** (an answer overstating what it could not see)
+                  **B-112** (the character cap nothing downstream can know
+                  about) and **B-113** are all **filed and not built**. B-110 carries the point
+                  worth keeping: **coverage cannot see that class by
+                  construction**, because carefully testing a capability is
+                  exactly what hides that nothing reaches it. B-109 carries its
+                  sibling: **a measurement built on a reconstruction is a second
+                  guess wearing a number.**
                   **B-108 wants a Linux machine** and cannot be closed from this
                   host. **B-101** (small screens) and **B-102**'s open half
                   (nothing walks the documented path automatically) are the two
@@ -37,7 +61,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 11.
-Last updated: 2026-08-21 by Claude Code (Phase 11 signed off and merged; B-109 scoped and filed, not built)
+Last updated: 2026-08-21 by Claude Code (B-109's four parts done; B-113 filed P1 — a refusal that is the platform's limit, not the data's)
 
 ---
 

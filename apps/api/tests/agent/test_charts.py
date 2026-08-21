@@ -13,6 +13,7 @@ the definition layer and what this repeats for charts.
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from decimal import Decimal
 from typing import cast
 
@@ -22,6 +23,7 @@ from dataagent.agent.charts import (
     MARKS,
     MAX_CATEGORIES,
     MAX_POINTS,
+    MAX_SERIES,
     Chart,
     ChartRequest,
     Frame,
@@ -519,3 +521,100 @@ def test_an_old_result_that_really_is_text_is_not_excused() -> None:
     chart = decide(old, ChartRequest(mark="bar", x="region", y="name"))
 
     assert chart.code == "y_not_numeric"
+
+
+# ---------------------------------------------------------------------------
+# Colour is a claim, not decoration (B-109)
+# ---------------------------------------------------------------------------
+
+
+def _split(rows: Sequence[tuple[object, ...]]) -> Frame:
+    """A frame with a real split in it. `Sequence`, because `list` is invariant
+    and a `list[tuple[str, str, float]]` is not a `list[tuple[object, ...]]`."""
+    return Frame(columns=("month", "channel", "revenue"), rows=tuple(rows))
+
+
+def test_a_split_the_axes_do_not_show_is_coloured() -> None:
+    """What colour is *for*: the same figures broken down by another column."""
+    frame = _split(
+        [
+            ("2026-04-01", "delivery", 100.0),
+            ("2026-04-01", "pickup", 60.0),
+            ("2026-05-01", "delivery", 120.0),
+            ("2026-05-01", "pickup", 70.0),
+        ]
+    )
+
+    chart = decide(frame, ChartRequest(mark="bar", x="month", y="revenue", series="channel"))
+
+    assert chart.spec is not None
+    encoding = chart.spec["encoding"]
+    assert isinstance(encoding, dict)
+    colour = cast("dict[str, object]", encoding)["color"]
+    assert isinstance(colour, dict)
+    assert cast("dict[str, object]", colour)["field"] == "channel"
+
+
+def test_colouring_by_the_column_already_on_the_axis_is_refused() -> None:
+    """**The request that started B-109.** The model asked for a separate colour
+    per month on a chart whose horizontal axis is already the month — eighteen
+    hues, a legend restating the tick labels, and not one fact added. design.md's
+    second rule settles it: *a hue is a claim that this thing has a state or a
+    category. Never colour for interest.*"""
+    frame = _frame([("2026-04-01", 1.0), ("2026-05-01", 2.0)], columns=("month", "revenue"))
+
+    chart = decide(frame, ChartRequest(mark="bar", x="month", y="revenue", series="month"))
+
+    assert chart.spec is None
+    assert chart.code == "colour_would_repeat_an_axis"
+    assert "already on the horizontal axis" in (chart.declined or "")
+
+
+def test_colouring_by_the_measure_is_refused_too() -> None:
+    frame = _frame([("a", 1.0), ("b", 2.0)], columns=("label", "amount"))
+
+    chart = decide(frame, ChartRequest(mark="bar", x="label", y="amount", series="amount"))
+
+    assert chart.code == "colour_would_repeat_an_axis"
+    assert "vertical axis" in (chart.declined or "")
+
+
+def test_a_refusal_is_said_rather_than_the_colour_quietly_dropped() -> None:
+    """**B-060 in a picture.** A chart that came back mono when colour was asked
+    for, with nothing said, would leave the run knowing a choice had been made
+    and the reader not. `decide` returns a spec or a sentence, never a spec with
+    the request silently trimmed out of it."""
+    frame = _frame([("a", 1.0), ("b", 2.0)], columns=("label", "amount"))
+
+    chart = decide(frame, ChartRequest(mark="bar", x="label", y="amount", series="label"))
+
+    assert chart.spec is None
+    assert chart.declined
+    assert chart.code
+
+
+def test_more_series_than_the_palette_has_hues_is_refused() -> None:
+    """A ninth series would repeat slot 1, and two series wearing one colour is a
+    chart that lies. The cap is the palette's size, not a readability guess."""
+    rows = [("2026-04-01", f"channel {index}", float(index)) for index in range(MAX_SERIES + 1)]
+
+    chart = decide(_split(rows), ChartRequest(mark="bar", x="month", y="revenue", series="channel"))
+
+    assert chart.code == "too_many_series"
+    assert str(MAX_SERIES) in (chart.declined or "")
+    # The number that makes a refusal actionable, as every other one here does.
+    assert f"{MAX_SERIES + 1:,}" in (chart.declined or "")
+
+
+def test_exactly_as_many_series_as_the_palette_has_is_drawn() -> None:
+    rows = [("2026-04-01", f"channel {index}", float(index)) for index in range(MAX_SERIES)]
+
+    chart = decide(_split(rows), ChartRequest(mark="bar", x="month", y="revenue", series="channel"))
+
+    assert chart.spec is not None
+
+
+def test_the_series_cap_is_far_below_the_category_cap() -> None:
+    """They are different questions. Fifty bars along an axis is a busy chart;
+    fifty colours is not a palette, and the axis is not what runs out."""
+    assert MAX_SERIES < MAX_CATEGORIES
