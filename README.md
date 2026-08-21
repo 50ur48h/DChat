@@ -18,9 +18,12 @@ prompts.
 
 ## Status
 
-**Phase 0 — bootstrap.** The repository is being built phase by phase against a
-written plan; there is no runnable application yet. Current position is always in
-[docs/plan/STATUS.md](docs/plan/STATUS.md).
+**Under construction, and runnable.** The repository is built phase by phase
+against a written plan; the quickstart below works end to end today — you can
+register a database, let it read the schema, ask a question and open the query
+behind the answer. Deployment to Azure is Phase 12 and is not done, so there is
+nothing hosted to visit: local is the only way to see it. Current position is
+always in [docs/plan/STATUS.md](docs/plan/STATUS.md).
 
 ## What is here
 
@@ -39,16 +42,127 @@ the phases deliver them.
 
 ## Quickstart
 
+Getting from nothing to an answer takes about ten minutes, most of which is
+Docker pulling images. **You need an OpenAI API key** — see the step below.
+
+### 1. Start the stack
+
 ```bash
 make up          # .env from .env.example, then platform Postgres + demo DB + api + web
 make db.setup    # migrate, and give the API's unprivileged role its login
 make seed        # build the pizza demo dataset (~72k orders, about 5 seconds)
-make secrets.key # print a LOCAL_SECRETS_KEY line for .env, then restart the api
+make secrets.key # print a LOCAL_SECRETS_KEY line for .env
 ```
 
-Then open <http://localhost:3000>: the page reports the API's health, version and
-build commit. `make down` stops everything and keeps the data; `make down.hard`
-throws the volumes away. `make logs` follows all services, `make ps` shows status.
+`make secrets.key` prints one line. Paste it into `.env`, replacing the empty
+`LOCAL_SECRETS_KEY=`, then **recreate** the api so it reads the new value:
+
+```bash
+docker compose -f ops/docker-compose.yml --env-file .env up -d api
+```
+
+`docker compose restart api` is **not** enough and fails in a way that looks
+unrelated: restarting reuses the container's existing environment, so the key
+never arrives, and the first thing you do afterwards — registering a database —
+returns a 500 with `LOCAL_SECRETS_KEY is not set`.
+
+### 2. Give it a model — this is required
+
+**The agent cannot answer anything without one, and there is no offline mode.**
+That is deliberate: the product *is* the agent, and a demo that answered from a
+canned script would teach you the opposite of what it exists to show. A build
+that answers without a model exists for CI only, and refuses to start outside it.
+
+Get a key from <https://platform.openai.com/api-keys>, then uncomment and fill
+this line in `.env`:
+
+```
+OPENAI_API_KEY=sk-...
+```
+
+and recreate the api with the same `up -d api` as above — `restart` will not
+pick it up. Nothing else needs changing: `.env.example` already names the models
+and their prices.
+
+**What it costs.** Very little. Questions in this demo run to roughly ten
+thousand tokens each at the tiers `.env.example` configures — a twenty-question
+evaluation run spent 223,000 tokens in total. A few questions while you look
+around costs a fraction of a US cent. It is not free, which is why nothing here
+spends it without you asking.
+
+### 3. Sign in
+
+Open <http://localhost:3000>. A fresh `.env` sets `AUTH_MODE=dev`, so the sign-in
+screen asks for a name rather than redirecting you to a corporate identity
+provider — type anything (`alice` is prefilled) and continue. The dev issuer
+mints tokens this API accepts and **refuses to start in a production build**, so
+it cannot follow you anywhere.
+
+Create an organization when asked. You are its Admin.
+
+### 4. Register the demo database
+
+The organization you just created is listed under **Your organizations** with a
+**Members** button — that button is the way in. From there choose **Data
+sources**, and fill in the **Register a database** form at the bottom:
+
+| Field | Value |
+|---|---|
+| Name | `Pizza demo` |
+| Engine | PostgreSQL |
+| Host | `seed-pizza-pg` |
+| Port | `5432` |
+| Database | `pizza` |
+| Username | `pizza_readonly` |
+| Password | the `SEED_PIZZA_READONLY_PASSWORD` from your `.env` |
+
+Leave **Encryption** blank, and press **Register**.
+
+**The host is `seed-pizza-pg`, not `localhost`.** The API reaches the database
+across the Docker network, where that is its name; `localhost:6543` in the table
+below is how *you* reach it from your own machine, which is a different journey.
+
+The credentials are read-only by construction — `make seed` creates that role
+with `SELECT` and nothing else — and registering tests them and says whether the
+connection was encrypted.
+
+### 5. Let it read the schema
+
+First choose **Test connection**. This is not optional politeness: it is what
+proves the credentials cannot write, and until it has passed **Refresh catalog**
+refuses with *"this data source has not been proven read-only"*. A catalog is
+only worth building on credentials that cannot change the database.
+
+Then **Refresh catalog**, then **Profile columns**. The
+first reads the tables and columns; the second samples them, so the agent knows
+what a column actually contains and which values look sensitive. Until both have
+run the agent has no catalog and will correctly refuse to guess rather than
+inventing a schema.
+
+### 6. Ask something
+
+Press **Back** to the organization, then **Ask**. Pick `Pizza demo` in the
+**Database** list, press **Start**, open the new conversation, and ask:
+
+> show me the revenue trend by month
+
+You should get a sentence, a chart, a line saying how the answer was reached, and
+a control that opens the SQL behind it. Every number is traceable to a query you
+can read.
+
+Good follow-ups, because they show what the product is actually for:
+
+- *"how many orders were placed in July 2026?"* — a plain count.
+- *"what were our best-selling items?"* — the demo has **no** `order_items`
+  table, so this is genuinely unanswerable. A good refusal names what is
+  missing rather than inventing a number.
+- *"why did revenue fall recently?"* — the data hides a ~12% decline that comes
+  almost entirely from one store's delivery orders.
+
+### Stopping and starting
+
+`make down` stops everything and keeps the data; `make down.hard` throws the
+volumes away. `make logs` follows all services, `make ps` shows status.
 
 `LOCAL_SECRETS_KEY` is only needed once you register a data source: the API
 encrypts customer database credentials with it and keeps the ciphertext in

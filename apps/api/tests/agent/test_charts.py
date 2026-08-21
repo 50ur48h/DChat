@@ -12,6 +12,10 @@ the definition layer and what this repeats for charts.
 
 from __future__ import annotations
 
+import json
+from decimal import Decimal
+from typing import cast
+
 import pytest
 
 from dataagent.agent.charts import (
@@ -24,6 +28,8 @@ from dataagent.agent.charts import (
     axis_title,
     decide,
 )
+from dataagent.dal.artifacts import encode
+from dataagent.dal.masking import MaskedFrame
 
 
 def _frame(rows: list[tuple[object, ...]], columns: tuple[str, ...] = ("label", "amount")) -> Frame:
@@ -80,7 +86,132 @@ def test_a_date_column_gets_a_time_axis() -> None:
     assert chart.spec is not None
     encoding = chart.spec["encoding"]
     assert isinstance(encoding, dict)
-    assert encoding["x"] == {"field": "day", "type": "temporal", "title": "Day"}
+    # Banded by month, because both values are the first of one (**B-105**).
+    assert encoding["x"] == {
+        "field": "day",
+        "type": "temporal",
+        "title": "Day",
+        "timeUnit": "yearmonth",
+    }
+
+
+# ---------------------------------------------------------------------------
+# How coarse the time axis is (B-105)
+# ---------------------------------------------------------------------------
+
+
+def _x(chart: Chart) -> dict[str, object]:
+    """The x encoding, narrowed. `spec` is `dict[str, object]` by design — it is
+    a document, not a model — so a test that reads into it has to say so."""
+    assert chart.spec is not None
+    raw = chart.spec["encoding"]
+    assert isinstance(raw, dict)
+    x = cast("dict[str, object]", raw)["x"]
+    assert isinstance(x, dict)
+    return cast("dict[str, object]", x)
+
+
+def test_monthly_bars_are_banded_by_month_not_scattered_on_a_calendar() -> None:
+    """**The frame from the gate walk, verbatim** (**B-105**).
+
+    Four monthly bars on a bare temporal axis are four instants on a continuous
+    four-month domain: Vega ticks it by week, the bars are drawn at their default
+    width, and the space between them reads as zero revenue. Wrong rather than
+    plain, which is the failure `decide` refuses for Q1/Q2 and then drew here
+    with real dates.
+    """
+    frame = _frame(
+        [
+            ("2026-04-01", 135950.59),
+            ("2026-05-01", 145341.12),
+            ("2026-06-01", 123650.61),
+            ("2026-07-01", 122712.33),
+        ],
+        columns=("month", "revenue"),
+    )
+
+    chart = decide(frame, ChartRequest(mark="bar", x="month", y="revenue"))
+
+    assert _x(chart)["timeUnit"] == "yearmonth"
+
+
+def test_the_line_chart_had_the_same_defect_and_it_only_looked_fine() -> None:
+    """The encoding that shipped for the trend question was identical to the bar
+    one — a bare `temporal` x. It read as correct only because a line implies no
+    width, so nothing in the picture claimed the space between two points."""
+    frame = _frame([("2026-04-01", 1.0), ("2026-05-01", 2.0)], columns=("month", "revenue"))
+
+    chart = decide(frame, ChartRequest(mark="line", x="month", y="revenue"))
+
+    assert _x(chart)["timeUnit"] == "yearmonth"
+
+
+def test_daily_data_is_not_rounded_up_to_months() -> None:
+    """The grain is the coarsest unit every value **sits exactly on**, so a
+    column with real days keeps them. Coarsening here would put three days in
+    one band and silently sum them into a bar nobody asked for."""
+    frame = _frame(
+        [("2026-04-01", 1.0), ("2026-04-02", 2.0), ("2026-04-03", 3.0)],
+        columns=("day", "amount"),
+    )
+
+    chart = decide(frame, ChartRequest(mark="bar", x="day", y="amount"))
+
+    assert _x(chart)["timeUnit"] == "yearmonthdate"
+
+
+def test_january_firsts_are_years() -> None:
+    frame = _frame([("2024-01-01", 1.0), ("2025-01-01", 2.0)], columns=("year", "amount"))
+
+    chart = decide(frame, ChartRequest(mark="bar", x="year", y="amount"))
+
+    assert _x(chart)["timeUnit"] == "year"
+
+
+def test_a_bar_on_timestamps_gets_a_discrete_axis_rather_than_instants() -> None:
+    """No unit to band by, and a bar at an instant is the same defect in its
+    general form. Ordinal is not a compromise for a bar chart — one band per
+    thing compared is what a bar chart's axis is."""
+    frame = _frame(
+        [("2026-04-01T09:30:00", 1.0), ("2026-04-01T10:15:00", 2.0)],
+        columns=("at", "amount"),
+    )
+
+    chart = decide(frame, ChartRequest(mark="bar", x="at", y="amount"))
+
+    x = _x(chart)
+    assert x["type"] == "ordinal"
+    assert "timeUnit" not in x
+
+
+def test_a_line_on_timestamps_stays_continuous() -> None:
+    """A line over a working day is exactly the case a continuous time axis is
+    for, and spacing the points evenly would misstate when they happened."""
+    frame = _frame(
+        [("2026-04-01T09:30:00", 1.0), ("2026-04-01T10:15:00", 2.0)],
+        columns=("at", "amount"),
+    )
+
+    chart = decide(frame, ChartRequest(mark="line", x="at", y="amount"))
+
+    x = _x(chart)
+    assert x["type"] == "temporal"
+    assert "timeUnit" not in x
+
+
+def test_dates_and_strings_agree_about_the_grain() -> None:
+    """Both representations reach `decide` — a driver that returned `date`
+    objects, and the ISO strings a stored artifact carries. If they disagreed,
+    the same result would chart differently depending on which side it came
+    from, which is the seam B-103 was found at."""
+    from datetime import date as _date
+
+    as_objects = _frame([(_date(2026, 4, 1), 1.0), (_date(2026, 5, 1), 2.0)], columns=("m", "v"))
+    as_text = _frame([("2026-04-01", 1.0), ("2026-05-01", 2.0)], columns=("m", "v"))
+
+    request = ChartRequest(mark="bar", x="m", y="v")
+
+    assert _x(decide(as_objects, request)) == _x(decide(as_text, request))
 
 
 # ---------------------------------------------------------------------------
@@ -264,3 +395,127 @@ def test_a_name_that_is_already_a_caption_is_left_alone() -> None:
     that "fixed" it would be making the caption worse."""
     assert axis_title("Total Revenue") == "Total Revenue"
     assert axis_title("") == ""
+
+
+# ---------------------------------------------------------------------------
+# Through the seam, not around it (**B-103**)
+# ---------------------------------------------------------------------------
+
+
+def _round_tripped(rows: list[tuple[object, ...]], columns: tuple[str, ...]) -> Frame:
+    """A frame the way the chart tool really gets one: encoded, then read back.
+
+    **This helper is the point of the section.** Seventeen tests above build a
+    `Frame` by hand out of Python floats, and every one of them passed while
+    charting money was impossible — because the defect never lived in `decide`,
+    it lived in the round trip that `decide` is downstream of. A hand-built frame
+    cannot catch this class, so this one goes through `encode` and `json.loads`
+    exactly as `tools/chart.py::_frame_for` does.
+    """
+    payload = json.loads(
+        encode(
+            MaskedFrame(
+                columns=columns,
+                rows=tuple(rows),
+                truncated=False,
+                duration_ms=1,
+                masked_columns=(),
+            )
+        )
+    )
+    stored = tuple(tuple(row) for row in payload["rows"])
+    types = tuple(payload.get("column_types", ()))
+    rebuilt = tuple(
+        tuple(
+            Decimal(value) if types[index] == "number" and isinstance(value, str) else value
+            for index, value in enumerate(row)
+        )
+        for row in stored
+    )
+    return Frame(columns=columns, rows=rebuilt, column_types=types)
+
+
+def test_money_survives_the_round_trip_and_draws(  # B-103
+) -> None:
+    """**The gate's own question.** Revenue is a `Decimal`, which cannot cross
+    JSON as a number, so it travels as a string and is rebuilt from the type the
+    writer recorded. Before this, the chart refused: *"'revenue' does not hold
+    numbers"* — on a correct answer, about a column that is nothing but."""
+    frame = _round_tripped(
+        [("2026-05", Decimal("145341.12")), ("2026-06", Decimal("123650.61"))],
+        columns=("month", "revenue"),
+    )
+
+    chart = decide(frame, ChartRequest(mark="line", x="month", y="revenue"))
+
+    assert chart.declined is None, chart.declined
+    assert chart.spec is not None
+
+
+def test_the_digits_are_not_rounded_on_the_way(  # B-103
+) -> None:
+    """A float would round this, which is why the value travels as text. The
+    point of the declared type is that it comes back exact."""
+    frame = _round_tripped(
+        [("a", Decimal("12345678901234.567890")), ("b", Decimal("0.000000000001"))],
+        columns=("label", "amount"),
+    )
+
+    assert frame.rows[0][1] == Decimal("12345678901234.567890")
+    assert frame.rows[1][1] == Decimal("0.000000000001")
+
+
+def test_a_column_of_digits_that_is_text_is_still_text() -> None:
+    """**The guess this fix refused to make.** An account number survives the
+    round trip as text because the writer *said* text — and a chart layer that
+    decided digits meant a number would make it a measure."""
+    frame = _round_tripped([("north", "90210"), ("south", "10118")], columns=("region", "postcode"))
+
+    chart = decide(frame, ChartRequest(mark="bar", x="region", y="postcode"))
+
+    assert chart.code == "y_not_numeric"
+
+
+def test_an_integer_still_charts_because_it_never_needed_rescuing() -> None:
+    """The shape WP11.1 demoed, and the reason this went unnoticed: `int` crosses
+    JSON untouched, so the one live proof in #82 was a `count(*)`."""
+    frame = _round_tripped(
+        [("2026-01", 3624), ("2026-02", 3311)], columns=("order_month", "order_count")
+    )
+
+    chart = decide(frame, ChartRequest(mark="line", x="order_month", y="order_count"))
+
+    assert chart.declined is None
+
+
+def test_a_result_stored_before_types_were_recorded_says_so() -> None:
+    """**B-087's rule, applied to a storage format.** An old artifact carries no
+    `column_types`, so the platform genuinely cannot tell money from a postcode.
+    Saying the column "does not hold numbers" would blame the customer's data for
+    something we lost."""
+    old = Frame(
+        columns=("month", "revenue"),
+        rows=(("2026-05", "145341.12"), ("2026-06", "123650.61")),
+        column_types=(),
+    )
+
+    chart = decide(old, ChartRequest(mark="line", x="month", y="revenue"))
+
+    assert chart.code == "types_not_recorded"
+    assert chart.declined is not None
+    assert "stored before" in chart.declined
+    assert "Ask the question again" in chart.declined
+
+
+def test_an_old_result_that_really_is_text_is_not_excused() -> None:
+    """The other half of the pair. Without this, every pre-B-103 result would
+    claim the platform's fault, including the ones that genuinely hold words."""
+    old = Frame(
+        columns=("region", "name"),
+        rows=(("north", "Alice"), ("south", "Bob")),
+        column_types=(),
+    )
+
+    chart = decide(old, ChartRequest(mark="bar", x="region", y="name"))
+
+    assert chart.code == "y_not_numeric"

@@ -59,6 +59,40 @@ make evals              # eval harness with FakeLLM (Phase 9+)
     | sort -u | while read c; do curl -s "http://localhost:3000$c" | grep -q '<a-token-from-your-change>' \
     && echo "$c: present" || echo "$c: ABSENT"; done
   ```
+  **That recipe cannot see a screen whose chunk is fetched lazily**, which is most
+  of them: the chunk is not in the server's HTML, so there is nothing for the grep
+  to walk and it reports ABSENT for code that is perfectly current. Driving the
+  page in a browser and grepping what it *requests* does not rescue it either — a
+  signed-out visitor renders the sign-in card, so the screen's chunk is never
+  asked for at all. Ask the container what it compiled, then fetch that chunk by
+  name:
+  ```sh
+  docker exec dataagent-web-1 sh -c "grep -rl '<a-token>' /app/.next/dev/static/chunks | head"
+  curl -s http://localhost:3000/_next/static/chunks/<the-file>.js | grep -c '<a-token>'
+  ```
+  Use a token that exists **only** in the new code, and check that an old-only
+  token is *gone* as well: "the new string is present" and "the old code is not
+  being served" are two claims, and a partial recompile satisfies the first
+  alone — seen on 2026-08-21, where after a restart the api-client chunk carried
+  the new method while the screen's chunk had not been rebuilt yet.
+  **And restart `api` too.** It bind-mounts its own source and runs with
+  `--reload`, which has the same blind spot: a container up for hours served an
+  OpenAPI schema with no trace of a route that had been on disk the whole time.
+- **`docker compose restart web` has a second failure, and it looks like a
+  routing bug.** The restart keeps `/app/.next`, and Turbopack's dev cache can
+  come back inconsistent with the source it then compiles: on 2026-08-21 every
+  route nested under the dynamic `[orgId]` segment served a **404** — the whole
+  product, since that is where the product is — while `/orgs/{id}` itself and
+  `/invitations/accept` were fine and every file was present in the container.
+  The log is what settles it: the request immediately before the old process's
+  `ELIFECYCLE` had returned 200, so the restart broke what it was run to fix.
+  **Clear the cache when you restart for a code change:**
+  ```sh
+  docker exec dataagent-web-1 rm -rf /app/.next
+  docker compose -f ops/docker-compose.yml --env-file .env restart web
+  ```
+  It costs one recompile. A 404 on a route whose file is right there is otherwise
+  a long hour, because every instinct says to look at the routing.
 - **A new web dependency needs the image rebuilt, and the B-044 recipe will not
   tell you.** `node_modules` comes from the image, not the bind mount, so
   `pnpm add x` on the host leaves the container without it: the page loads, your

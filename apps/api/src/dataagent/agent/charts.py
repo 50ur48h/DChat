@@ -39,6 +39,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
 from typing import Literal
 
 __all__ = [
@@ -80,6 +81,11 @@ class Frame:
     #: Whether the store holds more than these rows. A truncated result cannot
     #: be charted honestly — see the module docstring.
     truncated: bool = False
+    #: What the writer recorded each column as holding (**B-103**), or empty for
+    #: a result stored before that was written down. Empty is not "text": it is
+    #: *unknown*, and the difference decides whether a refusal blames the data or
+    #: admits the platform lost the information — which is B-087's rule.
+    column_types: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,13 +119,132 @@ def _decline(code: str, sentence: str) -> Chart:
 
 
 def _is_number(value: object) -> bool:
-    return isinstance(value, int | float) and not isinstance(value, bool)
+    """**Decimal counts** (**B-103**). A money column arrives as one, because a
+    `Decimal` cannot cross JSON as a number without rounding and is rebuilt from
+    the type the writer declared. What is deliberately *not* here is a string
+    that looks numeric: recognising one would draw a chart of an account number,
+    and a wrong chart is worse than an absent one."""
+    return isinstance(value, int | float | Decimal) and not isinstance(value, bool)
 
 
 def _is_temporal(value: object) -> bool:
     if isinstance(value, date | datetime):
         return True
     return isinstance(value, str) and bool(_ISO_DATE.match(value))
+
+
+#: The same shape `_ISO_DATE` admits, taken apart so the grain can be read off
+#: it. Kept separate from that pattern rather than replacing it: one answers
+#: "is this a date at all", which guards the axis type, and this one answers
+#: "how coarse is it", which only decorates an axis already known to be temporal.
+_ISO_PARTS = re.compile(
+    r"^(?P<year>\d{4})-(?P<month>\d{2})(?:-(?P<day>\d{2}))?"
+    r"(?:[T ](?P<hour>\d{2}):(?P<minute>\d{2})(?::(?P<second>\d{2}))?)?"
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _Instant:
+    """A temporal value reduced to the fields that decide its grain."""
+
+    month: int
+    day: int | None
+    #: Whether anything below a day is set to something other than midnight.
+    within_day: bool
+
+
+def _instant(value: object) -> _Instant | None:
+    """One temporal value taken apart, or None if it is not one.
+
+    Both representations reach here — a driver that returned `date`/`datetime`
+    objects, and the ISO strings a stored artifact carries — and they have to
+    agree, or the same result would chart differently depending on whether it
+    came from the database or from the store.
+    """
+    if isinstance(value, datetime):
+        return _Instant(
+            month=value.month,
+            day=value.day,
+            within_day=bool(value.hour or value.minute or value.second or value.microsecond),
+        )
+    if isinstance(value, date):
+        return _Instant(month=value.month, day=value.day, within_day=False)
+    if not isinstance(value, str):
+        return None
+    found = _ISO_PARTS.match(value)
+    if found is None:
+        return None
+    clock = (found.group("hour"), found.group("minute"), found.group("second"))
+    day = found.group("day")
+    return _Instant(
+        month=int(found.group("month")),
+        day=int(day) if day is not None else None,
+        within_day=any(part is not None and int(part) != 0 for part in clock),
+    )
+
+
+def _time_grain(values: Sequence[object]) -> str | None:
+    """The coarsest Vega-Lite `timeUnit` every value sits exactly on, or None.
+
+    **A monthly aggregate on a continuous day axis is a wrong chart, not a plain
+    one.** Four monthly bars drawn without this landed at four instants on a
+    four-month domain: thin spikes on a calendar ticked by week, with the gaps
+    between them reading as zero revenue. The Q1/Q2 rule with real dates —
+    `decide` refuses the values that are not dates and then drew this.
+
+    **Read off the values, never off the column's name.** That is the line this
+    module holds everywhere else: `_kind` judges `order_date` by what is in it,
+    `axis_title` de-snake-cases rather than translating, and `_is_number` will
+    not parse a string that looks numeric. A name like `month` proves nothing;
+    every value falling on the first of one is a fact about the data.
+
+    It is deliberately conservative in one direction only. Daily data that
+    happens to contain nothing but firsts-of-month is banded by month, which
+    places every point correctly and merely draws it coarser than it had to be.
+    Nothing here can move a point to a time it is not.
+    """
+    instants = [_instant(value) for value in _present(values)]
+    if not instants or any(instant is None for instant in instants):
+        return None
+    known = [instant for instant in instants if instant is not None]
+    if any(instant.within_day for instant in known):
+        # Something below a day is set, so a day is not the unit — leave the
+        # axis continuous rather than collapsing points onto the same band.
+        return None
+    if any(instant.day not in (None, 1) for instant in known):
+        return "yearmonthdate"
+    if all(instant.month == 1 for instant in known):
+        return "year"
+    return "yearmonth"
+
+
+def _stale_numeric(frame: Frame, name: str) -> bool:
+    """Whether this column is unjudgeable rather than non-numeric (**B-103**).
+
+    True only for a result stored before `column_types` existed, whose values
+    are all strings that would parse as numbers. Both halves are needed: without
+    the first this would fire on a genuine text column in a *new* result, where
+    the writer said "text" and meant it; without the second it would fire on
+    every old result, including the ones that really do hold words.
+
+    This is not the guess the fix refused to make. Nothing is charted on the
+    strength of it — it only chooses which true sentence to show, and the one it
+    chooses admits the platform lost the information instead of blaming the data.
+    """
+    if frame.column_types:
+        return False
+    values = _present(_column_values(frame, name))
+    if not values:
+        return False
+    return all(isinstance(value, str) and _parses_as_number(value) for value in values)
+
+
+def _parses_as_number(value: str) -> bool:
+    try:
+        Decimal(value)
+    except InvalidOperation:
+        return False
+    return True
 
 
 def _column_values(frame: Frame, name: str) -> tuple[object, ...]:
@@ -184,6 +309,19 @@ def decide(frame: Frame, request: ChartRequest) -> Chart:
 
     y_values = _column_values(frame, request.y)
     if _kind(y_values) != "quantitative":
+        if _stale_numeric(frame, request.y):
+            # **B-103, and B-087's rule applied to a storage format.** This
+            # result was written before column types were recorded, so the
+            # platform genuinely cannot tell money from a postcode here. Saying
+            # the column "does not hold numbers" would be a claim about the
+            # customer's data when the fact is about us.
+            return _decline(
+                "types_not_recorded",
+                "No chart was drawn: this result was stored before the platform "
+                "recorded what each column holds, so a number cannot be told "
+                "from text that looks like one. Ask the question again and the "
+                "new result will chart.",
+            )
         return _decline(
             "y_not_numeric",
             f"No chart was drawn: {request.y!r} does not hold numbers, so there is nothing "
@@ -255,6 +393,24 @@ def axis_title(column: str) -> str:
     return " ".join([first, *rendered[1:]])
 
 
+def _plottable(value: object) -> object:
+    """One cell, as the spec may carry it (**B-103**).
+
+    A `Decimal` becomes a `float` **here and only here**. The spec is stored as
+    JSONB and then rendered by Vega in a browser, whose only number type is a
+    double — so precision beyond a double cannot be displayed however carefully
+    it is carried, and carrying it anyway costs a `TypeError` at the point of
+    storage rather than buying anything a reader could see.
+
+    This is not a retreat from the exactness the rest of the fix is about. The
+    **artifact** keeps the Decimal, so anything that computes on the result gets
+    every digit; only the picture is approximate, and a picture always was.
+    """
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
+
+
 def _spec(
     frame: Frame,
     request: ChartRequest,
@@ -274,8 +430,29 @@ def _spec(
     # captioned in the database's vocabulary — `order_month`, `order_count` — to
     # a reader who never chose those words. The title is one field on the
     # encoding, and it is built server-side like everything else here.
+    x: dict[str, object] = {
+        "field": request.x,
+        "type": x_kind,
+        "title": axis_title(request.x),
+    }
+    if x_kind == "temporal":
+        # **B-105.** A temporal axis with no unit is a continuous one, and Vega
+        # then ticks it by whatever suits the *span* rather than the data: four
+        # monthly bars over four months got weekly gridlines, four thin spikes,
+        # and gaps a reader is entitled to read as zero. The unit is read off the
+        # values, so it says what the data is rather than what a column is called.
+        grain = _time_grain(_column_values(frame, request.x))
+        if grain is not None:
+            x["timeUnit"] = grain
+        elif request.mark == "bar":
+            # Dates with a time on them, and a bar for each. There is no unit to
+            # band by, and a bar at an instant on a continuous axis is the defect
+            # above in its general form — so the axis becomes discrete, which is
+            # what a bar chart's axis is anyway: one band per thing compared.
+            x["type"] = "ordinal"
+
     encoding: dict[str, object] = {
-        "x": {"field": request.x, "type": x_kind, "title": axis_title(request.x)},
+        "x": x,
         "y": {"field": request.y, "type": "quantitative", "title": axis_title(request.y)},
     }
     if request.series is not None:
@@ -293,7 +470,11 @@ def _spec(
         # so an address in it is a request that browser would make.
         "data": {
             "values": [
-                {name: row[index] for index, name in enumerate(frame.columns) if index < len(row)}
+                {
+                    name: _plottable(row[index])
+                    for index, name in enumerate(frame.columns)
+                    if index < len(row)
+                }
                 for row in frame.rows
             ]
         },

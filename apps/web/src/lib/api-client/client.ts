@@ -311,6 +311,8 @@ export interface Api {
     idempotencyKey: string,
   ): Promise<Accepted202>;
   run(orgId: string, runId: string, signal?: AbortSignal): Promise<Run>;
+  /** Every run in the thread, oldest first — what a card per answer needs (B-106). */
+  conversationRuns(orgId: string, conversationId: string): Promise<Run[]>;
   runEvents(orgId: string, runId: string, after?: number): Promise<RunEvents>;
   execution(orgId: string, runId: string, executionId: string): Promise<Execution>;
   streamRunEvents(
@@ -676,6 +678,16 @@ export function createApi(getToken: () => Promise<string | null>): Api {
         isRun,
         "run",
       );
+    },
+    // One request for the whole thread rather than one per assistant message
+    // (**B-106**): the number of round trips to render a conversation should not
+    // grow with how much somebody has used it.
+    async conversationRuns(orgId, conversationId) {
+      const payload = await call(`/v1/orgs/${orgId}/conversations/${conversationId}/runs`);
+      if (!Array.isArray(payload) || !payload.every(isRun)) {
+        throw new ApiError("The API's conversation runs response did not match the expected shape", 200);
+      }
+      return payload;
     },
     async runEvents(orgId, runId, after = 0) {
       return narrow(

@@ -1,0 +1,39 @@
+# What the smoke stack does differently from the local one (plan WP11.2b).
+#
+# Layered over docker-compose.yml by `ops/scripts/web_smoke.sh`. One difference,
+# and it is about **who owns the directories the API writes to**.
+#
+# The local stack bind-mounts `ops/.secrets` and `ops/artifacts` from the host on
+# purpose: `make down` must not throw away registered data sources, and WP5.2b's
+# claim that no unmasked value reaches a stored file is only checkable if the
+# files are somewhere a person can grep. Neither reason applies to a stack that
+# is destroyed at the end of one walk.
+#
+# And keeping them cost a red build. On a fresh checkout those directories do not
+# exist — they are gitignored — so Docker creates them **as root**, and the api
+# image runs as `app` (uid 1001), which cannot write there:
+#
+#   PermissionError: [Errno 13] Permission denied:
+#     '/app/ops/.secrets/secrets.json.8.tmp'
+#
+# Invisible on the machine this was written on, twice over: Docker Desktop's
+# bind mounts ignore ownership, and the directories had existed there for weeks.
+# It is the shape of **B-102** again — a path everybody's machine already
+# satisfies, so nobody walks the one where it is missing.
+#
+# Named volumes instead. The container creates them itself, so the image's own
+# user owns them and no host uid has to match anything; they belong to the smoke
+# project and go with `down --volumes`; and the walk stops writing a credential
+# into the developer's `ops/.secrets/secrets.json`, which it never had a reason
+# to touch. Compose merges `volumes` by the path inside the container, so naming
+# those two targets replaces their source and leaves `/app/src` alone.
+
+services:
+  api:
+    volumes:
+      - smoke-secrets:/app/ops/.secrets
+      - smoke-artifacts:/app/ops/artifacts
+
+volumes:
+  smoke-secrets:
+  smoke-artifacts:

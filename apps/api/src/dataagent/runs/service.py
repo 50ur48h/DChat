@@ -787,6 +787,47 @@ async def get_run(
         return await _run_view(session, await _owned_run(session, run_id=run_id, user_id=user_id))
 
 
+async def list_conversation_runs(
+    *, org_id: uuid.UUID, user_id: uuid.UUID, conversation_id: uuid.UUID
+) -> list[RunView]:
+    """Every run in this thread, oldest first (**B-106**).
+
+    **The screen needs all of them, and used to hold one.** The conversation
+    rendered a single answer card for the newest run, so every earlier answer
+    lost its chart, its method line, its limitations, its findings, its evidence
+    controls and its trace the moment a second question was asked — durable rows
+    with no route to them. The card is now the assistant turn, and a turn needs
+    its run.
+
+    **One request rather than one per message.** The alternative was for the
+    client to call `GET …/runs/{id}` for every assistant message it found, which
+    is a thread-length number of round trips to render a screen, growing with the
+    thing a person is most likely to keep using.
+
+    Ownership is checked once on the conversation, exactly as `list_messages`
+    does: a thread belongs to the person who started it, its runs are not a
+    separate grant, and re-checking each run against the same user would only be
+    a slower way to reach the same answer.
+    """
+    async with org_session(org_id) as session:
+        await _owned_conversation(session, conversation_id=conversation_id, user_id=user_id)
+        rows = (
+            (
+                await session.execute(
+                    select(AgentRun)
+                    # `(created_at, id)` as a pair, for the reason
+                    # `conversation_history` gives: two runs created in the same
+                    # microsecond still need an order rather than a coin toss.
+                    .where(AgentRun.conversation_id == conversation_id)
+                    .order_by(AgentRun.created_at, AgentRun.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [await _run_view(session, row) for row in rows]
+
+
 async def conversation_history(
     *, org_id: uuid.UUID, run_id: uuid.UUID, turns: int
 ) -> list[PriorTurn]:

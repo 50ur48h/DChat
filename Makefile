@@ -114,8 +114,20 @@ migration: .env ## Autogenerate a revision: make migration m="add widgets"
 secrets.key: ## Print a fresh LOCAL_SECRETS_KEY line to paste into .env
 	@$(UV_API) python -c "from cryptography.fernet import Fernet; print('LOCAL_SECRETS_KEY=' + Fernet.generate_key().decode())"
 
+# **`test.web.e2e` belongs here, and its absence cost a red build.** This target
+# says "everything CI will run" and prints "safe to push", and it was leaving out
+# the browser suite — so a WP11.2b change that every other check passed went to
+# CI and failed there on the one suite a developer had no reason to run. It is
+# the same rule the lint recipes above are written for: what a developer runs
+# must be what CI runs, with nothing between them that could differ. Costs about
+# a minute, and needs Chromium (`pnpm --dir apps/web exec playwright install
+# chromium`) — a one-off, and the failure names the command if it is missing.
+#
+# The compose smoke (`test.web.smoke`) is deliberately **not** here: it builds
+# images and seeds a database, which is minutes rather than a minute, and CI runs
+# it on its own job.
 .PHONY: preflight
-preflight: lint typecheck check.status check.backlog check.env test ## Everything CI will run, in CI's order
+preflight: lint typecheck check.status check.backlog check.env test test.web.e2e ## Everything CI will run, in CI's order
 	@echo "Preflight clean. Safe to push."
 
 .PHONY: check.status
@@ -200,7 +212,7 @@ lint.seed: ## ruff check the seed scripts
 # ---------------------------------------------------------------------------
 # apps/web
 # ---------------------------------------------------------------------------
-.PHONY: install.web lint.web typecheck.web test.web test.web.e2e web.dev build.web
+.PHONY: install.web lint.web typecheck.web test.web test.web.e2e test.web.smoke web.dev build.web
 install.web: ## Install web dependencies from the lockfile
 	$(PNPM_WEB) install --frozen-lockfile
 
@@ -215,6 +227,9 @@ test.web: ## vitest
 
 test.web.e2e: ## Playwright: the chat screen in a real browser, against a stub API
 	$(PNPM_WEB) test:e2e
+
+test.web.smoke: .env ## Playwright: the whole product in a browser, on its own compose stack
+	$(SHELL) ops/scripts/web_smoke.sh $(ARGS)
 
 web.dev: ## next dev on :3000
 	$(PNPM_WEB) dev

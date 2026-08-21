@@ -1,40 +1,31 @@
 # STATUS — data-agent build
 
-Current position: **Phases 0–5 and 7–11's first four items are done. Phase 6
-                  merged, its gate partially met and deliberately unticked.**
-                  **Phase 11 is most of the way through**: B-088 (definitions can
-                  be corrected and retired), B-090 (the environment guard),
-                  B-060 (reproduced, diagnosed, and its two chosen fixes built as
-                  B-092 and B-093), B-094 (a retired definition can be brought
-                  back), **WP11.1 — charts**, **B-095** (a run whose queries
-                  all failed is refused, not answered) and **WP11.2a** (polish,
-                  B-017, B-100, B-098) are all merged. What remains is
-                  **WP11.2b**, the phase gate.
+Current position: **Phases 0–5 and 7–11 are done. Phase 6 merged, its gate
+                  partially met and deliberately unticked.**
+                  **Phase 11 is signed off** (owner, 2026-08-21), on the second
+                  walk: the first found B-105, B-106 and B-107 and did not sign.
+                  The gate line below carries the evidence and, as importantly,
+                  what it does **not** cover — small screens (B-101), Linux
+                  (B-108), and **B-044**, since twice in this walk the owner's
+                  stack silently served old code while the branch itself was
+                  fine.
                   The session of 2026-08-19 was unusually productive for a reason
                   worth repeating: **six defects were found by the owner walking
                   the product by hand**, not by the suite — B-094, B-095, B-096,
                   B-097, B-098, and the two screen defects in B-088's web half.
                   Every one was invisible to a green build.
-Next step:        **WP11.2b — the phase gate** (`p11.2b-smoke`). Three things and
-                  they are in order: the **compose-based Playwright smoke** with
-                  its `web-e2e` CI job; the **README quickstart** rewritten so a
-                  non-developer reaches a real answer rather than a health check;
-                  and the **gate walk**.
-                  The model for the smoke is a **scripted provider selected by
-                  environment, refused at boot in prod** (owner, 2026-08-20).
-                  Two conditions came with that choice and both are binding.
-                  **The prod refusal gets a test that actually boots** with prod
-                  settings and the scripted provider selected — *“an assertion in
-                  a docstring is not a guard”*, and this is a path in the shipped
-                  image that answers questions without a model. And **the gate
-                  wording now says the CI smoke proves the stack wires up end to
-                  end, not that the agent answered**: the chart criterion is met
-                  by the live walk against a real model, because a gate signed
-                  off on a canned answer would be B-087 at the level of the gate.
-                  **B-097** (prose enumerating what the chart already shows) is
-                  the remaining polish candidate. **B-101 — the small-screen and
-                  catalog/members pass — is deliberately *not* in the gate**, so
-                  the sign-off must not be read as covering phones.
+Next step:        **Merge #87, then open Phase 12.** The gate is signed and the
+                  PR is out of draft; nothing in WP11.2b is outstanding.
+                  Phase 12 is `p12.1-bicep` and it is the phase whose every PR
+                  needs human review. Its **USER INPUT** batch is unanswered and
+                  blocks the first work package — subscription id, region, naming
+                  approval, the GitHub-OIDC app registration, a budget alert
+                  email and cap, which keys go to Key Vault, and any custom
+                  domain (plan §3.2 / §6 Phase 12).
+                  **B-108 wants a Linux machine** and cannot be closed from this
+                  host. **B-101** (small screens) and **B-102**'s open half
+                  (nothing walks the documented path automatically) are the two
+                  things this phase deliberately left behind.
 Merge policy: ASK
 Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  (owner, 2026-08-17), so `nightly-evals.yml` can run — keep its
@@ -42,9 +33,377 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 11.
-Last updated: 2026-08-20 by Claude Code (WP11.2a — conversation rename/archive, B-017's recovery grants, B-100's method line and B-098's axis titles; D-039 records archive-not-delete)
+Last updated: 2026-08-21 by Claude Code (**Phase 11 signed off by the owner**; #87 ready for review and awaiting merge)
 
 ---
+
+## The gate walk, 2026-08-20 — two defects, and the gate not ticked
+
+**The walk did what three suites and a green build did not.** Everything in the
+work package was passing when the owner sat down with it.
+
+### B-105 — the chart was wrong rather than plain, and it is fixed here
+
+Four monthly bars, April to July 2026, drawn on a **continuous** temporal axis:
+Vega ticked it by week — `Apr 05`, `Apr 12`, `Apr 19` — so four thin spikes sat
+on a daily calendar and the space between them read as zero revenue. Confirmed
+from the stored spec: `mark: bar`, `x: {"type": "temporal", "field": "month"}`,
+four values on month-firsts, **no `timeUnit`**.
+
+The owner's framing is the rule: *"this is the Q1/Q2 rule with real dates —
+wrong is worse than absent, and `charts.decide` refuses the one and drew the
+other."*
+
+**The line chart from step 2 of the same walk had the identical encoding.** It
+passed inspection only because a line implies no width, and so claims nothing
+about the space between two points. One defect, one visible form and one not —
+which is why the fix is keyed on the data rather than on the mark.
+
+The grain is now read **off the values**: the coarsest unit every present value
+sits exactly on becomes `timeUnit`. Off the values and never off the name, which
+is the line this module holds everywhere else — `_kind` judges `order_date` by
+what is in it, `axis_title` de-snake-cases rather than translating, `_is_number`
+refuses to parse a numeric-looking string. Where there is no grain because the
+dates carry a time, a `bar` gets an **ordinal** axis, which is not a compromise
+but what a bar chart's axis is; a `line` over the same values stays continuous,
+because spacing a working day's readings evenly would misstate when they
+happened.
+
+### B-106 — the answer card is a panel for the newest run — **the gate blocker, fixed**
+
+The owner read the chart vanishing on the next message as the Phase 7
+suppression rule outliving its reason. That is true of the card's *sentence* and
+understates the rest: `replied` suppresses only the duplicated sentence, and the
+disappearance is one layer up — `ConversationThread` holds **one** `run` and
+renders **one** card, so a previous run's card is not suppressed, it is never
+rendered. Chart, method line, limitations, findings, evidence controls **and the
+trace** all become unreachable from the screen while remaining durable rows.
+
+**The answer to the owner's question — card or bubble — is the card, and it
+should become the assistant turn.** Moving the chart into the bubble fixes a
+quarter of the problem, since architecture 4.2 makes an answer four things and
+three of them still vanish; it saves no work, because the thread's messages
+carry `content` and `run_id` and nothing else, so a chart in a bubble means
+fetching the run anyway; and it puts the chart *outside* the card, which is what
+B-048 refused. The sharper form: the bubble and the card are two renderings of
+one thing, which is the only reason `replied` exists and was the root of the
+Phase 7 gate defect.
+
+**The owner made it a gate blocker** on 2026-08-20, on the demo rather than on
+the code: *"a chart that disappears on the second question fails in front of an
+audience, and 'chart renders' is not met by one that survives only until the next
+message."* Built here. `GET …/conversations/{id}/runs` returns every run in the
+thread oldest first; the screen holds them by id; each assistant message renders
+as its run's card. **`replied` is gone rather than re-tuned** — it existed only
+because an answer had two renderings, and now it has one. The plain bubble
+survives as the fallback for a run that could not be fetched: the words are what
+the reader came for, and losing them because a second request failed would be a
+worse trade than losing the picture.
+
+Two things worth keeping about how it was checked. **Three of the five new web
+tests fail against the old screen**, and the two that pass are guarding the new
+design rather than reproducing the defect — worth saying, because "five new
+tests" and "five tests that would have caught it" are not the same claim. And the
+counts are what is asserted, in the unit tests and in the smoke: *presence* passed
+against the broken screen, because the newest answer always had its card.
+
+### B-107 — a rule fixed at one of its two call sites is fixed nowhere in particular
+
+Two findings on one execution, and **B-096's guard worked**: it keys on the
+citation set, it lives in `_write_ending`, and the composed answer — a third
+wording of the same numbers — was correctly not added. Both findings came from
+the **loop**, where `state.add_finding` still compares characters. That is the
+guard B-096 was filed against, one layer up, in the copy nobody changed.
+
+**Copying the rule across would have dropped the better sentence, and the owner
+asked to be told that rather than shipped it.** The two arrived from **one**
+reflection — the events read `finding_added → finding_added → reflection` — in
+the order enumeration-then-shape. First-wins keeps the numbers and discards the
+trend, which is the worse of the two by **B-097**'s own rule that the prose
+should give the shape and let a chart carry the detail; last-wins would be right
+here and wrong the moment a model emitted them the other way round.
+
+So the guard detects rather than chooses. `merge_by_evidence` **joins** findings
+from one reflection that rest on the same executions into one claim — one
+citation, one badge, the weakest of their confidences — and `state.add_finding`
+takes the citation-set rejection for the other half, a *later* reflection
+restating on evidence already concluded from, where the earlier finding stands
+and the iteration counts as barren. Merged **before** anything is persisted,
+because a finding row and its `finding_added` event are written together and a
+later merge would rewrite a row whose event already said something else. Only for
+findings that cite something: the empty set is shared by every uncited finding,
+and keying on evidence there would collapse them all into the first.
+
+### What the `web` job caught, and the gap that let it through
+
+**`loadThread` could take the whole conversation down with it.** B-106's runs
+request went into the same `Promise.all` and the same `catch` as the conversation
+and its messages, so a failure there emptied the screen — questions, answers and
+all. CI found it against the hermetic stub, which did not serve the new route
+yet; the effect would be the same against a network blip or an older API. The
+runs *enrich* the answers, the messages *are* the conversation, so the request now
+fails to null and keeps whatever runs were already held. A unit test covers it,
+and fails against the previous version.
+
+**The gap is `preflight`'s, and it is the more useful half.** That target says
+*"everything CI will run"* and prints *"safe to push"*, and it omitted
+`test.web.e2e` — the one suite this broke. Everything else was green locally.
+So the browser suite is in `preflight` now, which is the same rule the lint
+recipes are written for and state in as many words: *what a developer runs must be
+what CI runs, with nothing between them that could differ.* The compose smoke
+stays out — it builds images and seeds a database, which is minutes rather than a
+minute, and CI gives it its own job.
+
+### What the `web-e2e` job caught on its first real run
+
+**Red, and correctly so.** `PermissionError: '/app/ops/.secrets/secrets.json.8.tmp'`
+— on a fresh checkout those bind-mounted directories do not exist, because they
+are gitignored, so Docker created them as **root** and the api image runs as uid
+1001. Invisible on the machine the smoke was written on twice over: Docker
+Desktop ignores bind-mount ownership, and the directories had been there for
+weeks. **B-102's shape again** — a precondition every existing machine already
+satisfies, so nobody walks the path where it is missing.
+
+`ops/docker-compose.smoke.yml` replaces those two mounts with named volumes for
+the smoke stack only. The container creates them, so its own user owns them and
+no host uid has to match; they go with `down --volumes`; and the walk stops
+writing a credential into the developer's `ops/.secrets/secrets.json`, which it
+never had a reason to touch.
+
+**The overlay alone did not fix it, and the way it failed was the useful part.**
+Docker seeds a named volume from the image's content and ownership *only when the
+path exists in the image*; when it does not, the volume is empty and owned by
+root. Same error, different mount type — and now reproducible on Windows, where
+the bind-mount version never was. The api image therefore creates
+`/app/ops/.secrets` and `/app/ops/artifacts` before its `chown`, which is where
+that declaration belongs: the API writes credentials to one and stored results to
+the other, and an image that does not admit to it leaves every mount over it a
+coin flip. It does nothing for a bind mount, which never inherits image
+ownership — **so the local stack has the same hole for any Linux developer whose
+uid is not 1001**, which cannot be tested from this host.
+
+> **`make up` may not work on Linux, and nobody here can find out.** `ops/.secrets`
+> and `ops/artifacts` are gitignored, so a fresh clone has neither; Docker creates
+> a missing bind-mount source as root; the api container runs as uid **1001**. On
+> a host where those directories do not already exist and the developer's uid
+> differs — a typical Linux desktop user is 1000 — registering a data source dies
+> with `PermissionError` and every successful query dies writing its artifact.
+> **Two conditions have hidden this**: development has been on Windows, where
+> Docker Desktop's bind mounts ignore ownership entirely, and both directories
+> have existed on that machine for weeks. Filed as **B-108** with the candidate
+> fixes and what each costs. It wants somebody on Linux, not more thought here.
+
+**Green afterwards: `web-e2e` in 2m23s, the walk itself 15.6s** — inside the
+plan's ~5 minute budget, on a runner building both images from nothing.
+
+### The one thing this host says and CI does not
+
+Cold runs here are intermittent: **two of eight failed with `next dev` not
+serving a framework chunk**, leaving the page unhydrated and parked on B-104's
+sign-in card. Warm runs were 3/3, and the first clean CI run had none of it. So
+the flake looks like this Windows host rather than the smoke, and the dev target
+stays — changing what the smoke exercises on the strength of a symptom that does
+not appear where it runs would be trading fidelity for nothing.
+
+Two things were done rather than assumed. The walk's last step now **reloads
+until the page is running** before it asks about the answer, so an unhydrated
+page reports as one instead of as *"the answer never arrived"* — which is the one
+thing it does not mean. And if CI ever does show this, the answer is already
+written down: the hermetic suite chose `next build && next start` over `next dev`
+for exactly this symptom, and its config says why.
+
+One cold run also died on **B-028** (`ConnectionResetError [WinError 64]` inside
+`alembic upgrade head`) before reaching a browser — the known Windows flake that
+hit the second README walk too, and unrelated to anything in this work package.
+
+---
+
+## WP11.2b — the record (2026-08-20, #87)
+
+**Nothing here is a to-do list.** What is outstanding is the **Next step** field
+above. This exists because several of the findings below are not recoverable from
+the diff, and one of them is about how the work was done rather than what it
+changed.
+
+### The compose smoke, and what it is allowed to mean
+
+`apps/web/e2e-compose/smoke.spec.ts` drives the whole product in Chromium against
+a stack `ops/scripts/web_smoke.sh` brings up: sign in through the dev issuer,
+create the organization, register the seeded database, prove the credentials
+cannot write, discover and profile the schema, ask, read the answer card, open
+the query behind it, open the trace, reload. Everything in that chain is real
+except the model.
+
+**Two assertions carry the whole thing, and they pull in opposite directions.**
+One is `71798` in the evidence table — the seeded fixture's own order count,
+which nothing but a real query against a real database could produce, and the
+only line in the file no stub could satisfy. The other is the scripted model's
+exact sentence, which **only** the stub can satisfy: it is there so that a stack
+brought up with a real key fails loudly instead of quietly spending the owner's
+money and reporting a model's variability as a broken product.
+
+**Its own compose project, on its own ports** (`dataagent-smoke`, web 3200, api
+8200). Not politeness: a developer's stack holds the demo fixtures both README
+walks depended on, and `down` on the shared project would take them with it. The
+script exports `LLM_PROVIDERS=scripted` and blanks `OPENAI_API_KEY`,
+`ANTHROPIC_API_KEY` and `EMBEDDINGS_PROVIDER` — an exported variable beats
+`--env-file` in compose's interpolation order, so the owner's `.env`, which says
+`openai` and `entra` and carries a live key, cannot reach it. Blanking the
+embedder matters as much as the model: **discovery embeds catalog cards**, so a
+smoke that left it alone would bill for the schema it just read.
+
+**Measured, cold, on this machine: 3m06 end to end** — build, migrate, grant,
+seed 71,798 orders, walk, tear down. The walk itself is 11.7s; most of the rest
+is `next dev` compiling each route on its first request. A warm re-run is 4.6s.
+
+### Three failures while writing it, and only the third was mine to keep
+
+**`DEV_ISSUER_URL` is not a browser address.** Pointed at the published port, the
+walk signed in, rendered the profile screen, and then every authenticated call
+came back 401 `jwks_unavailable` — because that variable is both the `iss` the
+dev issuer stamps *and* where the API fetches its own JWKS, and it does that
+**from inside its container**, where the only port that exists is 8000. A failure
+that looks like a bad token and is a wrong port.
+
+**A page can be served long before it is running.** `next dev` compiles a route's
+client bundle on first request, so the server's HTML sits on screen with no React
+attached: `fill` landed in a DOM nothing was listening to, the click reached a
+button with no handler, hydration then reset the field, and the report read
+*"signing in does not work"* over a screenshot of an untouched form. The walk now
+waits for the app's own proof of life — the health widget reaching a verdict,
+which is also the first thing that must be true anyway.
+
+**And the third is a product defect: B-104.** Navigating by `page.goto` — a full
+load each time — the walk reached a conversations page rendering the **sign-in
+card** and waited thirty seconds for a heading that was never coming. `who`
+starts null and is restored by a round trip, and all nine screens read null as
+*signed out* rather than as *not known yet*. This is exactly the defect WP11.2a
+fixed once, for the conversations list that said *"Nothing yet"* while it was
+still loading — except this one does not say *you have nothing*, it says *you are
+nobody*, and then heals if you use the form. Filed, not fixed, on B-101's
+reasoning. The smoke now clicks through the product the way a person does, which
+is both more faithful and steadier.
+
+### The `web-e2e` job, and one test that was checking its own wording
+
+The job is path-filtered on `apps/web`, `apps/api`, `ops` and the workflow — it
+is the one job that would notice the two halves disagreeing. Steps are gated, not
+the job (**D-007**), so the check always reports. The script prints the api and
+web logs itself when the walk fails, **before** the teardown: a workflow step
+could not, because by then there would be nothing left to ask.
+
+Writing it turned up that `test_it_answers_every_role_the_loop_asks_of_it`
+asserts on the scripted provider's own strings — `'"done": true' in reflect.text`
+— which is a check on this module's wording, not on the contract. It would pass
+unchanged while `Plan` gained a required field and every smoke run died in
+`structured.py`. There is now a test that **parses each reply with the model the
+loop actually passes as `schema=`**, imported from `agent/` on purpose: the
+contract is with those four classes, and a copy of the shape restated in the test
+would be free to agree with nothing.
+
+### Two more quickstart defects, from walking it once more
+
+Both in prose, both invisible to a reader who already knows the product. The
+**Status** section still said *"Phase 0 — bootstrap… there is no runnable
+application yet"* directly above a quickstart that works — a non-developer
+reading top to bottom would stop there. And step 4 said **"Data sources → Add"**;
+there is no Add, and there is no visible route to data sources at all until you
+know that the **Members** button is how you enter an organization. That is the
+third and fourth defect of the same family this work package has found, after the
+"Discover" button and the omitted **Test connection**.
+
+### B-103 — the blocker, cleared
+
+**The gate criterion has been met live for the first time.** A clean stack, a
+fresh `.env`, a real model, and a money column:
+
+```
+status : completed
+method : 2 queries over 2 steps, against orders, payments, staff, stores and customers.
+CHART  : DRAWN, mark = line   axes: Revenue month / Monthly revenue
+  points: 18 -> {'revenue_month': '2025-02-01', 'monthly_revenue': 119558.51}
+```
+
+`monthly_revenue` is a number, not `"119558.51"`. Before this, charts had only
+ever been demonstrated on a `count(*)` — WP11.1's live proof in #82 was *number
+of orders by month*, and the demo had chosen the one shape that worked.
+
+The cause was at the artifact seam: a `Decimal` crossed JSON as text, so
+`_is_number` said no. The fix records `column_types` where the writer still has
+the Python objects, and the chart rebuilds the Decimal from that declaration
+rather than deciding that numeric-looking text is a number — which would make a
+measure of a postcode.
+
+### The second failure, which the suite could not see
+
+**Worth keeping, because it is the more useful half.** The first re-walk got
+*further* and still failed:
+
+```
+TypeError: Object of type Decimal is not JSON serializable
+[SQL: UPDATE agent_runs SET chart=$1::JSONB ...]
+```
+
+Rebuilding Decimals in the frame put them into the spec's inline values, which
+are stored as JSONB. **The fix had moved the defect one seam later and would have
+shipped.** It is the same shape as the original defect, one layer along — and the
+round-trip tests written *for* the original stop at `decide` and never store what
+it returns. A corpus that had just learned to cross one seam stopped one seam
+short of the truth.
+
+### The quickstart, and what walking it proved
+
+An OpenAI key is now stated as required, with rough cost and where to put it: a
+keyless path would answer from a script, and the product is the agent.
+
+Walking it found **five** defects, four of them in prose written minutes earlier
+by someone who had just read the code:
+
+1. **B-102** — `make db.setup` crashed from a clean state. Sourcing `.env` strips
+   quotes, so `LLM_ROLE_MAP={"compose":"small"}` arrived as `{compose:small}`, and
+   environment beats dotenv in pydantic's order. **Step 2 of the documented path.**
+2. `docker compose restart api` does not re-read the env file, so the secrets key
+   never arrives and registering a database 500s. **This predates the rewrite** —
+   the old quickstart said "restart the api" too.
+3. A **"Discover" button that does not exist**; the controls are *Refresh
+   catalog* and *Profile columns*.
+4. **Test connection** omitted, and it is required: until it passes, refreshing
+   the catalog refuses.
+5. B-103 itself.
+
+**B-102's lesson is the durable one.** That crash stayed hidden because
+`make migrate` was a *second route around the broken one* — and it is what
+everybody actually ran, because it is what you reach for mid-development. The
+documented path had a working shortcut beside it, so the broken one was never
+taken and never reported, and the people the documented path exists for are by
+definition not the people who know the shortcut. **Walking the documented path is
+the only thing that has ever caught this class**: not one of these five was found
+by a test, a review or a re-reading.
+
+### Local state, and the traps that are still traps
+
+**Run `make migrate` before anything.** Three revisions landed in WP11.2a and are
+on `main`: **0025** (`agent_runs.method`), **0026** (`conversations.archived_at`)
+and **0027** (`org_recovery_grants`). A missing revision surfaces as a CHECK
+violation mid-run rather than as a migration error.
+
+**The scripted provider is a stub in the shipped image.** `LLM_PROVIDERS=scripted`
+selects it; two guards refuse it in production, one at boot and one at first use.
+Do not weaken either without reading why they are separate — the boot check reads
+configuration and cannot see a runtime registration; the other reads the instance
+and cannot see configuration that is never built.
+
+**The owner's demo fixtures survived both walks and are still here**: `waste_cost`
+active at v6 with its full history, five chart-carrying runs, 366 conversations.
+Both walks ran under a **parallel compose project** (`-p dataagent-clean`) with
+`make down` first, so the volumes were never touched. That method has one cost
+worth knowing: `db_setup.sh`'s grant step targets the default project, so it
+fails under a parallel one and has to be applied by hand. That is the method, not
+a defect.
+
+**B-028 fired again** during the second walk — `make db.setup` died on
+`ConnectionResetError [WinError 64]` and succeeded on a retry. Its traceback and
+the cheap innocence check are in its row.
 
 ## WP11.2a — polish, B-017, B-100, B-098 (2026-08-20)
 
@@ -2421,7 +2780,7 @@ unexplained.
       exactly the same executions are one claim, whatever words they use — which
       is the rule `mark_cited` already followed one line below. Fixed in this
       WP, with a test that fails against the old guard
-- [ ] **B-095 (P1)** a run whose every query *failed* carries no limitation, and
+- [x] **B-095 (P1)** a run whose every query *failed* carries no limitation, and
       the answer calls the failure an empty result — *“no data was returned”*
       with `limitations: []`, while both executions had ended in a connector
       error. A reader is told their data is empty when nothing was asked of it.
@@ -2436,10 +2795,37 @@ unexplained.
       a model told "you are drawing a chart, do not list the numbers" can end up
       beside a refusal, leaving the reader neither. It becomes structural only
       if the prose should *refer* to the picture
-- [ ] B-098 (P3) chart axes are labelled with raw column names. Small, WP11.2's
+- [x] B-098 (P3) chart axes are labelled with raw column names. Small, WP11.2's
       polish pass; the axis title is one field on a spec the server already
-      assembles
-- [ ] WP11.2 History/catalog/members polish + Playwright smoke      ← gate PR
+      assembles — done in WP11.2a as a de-snake-casing and **deliberately not a
+      dictionary**: expanding `qty` or deciding `dt` means date would be the
+      platform inventing meaning it does not have
+- [x] WP11.2a History/catalog/members polish + B-017 + B-100 + B-098 (#86)
+      — conversation history with rename and **archive** (**D-039**, revision
+      0026: a button that says delete and hides instead is a lie to the person
+      clicking it); **B-017**'s recovery grant, which adds no new privilege
+      because the organization creates its own way back; **B-100**'s method line
+      surfaced rather than deleted (revision 0025). **B-101** carries out what is
+      not here — the small-screen pass and the catalog/members rounding
+- [x] WP11.2b Compose Playwright smoke + README quickstart          ← gate PR
+      — **built, not signed off.** `apps/web/e2e-compose/` drives the whole
+      product in Chromium against a real compose stack — sign in, register the
+      seeded database, prove it read-only, discover and profile the schema, ask,
+      read the answer card, open the query behind it, open the trace, and reload
+      to prove none of it was held in the page. The `web-e2e` CI job runs it
+      path-filtered. The model is a **stub in the shipped image** selected by
+      environment and refused twice outside CI (**D-040**). **B-103** is fixed
+      and the chart criterion has been met live.
+      **Walked by the owner on 2026-08-20 and not signed off**, on three
+      defects, all now fixed here: **B-105** (a monthly aggregate on a continuous
+      day axis — wrong rather than plain), **B-106** (every answer but the newest
+      lost its chart and its evidence — raised to a gate blocker by the owner,
+      and the card is now the assistant turn) and **B-107** (B-096's rule applied
+      to one of its two call sites). What remains is the owner's second walk, and
+      the GATE line below stays unticked until it happens
+- [ ] ~~WP11.2 History/catalog/members polish + Playwright smoke~~ *(split into
+      11.2a and 11.2b on 2026-08-20 — seven workstreams in one gate PR is a diff
+      nobody can review properly)*
       — carries **B-017**: recovery when an org has no Admin who can sign in
       (owner's call 2026-08-12, moved forward from Phase 12)
       — and **B-061** with **B-020**: internal identifiers and the wrong
@@ -2456,7 +2842,46 @@ unexplained.
       UI pattern-matching prose a model wrote
       — the Playwright smoke this WP plans is now a **widening** rather than a
       start: WP7.3b already added `apps/web/e2e/` with Chromium in CI (B-044)
-- [ ] GATE: trend question → rendered chart; smoke green; sign-off
+- [x] GATE: trend question → rendered chart; smoke green; sign-off
+      — **signed off by the owner on 2026-08-21**, on the second walk. The first
+      (2026-08-20) did not sign off and found three defects: **B-105** (a monthly
+      aggregate drawn on a continuous day axis — wrong rather than plain),
+      **B-106** (every answer but the newest lost its chart and its evidence) and
+      **B-107** (B-096's rule applied at one of its two call sites). All three
+      fixed in #87.
+      **B-103's criterion, in the owner's own hands**: money rendered on a
+      quantitative axis at 120,000–160,000, which cannot happen from strings.
+      **B-105**: the bars are banded on monthly ticks, not spikes on a weekly
+      calendar. **B-106**: both charts stay across questions — the card is the
+      assistant turn, so an answer keeps its chart, method, limitations,
+      findings, evidence and trace when the next question is asked.
+      **`web-e2e` green in CI** (2m19s, the walk itself 15.6s) against a stack it
+      builds from nothing, with a scripted model (**D-040**) — it proves the
+      stack wires up end to end and can never show that a question was
+      understood, which is why the chart criterion is met by the live walk and
+      not by it.
+      **The quickstart was walked from nothing three times** and produced seven
+      defects, five of them in prose. B-102's lesson stands: nothing walks the
+      documented path automatically, and that gap is still open.
+      **What this sign-off does not cover** — small screens (**B-101**: three
+      `@media` rules in the whole app, and nobody has sat at 375px); Linux
+      (**B-108**: `make up` may not start for a developer whose uid is not 1001,
+      and this host structurally cannot find out); whether the agent is any good,
+      which is the evals' business and not this gate's; and anything deployed,
+      which is Phase 12.
+      **And it does not cover B-044.** Twice during this walk the assistant said
+      the branch was ready having checked *the branch* and not the owner's
+      containers, and both times that stack was silently serving old code — the
+      second with a **stale API underneath it**, which reproduces the same
+      symptom on its own and would have been read as the fix not working. A gate
+      walked against a stack that can be silently stale is only as good as the
+      check that catches it, and **the documented check failed here**: the B-044
+      recipe cannot see a screen whose chunk is fetched lazily, and reported
+      ABSENT for code that was current. It has been amended in CLAUDE.md, along
+      with the restart's second failure — a kept `.next` that came back
+      inconsistent and 404'd every route under the dynamic segment. Neither of
+      those is closed by this sign-off; what closed them here was doing it by
+      hand, twice, after the fact.
 
 ## Phase 12 — Azure deploy + hardening (M12)  ⚠ human review on every PR
 - [ ] WP12.1 Bicep modules + env params + what-if in CI

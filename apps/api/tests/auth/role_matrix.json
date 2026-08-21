@@ -44,6 +44,11 @@
     "contributor": "allow",
     "reader": "allow"
   },
+  "GET /v1/orgs/{org_id}/conversations/{conversation_id}/runs": {
+    "admin": "allow",
+    "contributor": "allow",
+    "reader": "allow"
+  },
   "GET /v1/orgs/{org_id}/data-sources": {
     "admin": "allow",
     "contributor": "allow",

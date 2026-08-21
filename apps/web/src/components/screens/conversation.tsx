@@ -440,13 +440,22 @@ function Grounding({ run }: { run: Run }) {
 function AnswerCard({
   orgId,
   run,
-  replied,
+  answer,
 }: {
   orgId: string;
   run: Run;
-  /** Whether this run's reply is already in the thread above. */
-  replied: boolean;
+  /**
+   * The words this turn said, when the card is rendering a message.
+   *
+   * The two are the same string by construction — the run's `answer` is *read
+   * from* the assistant message — so this is not a second source of truth. It is
+   * which of the two the card should quote: rendering a message means rendering
+   * that message's own content, and the run's copy is the fallback for the card
+   * that appears before the message exists (**B-044**).
+   */
+  answer?: string | undefined;
 }) {
+  const words = answer ?? run.answer;
   const failed = run.status === "failed";
   return (
     <Card tone="sunken">
@@ -466,15 +475,18 @@ function AnswerCard({
         </p>
       ) : (
         <>
-          {/* The run carries its own answer, so a card is never wordless even if
-              the thread has not caught up or its fetch failed. Suppressed once
-              the reply is in the list above, which is where it belongs — the
-              gate found this card showing a citation and no words at all. */}
-          {!replied && run.answer && <p className={styles.findingStatement}>{run.answer}</p>}
+          {/* **The card says the words** (**B-106**). It used to suppress them
+              once the same sentence arrived in the thread as a message, which is
+              why `replied` existed — and having the answer in two places, only
+              one of which carried the chart and the evidence, is what the Phase 7
+              gate caught from the other direction when the card rendered a
+              citation and no words at all. The card is the assistant turn now, so
+              there is one rendering of an answer and nothing to keep in step. */}
+          {words && <p className={styles.findingStatement}>{words}</p>}
           <AnswerChart chart={run.chart} />
           <Method method={run.method} />
           <Limitations notes={run.limitations ?? []} />
-          <Findings orgId={orgId} runId={run.id} findings={run.findings} answer={run.answer} />
+          <Findings orgId={orgId} runId={run.id} findings={run.findings} answer={words} />
           {/* Collapsed once the run is over — the answer is the point then — but
               still there, because "how did you get that" is the question this
               product exists to be able to answer. */}
@@ -496,6 +508,16 @@ export function ConversationThread({
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [run, setRun] = useState<Run | null>(null);
+  /**
+   * Every answered run in the thread, by id (**B-106**).
+   *
+   * The screen used to hold exactly one run, so a second question took the first
+   * answer's chart, method line, limitations, findings, evidence controls and
+   * trace off the screen — durable rows with no route to them. A demo that loses
+   * its chart on the next question is the gate criterion failing one message
+   * late.
+   */
+  const [runs, setRuns] = useState<Map<string, Run>>(new Map());
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -512,12 +534,25 @@ export function ConversationThread({
 
   const loadThread = useCallback(async () => {
     try {
-      const [details, thread] = await Promise.all([
+      const [details, thread, answered] = await Promise.all([
         api.conversation(orgId, conversationId),
         api.messages(orgId, conversationId),
+        // **One request for every run in the thread** (**B-106**), not one per
+        // assistant message: the cost of opening a conversation should not grow
+        // with how much somebody has used it.
+        //
+        // **And it cannot take the thread down with it.** The runs enrich the
+        // answers; the messages *are* the conversation. Sharing one `Promise.all`
+        // and one `catch` meant a failure here emptied the screen — words,
+        // questions and all — which CI caught against a stub that did not serve
+        // this route yet. Failing to null keeps whatever runs were already held,
+        // so a later refresh that fails leaves the cards it had rather than
+        // dropping every answer to a bare line of text.
+        api.conversationRuns(orgId, conversationId).catch(() => null),
       ]);
       setConversation(details);
       setMessages(thread);
+      if (answered !== null) setRuns(new Map(answered.map((found) => [found.id, found])));
       return details;
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : "This conversation could not be loaded.");
@@ -629,9 +664,34 @@ export function ConversationThread({
   }, [api, orgId, conversationId, draft, sending, loadThread]);
 
   const answered = run !== null && TERMINAL.has(run.status);
-  const replied =
-    run !== null &&
-    messages.some((message) => message.role === "assistant" && message.run_id === run.id);
+
+  /**
+   * The run to render for an assistant message.
+   *
+   * The live one wins where they overlap: it is polled to completion, so it is
+   * the fresher of the two for the run being watched, and `loadThread` fills the
+   * rest of the thread in around it.
+   */
+  const runFor = (messageRunId: string | null): Run | null => {
+    if (messageRunId === null) return null;
+    const found = run !== null && run.id === messageRunId ? run : (runs.get(messageRunId) ?? null);
+    // Only a finished run has an answer to be the card of. A message should
+    // never name an unfinished one — the reply is written when the run ends —
+    // but a card that rendered "working" inside the thread would put a second
+    // live badge on the screen beside the real one, so the guard is here rather
+    // than assumed.
+    return found !== null && TERMINAL.has(found.status) ? found : null;
+  };
+
+  /**
+   * Whether the live run already has its message in the thread.
+   *
+   * Until it does, the card below the thread is the only place its answer can
+   * appear — `POST …/messages` returns before the reply is written, and this
+   * screen must not go quiet in between (**B-044**).
+   */
+  const liveRunIsInThread =
+    run !== null && messages.some((message) => message.run_id === run.id && message.role === "assistant");
 
   return (
     <Stack>
@@ -658,19 +718,37 @@ export function ConversationThread({
       )}
 
       <ol className={styles.thread}>
-        {messages.map((message) => (
-          <li
-            key={message.id}
-            className={message.role === "user" ? styles.fromUser : styles.fromAgent}
-          >
-            <p className={styles.messageText}>{message.content}</p>
-            <span className={styles.timestamp}>{when(message.created_at)}</span>
-          </li>
-        ))}
+        {messages.map((message) => {
+          const answering = message.role === "assistant" ? runFor(message.run_id) : null;
+          return (
+            <li
+              key={message.id}
+              className={message.role === "user" ? styles.fromUser : styles.fromAgent}
+            >
+              {/* **An answer is its card, not a bubble beside one** (B-106).
+                  Where the run is in hand the whole answer renders here — words,
+                  chart, method, limitations, evidence and trace — so it stays
+                  put when the next question is asked. The plain bubble is the
+                  fallback for a run that could not be fetched: the words are
+                  still the answer, and losing them because a second request
+                  failed would be worse than losing the picture. */}
+              {answering ? (
+                <AnswerCard orgId={orgId} run={answering} answer={message.content} />
+              ) : (
+                <p className={styles.messageText}>{message.content}</p>
+              )}
+              <span className={styles.timestamp}>{when(message.created_at)}</span>
+            </li>
+          );
+        })}
       </ol>
 
       {live && run && <RunProgress orgId={orgId} run={run} />}
-      {answered && run && <AnswerCard orgId={orgId} run={run} replied={replied} />}
+      {/* The live run's card, until its message joins the thread and the card
+          above becomes the one that carries it. Without this a finished run is
+          wordless for as long as the reload takes, which is the Phase 7 gate's
+          own defect (**B-044**). */}
+      {answered && run && !liveRunIsInThread && <AnswerCard orgId={orgId} run={run} />}
 
       <Card>
         <label className={styles.composerLabel} htmlFor="question">

@@ -17,10 +17,15 @@ if [ ! -f .env ]; then
   exit 1
 fi
 
-# shellcheck disable=SC1091
-set -a
-. ./.env
-set +a
+# **Read three values; do not source the file** (**B-102**). The reasoning, and
+# the reader that carries it, live in env_file.sh — shared with web_smoke.sh,
+# which needs the same values for the same reason. Two hand-rolled copies is how
+# the two would drift, and the drifted one would be whichever nobody was running.
+. "$(dirname "$0")/env_file.sh"
+
+PLATFORM_DB_USER=$(env_value PLATFORM_DB_USER)
+PLATFORM_DB_NAME=$(env_value PLATFORM_DB_NAME)
+APP_DB_PASSWORD=$(env_value APP_DB_PASSWORD)
 
 : "${PLATFORM_DB_USER:?PLATFORM_DB_USER missing from .env}"
 : "${PLATFORM_DB_NAME:?PLATFORM_DB_NAME missing from .env}"

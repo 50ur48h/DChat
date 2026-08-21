@@ -144,6 +144,11 @@ PROBES: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
         "/v1/orgs/{org_id}/conversations/{conversation_id}/messages",
         {"content": "How many orders?", "idempotency_key": "probe"},
     ),
+    # The answers in a thread, which the screen reads to render each one as more
+    # than its words (**B-106**). Every role, like the messages above and for the
+    # same reason: this is a person reading their own conversation, and the runs
+    # in it are what they were told.
+    ("GET", "/v1/orgs/{org_id}/conversations/{conversation_id}/runs", None),
     ("GET", "/v1/orgs/{org_id}/runs/{run_id}", None),
     ("GET", "/v1/orgs/{org_id}/runs/{run_id}/events", None),
     # Resolving your own citation is part of reading your own trace, so it is a
@@ -663,6 +668,7 @@ async def test_the_snapshot_says_what_the_architecture_says(matrix_app: Matrix) 
         "GET /v1/orgs/{org_id}/conversations/{conversation_id}",
         "GET /v1/orgs/{org_id}/conversations/{conversation_id}/messages",
         "POST /v1/orgs/{org_id}/conversations/{conversation_id}/messages",
+        "GET /v1/orgs/{org_id}/conversations/{conversation_id}/runs",
         "GET /v1/orgs/{org_id}/runs/{run_id}",
         "GET /v1/orgs/{org_id}/runs/{run_id}/events",
         # A trace whose citations cannot be opened is a trace you are asked to

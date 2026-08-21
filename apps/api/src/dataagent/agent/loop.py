@@ -50,7 +50,13 @@ from dataagent.agent.budget import BudgetState
 from dataagent.agent.capability import JoinGraph
 from dataagent.agent.context import ContextBundle, Definition, history_block
 from dataagent.agent.planner import Plan, plan_query
-from dataagent.agent.state import ExecutionRef, ResearchState, StateFinding, Step
+from dataagent.agent.state import (
+    ExecutionRef,
+    ResearchState,
+    StateFinding,
+    Step,
+    merge_by_evidence,
+)
 from dataagent.agent.tools.base import ToolContext, ToolResult
 from dataagent.agent.tools.knowledge import PassageOut, SearchKnowledgeOut
 from dataagent.agent.tools.registry import ToolRegistry
@@ -442,12 +448,22 @@ async def research(
         budget.spend_llm(tokens)
         state.phase = "reflecting"
 
-        for candidate in reflection.findings:
-            proposed = StateFinding(
-                statement=candidate.statement,
-                support=candidate.supported_by,
-                confidence=candidate.confidence,
-            )
+        # **One claim per set of evidence, before anything is written** (B-107).
+        # Two sentences from one reflection about one query are one claim; they
+        # are joined rather than one of them dropped, because evidence cannot say
+        # which sentence is the better one and this codebase has a rule about
+        # what the prose should carry when a chart is drawn (B-097).
+        proposals = merge_by_evidence(
+            [
+                StateFinding(
+                    statement=found.statement,
+                    support=list(found.supported_by),
+                    confidence=found.confidence,
+                )
+                for found in reflection.findings
+            ]
+        )
+        for proposed in proposals:
             if state.add_finding(proposed):
                 progress.findings_added += 1
                 # The stored copy, whose citations have been filtered down to

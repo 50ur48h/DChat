@@ -57,7 +57,19 @@ COPY src ./src
 COPY tests ./tests
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked
 
-RUN groupadd --system --gid 1001 app \
+# **The image declares the two directories it writes to** (WP11.2b). The API
+# writes encrypted data-source credentials to one and stored query results to the
+# other, and compose mounts something over both. Creating them here, before the
+# chown, is what makes the mount usable: Docker seeds a *named volume* from the
+# image's content and ownership, but only when the path exists in the image —
+# otherwise the volume is created empty and owned by **root**, and `app` cannot
+# write to it. That is the failure the compose smoke hit on its first CI run,
+# `PermissionError: '/app/ops/.secrets/secrets.json.8.tmp'`.
+#
+# It does nothing for a *bind* mount, which never inherits image ownership. A
+# host directory mounted here has to be writable by uid 1001 by its own arrangement.
+RUN mkdir -p /app/ops/.secrets /app/ops/artifacts \
+    && groupadd --system --gid 1001 app \
     && useradd --system --uid 1001 --gid app --no-create-home app \
     && chown -R app:app /app
 USER app

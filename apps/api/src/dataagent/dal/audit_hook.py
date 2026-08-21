@@ -34,7 +34,7 @@ import hashlib
 import uuid
 from dataclasses import dataclass
 
-from dataagent.dal.artifacts import ArtifactStore, encode, expires_at, summarize
+from dataagent.dal.artifacts import ArtifactStore, encodable, encode, expires_at, summarize
 from dataagent.dal.errors import PolicyViolation
 from dataagent.dal.executor import Execution
 from dataagent.db.models import QueryExecution, ResultArtifact
@@ -105,7 +105,8 @@ async def record_success(
             # a row in the platform database is not the place for a thousand of
             # anything.
             sample_rows=[
-                [_plain(value) for value in sample] for sample in execution.frame.rows[:SAMPLE_ROWS]
+                [encodable(value) for value in sample]
+                for sample in execution.frame.rows[:SAMPLE_ROWS]
             ],
             truncated=execution.truncated,
             expires_at=expires_at(),
@@ -267,12 +268,6 @@ async def _attach_storage(org_id: uuid.UUID, execution_id: uuid.UUID, reference:
         )
         if artifact is not None:
             artifact.storage_ref = reference
-
-
-def _plain(value: object) -> object:
-    if value is None or isinstance(value, str | int | float | bool):
-        return value
-    return str(value)
 
 
 def hash_sql(sql: str) -> str:

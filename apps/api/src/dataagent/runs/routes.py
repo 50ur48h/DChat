@@ -516,6 +516,17 @@ async def get_run(
         view = await service.get_run(org_id=context.org_id, run_id=run_id, user_id=context.user_id)
     except NotFoundError as error:
         raise _not_found("run") from error
+    return _run_out(view)
+
+
+def _run_out(view: service.RunView) -> RunOut:
+    """One run, as the API states it.
+
+    Shared by the single-run route and the thread's list (**B-106**) so the two
+    cannot drift: a field added to one and not the other would make an answer
+    look different depending on which request fetched it, and the thread is the
+    place a reader compares two answers side by side.
+    """
     return RunOut(
         id=view.id,
         conversation_id=view.conversation_id,
@@ -543,6 +554,32 @@ async def get_run(
         definitions_applied=view.definitions_applied,
         definitions_available=view.definitions_available,
     )
+
+
+@router.get(
+    "/orgs/{org_id}/conversations/{conversation_id}/runs",
+    response_model=list[RunOut],
+    summary="Every run in this conversation, oldest first",
+)
+async def list_conversation_runs(
+    context: Annotated[RequestContext, Depends(require_member)],
+    conversation_id: ConversationId,
+) -> list[RunOut]:
+    """What the thread needs to render an answer as more than its words (**B-106**).
+
+    The screen used to hold one run and render one answer card, so every answer
+    but the newest lost its chart, its method, its findings, its evidence and its
+    trace. One request for the thread, rather than one per assistant message.
+    """
+    try:
+        views = await service.list_conversation_runs(
+            org_id=context.org_id,
+            user_id=context.user_id,
+            conversation_id=conversation_id,
+        )
+    except NotFoundError as error:
+        raise _not_found("conversation") from error
+    return [_run_out(view) for view in views]
 
 
 @router.get(

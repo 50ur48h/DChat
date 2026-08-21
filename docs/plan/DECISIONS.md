@@ -4,6 +4,44 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-040 — CI's model is a stub inside the shipped image, refused twice everywhere else
+Date: 2026-08-20 · Phase: 11 · PR: #87 (WP11.2b) · Migration: none
+Context: The M11 gate wants a browser driving the **real** product in CI — real
+API, real platform database under RLS, real DAL, real catalog, real seeded
+customer database. Every part of that chain runs in CI for free and
+deterministically except one: the model. Architecture 8.3 has no offline mode
+and the product deliberately has none either (the README says so), so something
+has to stand in.
+Options: (a) a real key — no fork's PR can use a secret, and a green build would
+then depend on a provider's uptime and a model's mood; (b) leave CI on `FakeLLM`
+inside pytest, which is where it already is and which never starts a browser, so
+"the stack wires up" stays unproven; (c) a scripted provider selected by
+environment, shipped in the ordinary image.
+Decision: **(c)**, the owner's call of 2026-08-20. `LLM_PROVIDERS=scripted`
+selects `llm/scripted.py`, which answers each role with the smallest thing that
+satisfies that role's schema. It is in the **image**, not in a test harness, on
+purpose: a CI-only image would prove a build nobody deploys.
+Consequences: **a stub reaches the shipped image, and that is the whole risk.**
+`ProviderCaps.is_stub` already names the hazard — a stub in production would not
+fail, it would fabricate, confidently, in a product whose entire claim is that
+its answers are evidenced. So **two independent guards**, and they stay separate
+because they see different things. At boot,
+`Settings.assert_llm_providers_are_production_safe` refuses to start a production
+build or environment naming a stub in `LLM_PROVIDERS` — boot rather than first
+call, for the reason the auth and secrets assertions give: a service that starts,
+answers its health check, accepts a question and *then* refuses has already told
+an operator it was fine. At first use, `registry.get_provider` refuses any
+provider whose capabilities report `is_stub`, which catches what configuration
+cannot see — one handed to `register_provider` at runtime. The test that carries
+this **boots a real app** with production settings and the scripted provider
+selected, across both halves of `is_production`; calling the checker directly
+would prove the function refuses and say nothing about whether the boot path asks
+it. **And the gate wording is part of this decision**: plan WP11.2 now says in as
+many words that the CI smoke proves the stack wires up and can never show that a
+question was understood, with the chart criterion met by a live walk against a
+real model. A gate signed off on a canned answer would be B-087's failure at the
+level of the gate itself.
+
 ## D-039 — A conversation is archived, never deleted
 Date: 2026-08-20 · Phase: 11 · PR: #86 (WP11.2a) · Migration 0026
 Context: Plan WP11.2 lists "conversation history list + rename/**delete**". A

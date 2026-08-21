@@ -27,6 +27,7 @@ jobs:
     outputs:
       api: ${{ steps.filter.outputs.api }}
       web: ${{ steps.filter.outputs.web }}
+      smoke: ${{ steps.filter.outputs.smoke }}
       connectors: ${{ steps.filter.outputs.connectors }}
     steps:
       - uses: actions/checkout@v4
@@ -41,6 +42,15 @@ jobs:
               - '.github/workflows/ci.yml'
             web:
               - 'apps/web/**'
+              - 'Makefile'
+              - '.github/workflows/ci.yml'
+            # The compose smoke drives both halves at once, so it is the one job
+            # that would notice them disagreeing — and the only one for which a
+            # change to the compose file or the seed is a reason to run.
+            smoke:
+              - 'apps/web/**'
+              - 'apps/api/**'
+              - 'ops/**'
               - 'Makefile'
               - '.github/workflows/ci.yml'
             connectors:
@@ -450,6 +460,94 @@ jobs:
       - name: Nothing to do
         if: env.RUN != 'true'
         run: echo "No changes under apps/web — skipping."
+
+  # The whole product, in a browser, on a real compose stack (plan WP11.2b).
+  #
+  # Its own job because it needs everything: both images built, a platform
+  # database with its migrations and its unprivileged role, a seeded customer
+  # database, and a browser. The `web` job above is the cheap one — a stub API,
+  # no containers — and merging the two would make every lint failure wait on a
+  # docker build.
+  #
+  # **What green here means, and what it does not.** It means login, source
+  # registration, catalog discovery, profiling, asking, answering, storage and
+  # the trace all connect. It does not mean a question was understood: the model
+  # is `llm/scripted.py`, selected by `LLM_PROVIDERS` below and refused by two
+  # independent guards outside CI (**D-040**). Plan WP11.2's gate wording says so
+  # explicitly, and the chart criterion is met by a live walk instead.
+  #
+  # Path filter per **D-007**: the job always runs so the check always reports,
+  # and its steps are what the filter gates. It watches `api` as well as `web` —
+  # this is the one job that would notice the two halves disagreeing.
+  web-e2e:
+    needs: changes
+    runs-on: ubuntu-latest
+    # The observed cold run on a developer machine is ~3 minutes, most of it
+    # `next dev` compiling routes on first request. A cold runner also builds
+    # both images from nothing. Bounded well above that for the reason the
+    # `web` job is bounded: a step that reaches the network must not be able to
+    # burn the six-hour default when something outside this repo stalls.
+    timeout-minutes: 30
+    env:
+      RUN: ${{ needs.changes.outputs.smoke }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        if: env.RUN == 'true'
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+      - uses: pnpm/action-setup@v4
+        if: env.RUN == 'true'
+        with:
+          package_json_file: apps/web/package.json
+      - uses: actions/setup-node@v4
+        if: env.RUN == 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - name: Install
+        if: env.RUN == 'true'
+        run: |
+          uv sync --locked --directory apps/api
+          pnpm --dir apps/web install --frozen-lockfile
+      # No `--with-deps`, for the reason the `web` job gives at length: that flag
+      # becomes root and runs `apt-get update`, which stalled for 1h 58m on
+      # GitHub's own mirror on 2026-08-19.
+      - name: Install Chromium
+        if: env.RUN == 'true'
+        timeout-minutes: 8
+        run: pnpm --dir apps/web exec playwright install chromium
+      # The stack's configuration, which on a developer's machine is a file they
+      # own. Local-only values; the smoke reaches no paid API and stores no
+      # customer credential worth protecting — the one it does store is the
+      # fixture's own read-only login, written three lines above.
+      - name: A .env for the stack
+        if: env.RUN == 'true'
+        run: |
+          cp .env.example .env
+          {
+            echo "LOCAL_SECRETS_KEY=$(uv run --directory apps/api python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+          } >> .env
+      # The script prints the api and web logs itself when the walk fails, before
+      # it takes the stack down — a step here could not, because by then there
+      # would be nothing left to ask.
+      - name: The walk
+        if: env.RUN == 'true'
+        run: make test.web.smoke
+      - name: Keep the trace of a failure
+        if: failure() && env.RUN == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-smoke
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
+          retention-days: 7
+      - name: Nothing to do
+        if: env.RUN != 'true'
+        run: echo "No changes under apps/web or apps/api — the smoke did not need to run."
 
   # Proves both images still build. Pushing them arrives with Phase 12.
   docker:
