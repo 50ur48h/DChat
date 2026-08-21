@@ -22,6 +22,10 @@ Next step:        **Merge #87, then open Phase 12.** The gate is signed and the
                   approval, the GitHub-OIDC app registration, a budget alert
                   email and cap, which keys go to Key Vault, and any custom
                   domain (plan §3.2 / §6 Phase 12).
+                  **B-109 is scoped and not built** (owner, 2026-08-21): every
+                  chart is one flat colour, and the model apologised for it in
+                  the answer text. It can run ahead of WP12.1 while that input is
+                  outstanding, and does not reopen Phase 11.
                   **B-108 wants a Linux machine** and cannot be closed from this
                   host. **B-101** (small screens) and **B-102**'s open half
                   (nothing walks the documented path automatically) are the two
@@ -33,7 +37,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 11.
-Last updated: 2026-08-21 by Claude Code (**Phase 11 signed off by the owner**; #87 ready for review and awaiting merge)
+Last updated: 2026-08-21 by Claude Code (Phase 11 signed off and merged; B-109 scoped and filed, not built)
 
 ---
 
@@ -2823,9 +2827,13 @@ unexplained.
       and the card is now the assistant turn) and **B-107** (B-096's rule applied
       to one of its two call sites). What remains is the owner's second walk, and
       the GATE line below stays unticked until it happens
-- [ ] ~~WP11.2 History/catalog/members polish + Playwright smoke~~ *(split into
-      11.2a and 11.2b on 2026-08-20 — seven workstreams in one gate PR is a diff
-      nobody can review properly)*
+      **Superseded:** ~~WP11.2 History/catalog/members polish + Playwright
+      smoke~~ — split into 11.2a and 11.2b on 2026-08-20, because seven
+      workstreams in one gate PR is a diff nobody can review properly. Kept as a
+      note rather than an unticked box: the work was split, not abandoned, and a
+      box that can never be ticked is a small lie in the file the plan calls the
+      single source of truth. What follows is that entry's own record, which is
+      worth keeping because it says why each item was grouped with the others.
       — carries **B-017**: recovery when an org has no Admin who can sign in
       (owner's call 2026-08-12, moved forward from Phase 12)
       — and **B-061** with **B-020**: internal identifiers and the wrong
