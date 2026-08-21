@@ -157,6 +157,23 @@ function Citation({
  * the single place a colour is decided, and a chart with its own palette is a
  * chart that drifts from the product the first time somebody changes a token.
  */
+/**
+ * The light-mode categorical steps, for the one case `getComputedStyle` returns
+ * nothing: jsdom, where the unit tests run. Not a second source of truth — the
+ * tokens are — but a chart that silently fell back to eight copies of one colour
+ * would be the flat purple this was built to fix, wearing a passing test.
+ */
+const CHART_CATEGORY_FALLBACK = [
+  "#5b5bd6",
+  "#eb6834",
+  "#1baf7a",
+  "#eda100",
+  "#e87ba4",
+  "#008300",
+  "#2a78d6",
+  "#e34948",
+];
+
 function chartTheme(element: HTMLElement): Record<string, unknown> {
   const style = getComputedStyle(element);
   const token = (name: string, fallback: string) =>
@@ -178,10 +195,20 @@ function chartTheme(element: HTMLElement): Record<string, unknown> {
     titleFontWeight: 500 as const,
   };
 
+  // **The categorical range, in fixed order** (**B-109**). Read from the tokens
+  // like everything else here, because a palette written into a spec is the same
+  // bug design.md names for a colour written into a component. Never cycled: a
+  // ninth series would repeat slot 1 and two series would look like one, which
+  // is why `charts.MAX_SERIES` refuses before it can happen.
+  const category = Array.from({ length: 8 }, (_, index) =>
+    token(`--chart-cat-${index + 1}`, CHART_CATEGORY_FALLBACK[index] ?? primary),
+  );
+
   return {
     // Transparent, so the card's surface shows through and the chart is part of
     // the answer rather than a picture pasted onto it.
     background: "transparent",
+    range: { category },
     font: style.fontFamily,
     axis,
     axisX: { ...axis, labelAngle: 0 },

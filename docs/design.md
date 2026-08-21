@@ -56,6 +56,45 @@ background with a readable `-strong` foreground; never use `-soft` for text.
 Semantic aliases (`--ok`, `--warn`, `--danger`) point at the `-strong` values so
 status code never names a hue directly.
 
+**Chart series** — a separate, fixed-order categorical ramp, `--chart-cat-1`
+through `--chart-cat-8`. It exists because rule 2 cuts both ways: the pastels
+above *mean* something — success, information, warning, error — so painting a
+category with them makes a rose bar read as a failure. A hue that means two
+things means neither.
+
+| Slot | Hue | Light | Dark |
+|---|---|---|---|
+| 1 | indigo | `#5b5bd6` | `#7a7ae6` |
+| 2 | orange | `#eb6834` | `#d95926` |
+| 3 | aqua | `#1baf7a` | `#199e70` |
+| 4 | yellow | `#eda100` | `#c98500` |
+| 5 | magenta | `#e87ba4` | `#d55181` |
+| 6 | green | `#008300` | `#008300` |
+| 7 | blue | `#2a78d6` | `#3987e5` |
+| 8 | red | `#e34948` | `#e66767` |
+
+Four rules, none of them taste:
+
+1. **Fixed order, never cycled.** Slot 8 is the cap the server enforces
+   (`charts.MAX_SERIES`); a ninth series would repeat slot 1, and two series
+   wearing one colour is a chart that lies. Past eight the honest answer is a
+   filter, a facet, or the table.
+2. **Colour follows the entity, not its rank.** A filter that removes a series
+   must not repaint the survivors.
+3. **A chart with one series uses `--primary`**, not slot 1 — the categorical
+   range applies only where colour carries a split. Colour for a lone series
+   would be decoration, which rule 2 above forbids.
+4. **Validated as a set, not chosen.** Both columns pass lightness band, chroma
+   floor, colour-vision separation on adjacent pairs and normal-vision
+   separation, against the card surface in their own mode. Light slots 3, 4 and
+   5 fall below 3:1 contrast on white; the legend and the always-available
+   result table are what relieve that, so a chart must never carry identity by
+   colour alone. Re-run the check before changing any value here.
+
+The dark column is the same eight hues stepped for the dark surface, not a
+second palette. Slot 1 is a shade below `--primary` there, because the dark
+primary sits just outside the lightness band the set was validated in.
+
 ### Spacing
 
 A 4px scale: `--space-1` 4px · `-2` 8px · `-3` 12px · `-4` 16px · `-5` 24px ·

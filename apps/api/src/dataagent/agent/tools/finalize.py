@@ -70,6 +70,16 @@ class ChartAsk(BaseModel):
     y: str = Field(
         default="", max_length=120, description="Column for the vertical axis. Must hold numbers."
     )
+    series: str = Field(
+        default="",
+        max_length=120,
+        description=(
+            "Optional column to split the marks by colour, when the split is "
+            "part of the answer — revenue by month *per channel*. Leave empty "
+            "for a single series: colouring one series by its own x values adds "
+            "no information the axis does not already carry, and is refused."
+        ),
+    )
 
 
 class FinalizeIn(BaseModel):
@@ -84,7 +94,11 @@ class FinalizeIn(BaseModel):
         max_length=4000,
         description=(
             "The answer, in plain words, for the person who asked. If you could "
-            "not answer, say what is missing instead — do not guess."
+            "not answer, say what is missing instead — do not guess. Write about "
+            "the data and never about the chart: whether one can be drawn is "
+            "decided after you answer, and the card says so in its own place. An "
+            "apology for what a chart cannot do reads to the reader as the "
+            "product being broken."
         ),
     )
     answered: bool = Field(

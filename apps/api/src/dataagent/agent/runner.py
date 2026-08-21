@@ -911,7 +911,17 @@ async def _chart_for(
     result = await tools.call(
         context,
         "create_chart_spec",
-        {"execution_id": ask.of, "mark": ask.mark, "x": ask.x, "y": ask.y},
+        {
+            "execution_id": ask.of,
+            "mark": ask.mark,
+            "x": ask.x,
+            "y": ask.y,
+            # **B-109.** Empty means "no split", which is the common case, and the
+            # tool's schema says that with `None` rather than with `""` — the
+            # model's schema uses the empty string because `ChartAsk` is closed
+            # and every member defaulted (B-033), so the two idioms meet here.
+            "series": ask.series.strip() or None,
+        },
         events=events,
     )
     if not result.ok or not isinstance(result.data, CreateChartOut):

@@ -62,6 +62,14 @@ MARKS: tuple[str, ...] = ("bar", "line", "point", "area")
 #: this the honest answer is the table, which has all of them.
 MAX_CATEGORIES = 50
 
+#: How many *coloured* series a chart may carry, which is a different and much
+#: smaller number (**B-109**): it is the size of the categorical palette in
+#: `globals.css`, and a ninth series would have to repeat a hue. Two series
+#: wearing one colour is a chart that lies, and generating a ninth hue is how a
+#: palette stops being a palette. Past this the honest answers are a filter, a
+#: facet or the table — and the refusal says which.
+MAX_SERIES = 8
+
 #: How many points may travel inline in a spec. The spec is JSON in an HTTP
 #: response and then in a browser's memory; a result larger than this is a table.
 MAX_POINTS = 1_000
@@ -350,12 +358,32 @@ def decide(frame: Frame, request: ChartRequest) -> Chart:
             )
 
     if request.series is not None:
+        # **Colour is a claim, not decoration** (**B-109**, and docs/design.md's
+        # second rule in as many words: *a hue is a claim that this thing has a
+        # state or a category. Never colour for interest*). Splitting a series by
+        # the same column that is already on an axis paints the axis a second
+        # time: eighteen months in eighteen hues, a legend restating the tick
+        # labels, and not one fact added.
+        #
+        # **Refused rather than quietly dropped.** A chart that came back mono
+        # when colour was asked for, with nothing said, is B-060 in a picture —
+        # the run knew a choice had been made and the reader did not.
+        if request.series in (request.x, request.y):
+            axis = "horizontal" if request.series == request.x else "vertical"
+            return _decline(
+                "colour_would_repeat_an_axis",
+                f"No chart was drawn: {request.series!r} is already on the {axis} axis, so "
+                "colouring by it would say the same thing twice. Colour is kept for a split "
+                "the axes do not show — the same figures broken down by another column.",
+            )
         series_distinct = len({str(value) for value in _column_values(frame, request.series)})
-        if series_distinct > MAX_CATEGORIES:
+        if series_distinct > MAX_SERIES:
             return _decline(
                 "too_many_series",
                 f"No chart was drawn: {request.series!r} has {series_distinct:,} distinct values, "
-                f"and a chart here shows at most {MAX_CATEGORIES} of them at once.",
+                f"and a chart here colours at most {MAX_SERIES} at once — past that a ninth "
+                "would repeat a colour and two series would look like one. The table has all "
+                "of them.",
             )
 
     return Chart(spec=_spec(frame, request, x_kind))

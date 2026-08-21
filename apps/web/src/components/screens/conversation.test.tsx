@@ -446,6 +446,33 @@ describe("the chart, and the reason there is none", () => {
     data: { values: [{ month: "2026-07-01", revenue: 6214 }] },
   };
 
+  it("gives vega a categorical range, so a split is not eight of one colour", async () => {
+    /**
+     * **B-109.** Every chart was `--primary` and nothing else, and the model
+     * apologised in the answer for a colour setting it had no field to ask for.
+     * The range is read from the tokens like the rest of the theme, because a
+     * palette written into a spec is the same bug design.md names for a colour
+     * written into a component.
+     *
+     * Asserted through the embed call rather than on the CSS, since what matters
+     * is that vega is *given* the range — jsdom resolves no custom properties,
+     * so the fallback is what renders here and the shape is the property.
+     */
+    const embed = (await import("vega-embed")).default as unknown as ReturnType<typeof vi.fn>;
+    embed.mockClear();
+    routeFetch({ run: { ...ANSWERED, limitations: [], chart: { spec: SPEC } } });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+    await screen.findByTestId("chart");
+
+    const config = embed.mock.calls[0]?.[2] as { config?: { range?: { category?: string[] } } };
+    const category = config?.config?.range?.category ?? [];
+    expect(category).toHaveLength(8);
+    // Eight distinct hues, in a fixed order. A palette that had quietly become
+    // eight copies of the primary would pass a length check and nothing else.
+    expect(new Set(category).size).toBe(8);
+  });
+
   it("says why there is no chart, where the chart would have been", async () => {
     // **The case the whole design turned on.** A picture that silently fails to
     // appear is indistinguishable from a broken page, so the reason renders in
