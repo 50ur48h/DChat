@@ -22,10 +22,23 @@ Next step:        **Merge #87, then open Phase 12.** The gate is signed and the
                   approval, the GitHub-OIDC app registration, a budget alert
                   email and cap, which keys go to Key Vault, and any custom
                   domain (plan §3.2 / §6 Phase 12).
-                  **B-109 is scoped and not built** (owner, 2026-08-21): every
-                  chart is one flat colour, and the model apologised for it in
-                  the answer text. It can run ahead of WP12.1 while that input is
-                  outstanding, and does not reopen Phase 11.
+                  **B-109 is three parts of four and stays open**: charts carry
+                  a validated eight-hue categorical ramp where colour means a
+                  split and refuse it where it would repeat an axis — verified
+                  live — but **the model still narrates the chart in the answer**,
+                  which is the defect as reported. The field description was
+                  measured and *does* reach the model, so the next lever is the
+                  composing prompt, tried once; two failed levers means the prose
+                  is driven by something not yet found.
+                  **B-110** (a schema-correspondence check and a dead-function
+                  pass), **B-111** (an answer overstating what it could not see)
+                  and **B-112** (the character cap nothing downstream can know
+                  about) are all **filed and not built**. B-110 carries the point
+                  worth keeping: **coverage cannot see that class by
+                  construction**, because carefully testing a capability is
+                  exactly what hides that nothing reaches it. B-109 carries its
+                  sibling: **a measurement built on a reconstruction is a second
+                  guess wearing a number.**
                   **B-108 wants a Linux machine** and cannot be closed from this
                   host. **B-101** (small screens) and **B-102**'s open half
                   (nothing walks the documented path automatically) are the two
@@ -37,7 +50,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 11.
-Last updated: 2026-08-21 by Claude Code (Phase 11 signed off and merged; B-109 scoped and filed, not built)
+Last updated: 2026-08-21 by Claude Code (B-109 three parts of four, open on the prose; B-110/111/112 filed)
 
 ---
 
