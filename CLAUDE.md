@@ -35,9 +35,42 @@ make evals              # eval harness with FakeLLM (Phase 9+)
   `TENANT_TABLES` and an extension of the rls_proof suite.
 - **Every gate PR ends with a manual test script**: numbered steps and what
   the user should see at each, including the failure case.
+- **A new capability ships with proof it is *reached*, not only proof it
+  works.** See below — this is the defect this project produces most.
 - Mid-phase, verify it yourself and report the evidence. Only ask the user to
   check what you genuinely cannot: rendered browser UI, anything specific to
   their machine, and decisions. Their time is the scarce resource.
+
+## Built, tested, unreachable — this project's characteristic defect
+Four instances so far, and **not one was caught by CI**:
+
+- **B-083** — a definition reached the critic and never the model, so the rule
+  was enforced against a planner that had not been told it. `Definition.render()`,
+  written for exactly that job, was called by nothing.
+- **B-085** — an imported definition answers only to its key and its label, and
+  no real question is phrased in those words. Eighteen metrics imported, nothing
+  bound.
+- **B-100** — the answer's method line, computed on every run and read by
+  nothing.
+- **B-109** — a colour channel assembled, carried, accepted by the tool and
+  asserted by a test, with no field on the schema the model actually fills.
+
+**Coverage cannot see this class, by construction.** A unit test hands a function
+its arguments directly, which is the one thing the product cannot do — so the
+more carefully a capability is tested in isolation, the more convincingly it
+looks exercised. `charts._spec`'s colour branch was covered the whole time it
+was unreachable. No coverage threshold changes that.
+
+**So: a new capability ships with proof it is reached on the live path.** A test
+that drives it the way the product does — through the schema the model fills,
+the route the screen calls, the prompt the run sends — not only one that calls it
+directly. B-109's regression test is the shape: it asserts a refusal code that is
+only reachable if the field survived `ChartAsk` → `_chart_for` → the tool →
+`decide` → the stored run, so if the field ever stops travelling, the test goes
+red rather than staying green over dead code.
+
+Every one of the four was found by reading or walking. Until **B-110** ships a
+schema-correspondence check, walking is still the only thing that has caught it.
 
 ## Environment quirks
 - Python via uv (apps/api); Node via pnpm (apps/web).
@@ -110,10 +143,34 @@ make evals              # eval harness with FakeLLM (Phase 9+)
   `docker exec … sh -c '/opt/…'` arrives as nonsense. Start such command strings
   with a word (`exec /opt/…`), as `ops/scripts/seed_mssql.sh` does.
 
-## Customer data never enters this repo
-The GitHub remote is **public**. Anything a customer supplies — the database, its
-data dictionary, and anything derived from either — lives under `.SampleData/`,
-which is gitignored as a whole directory rather than by file extension.
+## Customer data: the default, and the one sample that is cleared
+The GitHub remote is **public**. The default is that anything a customer supplies
+— the database, its data dictionary, and anything derived from either — lives
+under `.SampleData/`, which is gitignored as a whole directory rather than by
+file extension.
+
+**One exception, granted by the owner on 2026-08-22.** The F&B sample this
+project has been built against is **cleared for the planning documents**: its
+shape, its table and metric names, and the figures already derived from it in
+`STATUS.md`, `BACKLOG.md` and `DECISIONS.md` may stay and may be added to. That
+is deliberate rather than tolerated — entries like B-060, B-085 and B-092 are
+only worth reading because they carry the real numbers (`move_type` at
+`DO 78%, PI 17%, UC 4%`, a filter matching 7 rows in 51,356, eighteen imported
+metrics none of whose questions name their key), and a version with the figures
+removed would record that something happened without recording what.
+
+**The rule this section had before was written as an absolute and the repo did
+not keep it**, which is worse than a narrower rule honestly stated: a rule
+everyone is quietly breaking stops being read at all.
+
+**What is never cleared, for this client or any other.** Credentials and
+connection strings; the raw data itself, which stays in `.SampleData/`; and
+anything that would identify a person rather than a schema.
+
+**Any other client's data needs the owner's explicit permission first**, asked
+for and given *before* it reaches a tracked file — not after, and not inferred
+from this exception. The clearance above is for one sample and does not
+generalise.
 
 **Scan DDL for literals, not just tables for rows.** A ported view definition is
 schema by its file extension and *content* by what is inside it: `ops/seed/`
