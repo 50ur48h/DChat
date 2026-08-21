@@ -715,7 +715,21 @@ async def _compose(
         "Answer the question in plain words for the person who asked. Use only "
         "these numbers. Cite in supported_by the execution ids your answer rests "
         "on. If the evidence does not actually answer the question, set answered "
-        "to false and say what is missing."
+        "to false and say what is missing.\n\n"
+        # **B-109, second lever.** The same instruction is already on
+        # `FinalizeIn.answer`'s field description, and that description was
+        # *measured* reaching the model — it is in `model_json_schema()`, the
+        # provider reports native schema support, and the schema is sent
+        # verbatim. The model narrated the chart anyway. A field description
+        # describes what a field should contain; this is the text the model is
+        # actually answering, which is a different kind of instruction and the
+        # only untried placement. If it narrates the chart from here too, the
+        # prose is driven by something neither lever has found, and that is worth
+        # knowing rather than escalating into a third.
+        "Write about the data and never about the chart. Whether a picture can "
+        "be drawn is decided after you answer and shown in its own place, so a "
+        "sentence about what a chart can or cannot do belongs nowhere in this "
+        "answer — to the reader it reads as the product being broken."
     )
     completion = await llm.complete(
         role="compose",
