@@ -48,16 +48,25 @@ MIN_REMAINING_PERCENT=80
 # Emits "key<TAB>state" for every tracked checkbox line, where the key is stable
 # across rewordings: a WP number, a backlog ID, or GATE plus its phase. Lines
 # with no such key (prose bullets) are not tracked and not reported.
+#
+# **The key is what the item IS, not what it mentions**, which is why every
+# pattern is anchored. Unanchored, `- [x] B-098 … Small, WP11.2's polish pass`
+# was keyed **WP11.2**, because the WP branch is tried first and matched in the
+# middle of the sentence — so B-098's own state went unwatched from the day it
+# was written, and WP11.2 acquired a second, contradictory entry. Leading `*` and
+# `~` are stripped first, so bold and struck-through items key the same as plain
+# ones.
 readonly TRACKED_ITEMS_AWK='
   { sub(/\r$/, "") }
   /^## Phase [0-9]+/ { phase = $3; next }
   /^- \[.\]/ {
     state = substr($0, 4, 1)
     rest  = substr($0, 7)
+    gsub(/^[*~ ]+/, "", rest)
     key   = ""
-    if (rest ~ /^GATE:/)                      key = "GATE(phase " phase ")"
-    else if (match(rest, /WP[0-9]+\.[0-9]+[a-z]?/)) key = substr(rest, RSTART, RLENGTH)
-    else if (match(rest, /B-[0-9]+/))         key = substr(rest, RSTART, RLENGTH)
+    if (rest ~ /^GATE:/)                       key = "GATE(phase " phase ")"
+    else if (match(rest, /^WP[0-9]+\.[0-9]+[a-z]?/)) key = substr(rest, RSTART, RLENGTH)
+    else if (match(rest, /^B-[0-9]+/))         key = substr(rest, RSTART, RLENGTH)
     if (key != "") print key "\t" state
   }
 '
@@ -99,6 +108,22 @@ check_structure() {
   items=$(awk "$TRACKED_ITEMS_AWK" "$file" | wc -l | tr -d ' ')
   if ((items < MIN_ITEMS)); then
     fail "only $items tracked items left; below the floor of $MIN_ITEMS"
+  fi
+
+  # **One key, one state.** An item may legitimately appear twice — the same WP
+  # listed under two phases — and that is fine while both say the same thing.
+  # Two entries that *disagree* are not: the baseline comparison keeps the last
+  # one it reads, so the file and its baseline can resolve the same key
+  # differently and the guard reports a regression nobody made. That is not a
+  # hypothetical; it cost an afternoon, and the message it printed —
+  # "WP11.2 went from [x] to [ ]" — was true of nothing in the diff.
+  local conflicted
+  conflicted=$(awk "$TRACKED_ITEMS_AWK" "$file" | sort -u | cut -f1 | uniq -d)
+  if [[ -n $conflicted ]]; then
+    local key
+    while read -r key; do
+      fail "$key is tracked more than once with different states — one item, one box"
+    done <<<"$conflicted"
   fi
 }
 
@@ -251,6 +276,31 @@ selftest() {
   local no_gate=$dir/no_gate.md
   awk '!/GATE:/ || ++seen != 2' "$good" >"$no_gate"
   run_case 'a phase that lost its GATE line is caught' fail "$no_gate" "$good"
+
+  # The two cases the WP11.2 collision taught, on 2026-08-21.
+  local same_key_agreeing=$dir/same_key_agreeing.md
+  {
+    cat "$good"
+    printf -- '- [x] WP3.2 The same work, listed again under another phase\n'
+  } >"$same_key_agreeing"
+  run_case 'one key twice, both saying the same thing, passes' pass \
+    "$same_key_agreeing" "$good"
+
+  local same_key_conflicting=$dir/same_key_conflicting.md
+  {
+    cat "$good"
+    printf -- '- [ ] WP3.2 The same key, disagreeing with itself\n'
+  } >"$same_key_conflicting"
+  run_case 'one key twice with different states is caught' fail \
+    "$same_key_conflicting" "$good"
+
+  local mentions_a_wp=$dir/mentions_a_wp.md
+  sed 's/^- \[x\] WP6\.1 Did a thing/- [x] B-777 A backlog item that mentions WP6.1 in passing/' \
+    "$good" >"$mentions_a_wp"
+  # B-777 must be tracked as B-777. Keyed as WP6.1 it would both hide B-777 and
+  # give WP6.1 a duplicate, which is exactly what happened to B-098.
+  run_case 'an item that merely mentions a WP keys as itself' fail \
+    "$mentions_a_wp" "$good"
 
   local grown=$dir/grown.md
   {

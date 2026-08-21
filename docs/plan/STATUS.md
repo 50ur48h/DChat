@@ -2827,9 +2827,13 @@ unexplained.
       and the card is now the assistant turn) and **B-107** (B-096's rule applied
       to one of its two call sites). What remains is the owner's second walk, and
       the GATE line below stays unticked until it happens
-- [ ] ~~WP11.2 History/catalog/members polish + Playwright smoke~~ *(split into
-      11.2a and 11.2b on 2026-08-20 — seven workstreams in one gate PR is a diff
-      nobody can review properly)*
+      **Superseded:** ~~WP11.2 History/catalog/members polish + Playwright
+      smoke~~ — split into 11.2a and 11.2b on 2026-08-20, because seven
+      workstreams in one gate PR is a diff nobody can review properly. Kept as a
+      note rather than an unticked box: the work was split, not abandoned, and a
+      box that can never be ticked is a small lie in the file the plan calls the
+      single source of truth. What follows is that entry's own record, which is
+      worth keeping because it says why each item was grouped with the others.
       — carries **B-017**: recovery when an org has no Admin who can sign in
       (owner's call 2026-08-12, moved forward from Phase 12)
       — and **B-061** with **B-020**: internal identifiers and the wrong
