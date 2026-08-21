@@ -1,40 +1,31 @@
 # STATUS — data-agent build
 
-Current position: **Phases 0–5 and 7–11's first four items are done. Phase 6
-                  merged, its gate partially met and deliberately unticked.**
-                  **Phase 11 is most of the way through**: B-088 (definitions can
-                  be corrected and retired), B-090 (the environment guard),
-                  B-060 (reproduced, diagnosed, and its two chosen fixes built as
-                  B-092 and B-093), B-094 (a retired definition can be brought
-                  back), **WP11.1 — charts**, **B-095** (a run whose queries
-                  all failed is refused, not answered) and **WP11.2a** (polish,
-                  B-017, B-100, B-098) are all merged. What remains is
-                  **WP11.2b**, the phase gate.
+Current position: **Phases 0–5 and 7–11 are done. Phase 6 merged, its gate
+                  partially met and deliberately unticked.**
+                  **Phase 11 is signed off** (owner, 2026-08-21), on the second
+                  walk: the first found B-105, B-106 and B-107 and did not sign.
+                  The gate line below carries the evidence and, as importantly,
+                  what it does **not** cover — small screens (B-101), Linux
+                  (B-108), and **B-044**, since twice in this walk the owner's
+                  stack silently served old code while the branch itself was
+                  fine.
                   The session of 2026-08-19 was unusually productive for a reason
                   worth repeating: **six defects were found by the owner walking
                   the product by hand**, not by the suite — B-094, B-095, B-096,
                   B-097, B-098, and the two screen defects in B-088's web half.
                   Every one was invisible to a green build.
-Next step:        **Re-walk the manual test script, and sign off or don't.**
-                  The owner walked the gate on 2026-08-20, did not tick it, and
-                  found three things. All three are now fixed in #87.
-                  **B-105** — a monthly aggregate drawn on a continuous day axis,
-                  four bars on a weekly calendar with the gaps reading as zero.
-                  **B-106** — every answer but the newest lost its chart, method,
-                  limitations, findings, evidence and trace; **raised to a gate
-                  blocker by the owner**, on the demo: *"a chart that disappears
-                  on the second question fails in front of an audience."*
-                  **B-107** — two findings on one query, because B-096's rule had
-                  been applied to one of its two call sites.
-                  The script in #87 now has a **step 3b** (the bar chart) and a
-                  **step 4b** (ask again; both answers keep their evidence).
-                  **CI is fully green on the branch** — `web` 1m31s, `web-e2e`
-                  2m19s, `api` 12m32s — so the walk is against a validated tree.
-                  **The GATE box stays unticked**, and `[~]` stays on WP11.2b,
-                  until that walk happens.
-                  **B-101** (small screens) is outside the gate, so no sign-off
-                  covers phones. **B-108** — the local stack's uid hole — cannot
-                  be tested from this host at all.
+Next step:        **Merge #87, then open Phase 12.** The gate is signed and the
+                  PR is out of draft; nothing in WP11.2b is outstanding.
+                  Phase 12 is `p12.1-bicep` and it is the phase whose every PR
+                  needs human review. Its **USER INPUT** batch is unanswered and
+                  blocks the first work package — subscription id, region, naming
+                  approval, the GitHub-OIDC app registration, a budget alert
+                  email and cap, which keys go to Key Vault, and any custom
+                  domain (plan §3.2 / §6 Phase 12).
+                  **B-108 wants a Linux machine** and cannot be closed from this
+                  host. **B-101** (small screens) and **B-102**'s open half
+                  (nothing walks the documented path automatically) are the two
+                  things this phase deliberately left behind.
 Merge policy: ASK
 Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  (owner, 2026-08-17), so `nightly-evals.yml` can run — keep its
@@ -42,7 +33,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 11.
-Last updated: 2026-08-20 by Claude Code (B-105, B-106 and B-107 fixed and CI fully green — web 1m31s, web-e2e 2m19s; the second walk is the owner's)
+Last updated: 2026-08-21 by Claude Code (**Phase 11 signed off by the owner**; #87 ready for review and awaiting merge)
 
 ---
 
@@ -2816,7 +2807,7 @@ unexplained.
       because the organization creates its own way back; **B-100**'s method line
       surfaced rather than deleted (revision 0025). **B-101** carries out what is
       not here — the small-screen pass and the catalog/members rounding
-- [~] WP11.2b Compose Playwright smoke + README quickstart          ← gate PR
+- [x] WP11.2b Compose Playwright smoke + README quickstart          ← gate PR
       — **built, not signed off.** `apps/web/e2e-compose/` drives the whole
       product in Chromium against a real compose stack — sign in, register the
       seeded database, prove it read-only, discover and profile the schema, ask,
@@ -2851,7 +2842,46 @@ unexplained.
       UI pattern-matching prose a model wrote
       — the Playwright smoke this WP plans is now a **widening** rather than a
       start: WP7.3b already added `apps/web/e2e/` with Chromium in CI (B-044)
-- [ ] GATE: trend question → rendered chart; smoke green; sign-off
+- [x] GATE: trend question → rendered chart; smoke green; sign-off
+      — **signed off by the owner on 2026-08-21**, on the second walk. The first
+      (2026-08-20) did not sign off and found three defects: **B-105** (a monthly
+      aggregate drawn on a continuous day axis — wrong rather than plain),
+      **B-106** (every answer but the newest lost its chart and its evidence) and
+      **B-107** (B-096's rule applied at one of its two call sites). All three
+      fixed in #87.
+      **B-103's criterion, in the owner's own hands**: money rendered on a
+      quantitative axis at 120,000–160,000, which cannot happen from strings.
+      **B-105**: the bars are banded on monthly ticks, not spikes on a weekly
+      calendar. **B-106**: both charts stay across questions — the card is the
+      assistant turn, so an answer keeps its chart, method, limitations,
+      findings, evidence and trace when the next question is asked.
+      **`web-e2e` green in CI** (2m19s, the walk itself 15.6s) against a stack it
+      builds from nothing, with a scripted model (**D-040**) — it proves the
+      stack wires up end to end and can never show that a question was
+      understood, which is why the chart criterion is met by the live walk and
+      not by it.
+      **The quickstart was walked from nothing three times** and produced seven
+      defects, five of them in prose. B-102's lesson stands: nothing walks the
+      documented path automatically, and that gap is still open.
+      **What this sign-off does not cover** — small screens (**B-101**: three
+      `@media` rules in the whole app, and nobody has sat at 375px); Linux
+      (**B-108**: `make up` may not start for a developer whose uid is not 1001,
+      and this host structurally cannot find out); whether the agent is any good,
+      which is the evals' business and not this gate's; and anything deployed,
+      which is Phase 12.
+      **And it does not cover B-044.** Twice during this walk the assistant said
+      the branch was ready having checked *the branch* and not the owner's
+      containers, and both times that stack was silently serving old code — the
+      second with a **stale API underneath it**, which reproduces the same
+      symptom on its own and would have been read as the fix not working. A gate
+      walked against a stack that can be silently stale is only as good as the
+      check that catches it, and **the documented check failed here**: the B-044
+      recipe cannot see a screen whose chunk is fetched lazily, and reported
+      ABSENT for code that was current. It has been amended in CLAUDE.md, along
+      with the restart's second failure — a kept `.next` that came back
+      inconsistent and 404'd every route under the dynamic segment. Neither of
+      those is closed by this sign-off; what closed them here was doing it by
+      hand, twice, after the fact.
 
 ## Phase 12 — Azure deploy + hardening (M12)  ⚠ human review on every PR
 - [ ] WP12.1 Bicep modules + env params + what-if in CI
