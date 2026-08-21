@@ -22,6 +22,10 @@ Next step:        **Merge #87, then open Phase 12.** The gate is signed and the
                   approval, the GitHub-OIDC app registration, a budget alert
                   email and cap, which keys go to Key Vault, and any custom
                   domain (plan §3.2 / §6 Phase 12).
+                  **B-109 is scoped and not built** (owner, 2026-08-21): every
+                  chart is one flat colour, and the model apologised for it in
+                  the answer text. It can run ahead of WP12.1 while that input is
+                  outstanding, and does not reopen Phase 11.
                   **B-108 wants a Linux machine** and cannot be closed from this
                   host. **B-101** (small screens) and **B-102**'s open half
                   (nothing walks the documented path automatically) are the two
@@ -33,7 +37,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 11.
-Last updated: 2026-08-21 by Claude Code (**Phase 11 signed off by the owner**; #87 ready for review and awaiting merge)
+Last updated: 2026-08-21 by Claude Code (Phase 11 signed off and merged; B-109 scoped and filed, not built)
 
 ---
 
