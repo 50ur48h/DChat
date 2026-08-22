@@ -1,11 +1,19 @@
 #!/usr/bin/env sh
 # Run the golden evals inside the API container (plan WP9.2).
 #
-# Inside, because the data source is registered with the compose network's own
-# hostname — `seed-pizza-pg` resolves there and nowhere else. A harness run from
-# the host gets `getaddrinfo failed` and reports twenty failures that are really
-# one DNS lookup, which is the least useful failure a suite can produce.
-# `scripts/agent_smoke.py` is run the same way and for the same reason.
+# Inside, for an organization whose data source carries a compose hostname —
+# `seed-pizza-pg` resolves there and nowhere else. A harness run from the host
+# against one of those gets `getaddrinfo failed` and reports twenty failures that
+# are really one DNS lookup, which is the least useful failure a suite can
+# produce. `scripts/agent_smoke.py` is run the same way and for the same reason.
+#
+# **This header used to say the data source *is* registered that way, flatly, and
+# it was not** (**B-115**). `make evals.setup` reads `SEED_PIZZA_HOST` from
+# `.env`, which is `localhost` — so `make evals` on the host worked and this
+# script was the one that would have failed. Two provisioners now exist and each
+# says which network it is for: `evals.setup` (host, and what CI runs) and
+# `demo.setup` (compose, and what the browser uses). Point EVALS_ORG_ID at an
+# organization built by the second when running this.
 #
 # The files are copied in rather than mounted: the api service mounts only
 # `apps/api/src`, and widening that for a harness would put the whole repository
