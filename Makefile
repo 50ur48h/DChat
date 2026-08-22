@@ -253,5 +253,18 @@ evals: .env ## Run the 20 golden evals (FakeLLM by default; EVALS_LIVE=1 for rea
 evals.docker: .env ## Same, but inside the api container — for the compose stack
 	$(SHELL) ops/scripts/evals.sh $(ARGS)
 
-evals.setup: .env ## Create the org, register the seed source, build its catalog
+evals.setup: .env ## The eval harness's org — HOST addresses, not usable in the browser (B-115)
 	$(UV_API) python ../../ops/evals/provision.py
+
+# **Two provisioners, and the difference is the network you are on** (**B-115**).
+# `evals.setup` registers the fixture at the address in `.env` — `localhost:6543`
+# — because the harness runs in-process on the host and on a CI runner with no
+# container at all. `demo.setup` registers the compose names, because the API
+# answers questions inside the container, where `localhost` is the API itself.
+# The old help text for `evals.setup` said "create the org, register the seed
+# source, build its catalog", which is true of both and told nobody which they
+# were getting; a fresh machine ran it and got an organization every browser
+# question failed against.
+.PHONY: demo.setup
+demo.setup: .env ## The browser's org — COMPOSE addresses, built inside the api container
+	$(SHELL) ops/scripts/demo_setup.sh
