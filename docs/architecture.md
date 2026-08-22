@@ -658,6 +658,8 @@ Service-by-service justification (your §10 format — need / problem solved / V
 
 Deployment: two environments (`dev`, `prod`), Bicep modules in `infra/`; ACA revisions give instant rollback; Alembic migrations run as a release step before traffic shift; secrets referenced from KV, never in pipeline YAML.
 
+> **Amended 2026-08-22 (D-041): Phase 12 stands up `dev` only.** `prod` is deferred and `v1.0.0` is tagged from dev. The two-environment shape above is still the design and `infra/params/prod.bicepparam` is kept compiling against it, so standing prod up is a parameter file and an approval rather than a rewrite — but nothing deploys it yet, and no pipeline references it. Every other Phase 12 acceptance criterion holds against dev.
+
 ## 9.2 Local development architecture (§46)
 
 `docker compose up` brings: platform Postgres (+pgvector) with migrations + seed, **a seeded demo "pizza chain" customer database** (orders/customers/restaurants/menu_items — matching your §36 scenario, including the deliberately missing ORDER_ITEMS table to exercise honest refusal), SQL Server dev container, Azurite (blob). Auth: Entra dev tenant, or the compiled-out dev token issuer (6.1). LLMs: real keys via `.env`, plus a **deterministic FakeLLM** driving unit tests of the loop, and recorded fixtures for integration tests. An **eval harness** (`ops/evals/`) runs a golden question set against the seed DBs and scores answers on citation validity, refusal correctness, and budget adherence — nightly in CI with a hard token cap; this is how agent regressions get caught before users do.
