@@ -729,7 +729,7 @@ async def _compose(
         "Write about the data and never about the chart. Whether a picture can "
         "be drawn is decided after you answer and shown in its own place, so a "
         "sentence about what a chart can or cannot do belongs nowhere in this "
-        "answer — to the reader it reads as the product being broken."
+        "answer — to the reader it reads as the product being broken." + PARTIAL_RESULT_RULE
     )
     completion = await llm.complete(
         role="compose",
@@ -789,6 +789,32 @@ async def _finalize_refusal(
     """
     final = FinalizeIn(answer=reason, answered=False, supported_by=[], confidence="high")
     return await _write_ending(context, events, working, final, (), caveat=caveat)
+
+
+#: What to say when a result arrived in part (**B-113**, **B-111**).
+#:
+#: **Every refusal this product makes is a feature except this one.** WP7.2b's
+#: argument, B-095, B-087 and D-038 are all one claim enforced: an honest refusal
+#: beats a confident guess. A refusal caused by the *preview budget* is not that.
+#: Nothing about the customer's data is missing — ours is — and the sentence a
+#: reader gets is otherwise indistinguishable from one about their schema. The
+#: second wearing the first's clothes corrodes exactly the trust the first earns.
+#:
+#: So the rule names the owner of the limit and offers the way past it, and it
+#: forbids the two failures seen live on 2026-08-21: describing a partial result
+#: as though nothing was there (**B-111** — *"the evidence does not include the
+#: actual monthly revenue values"* over twenty rows of them), and declining
+#: outright a question the data answers in full (**B-113**).
+PARTIAL_RESULT_RULE = (
+    "\n\nA result marked `truncated` reached you in part: `row_count` is how many "
+    "rows the query returned, and the rows you were given are the ones that fit "
+    "in this prompt. That is a limit of ours and not of the data, so say whose it "
+    "is — name both numbers, answer with everything the rows you have do "
+    "establish, and say what a narrower question would settle. Do not describe a "
+    "partial result as though it held nothing: you have those rows and the reader "
+    "is entitled to what they show. Do not refuse a question the data answered "
+    "merely because you were shown part of the answer."
+)
 
 
 async def _write_ending(

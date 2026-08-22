@@ -23,22 +23,68 @@ citation will point at.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
+
 from pydantic import BaseModel, ConfigDict, Field
 
-from dataagent.agent.tools.base import Tool, ToolContext, ToolError
+from dataagent.agent.tools.base import MAX_RENDERED_CHARS, Tool, ToolContext, ToolError
 from dataagent.catalog.browse import NoCatalogError
 from dataagent.connectors.base import ConnectorError
 from dataagent.dal import run as dal_run
 from dataagent.dal.artifacts import encodable
 from dataagent.dal.errors import PolicyViolation
+from dataagent.dal.masking import MaskedFrame
+from dataagent.dal.service import Execution
 from dataagent.datasources.service import NotFoundError
 
-__all__ = ["RUN_SQL"]
+#: `preview_rows` is public because it is the rule, not an implementation
+#: detail: how much of a result reaches a model decides what that model can
+#: answer, and B-113 is what happens when it is wrong. It is asserted
+#: directly rather than inferred from a tool call.
+__all__ = ["PREVIEW_CHARS", "PREVIEW_ROWS_MIN", "RUN_SQL", "preview_rows"]
 
-#: Rows put in front of the model. The DAL's own cap is far higher because the
-#: artifact keeps the whole result; what reaches a prompt is a sample big enough
-#: to reason about and small enough that raw values do not become the context.
-PREVIEW_ROWS = 20
+#: What a preview may cost the prompt, measured on the payload that is actually
+#: rendered (**B-113**).
+#:
+#: **A budget by shape, because characters are the resource being spent.** This
+#: was `PREVIEW_ROWS = 20` — a fixed count, chosen for a reason that is still
+#: true: the DAL's cap is far higher because the artifact keeps the whole result,
+#: and what reaches a prompt has to stay small enough that raw values do not
+#: become the context (architecture 4.4, *summaries flow forward*). A row count
+#: is simply the wrong unit for that rule. Twenty rows of three short columns
+#: cost a fifth of twenty rows of twelve wide ones, so a fixed count either
+#: starves the narrow case or floods the wide one — and it starved the narrow
+#: case: eighteen months of revenue by channel is 54 rows the model never saw,
+#: and a question the data answered in full came back refused.
+#:
+#: **Derived from `MAX_RENDERED_CHARS`, not chosen.** That is the ceiling
+#: `ToolResult.render` cuts at, and the margin below it is the frame it wraps
+#: this payload in. Deriving rather than picking a number buys a property worth
+#: having: a preview the budget governs cannot be truncated by `render`, so it
+#: never hits **B-112**'s unannounced cut.
+#:
+#: **That holds everywhere the budget wins, and the floor below can beat it.** A
+#: result so wide that `PREVIEW_ROWS_MIN` rows exceed the ceiling is rendered
+#: anyway and cut by `render` — measured at 18,297 characters for four rows of
+#: 6,000. So this narrows B-112's exposure to the widest results and does not
+#: close it, which is the honest claim: B-112 stays open, still with no flag when
+#: a cut happens, and that case is now the one place this tool can reach it.
+#:
+#: Deliberately **no row ceiling on top**. A second limit would be a second
+#: cliff chosen from nothing, and the reason a bigger constant was refused is
+#: that it moves the cliff rather than removing it. This one corresponds to a
+#: real resource, which is what makes it defensible.
+PREVIEW_CHARS = MAX_RENDERED_CHARS - 100
+
+#: The fewest rows worth showing, whatever they cost. A result so wide that one
+#: row exceeds the budget still has to arrive as *something*: a model shown zero
+#: rows and a row count cannot tell an empty result from an expensive one.
+#:
+#: This is the one place the budget above does not hold, and it is a deliberate
+#: trade rather than an oversight — three wide rows cut by `render` is a better
+#: failure than no rows at all, because the second invites the model to invent
+#: what the result contained and the first does not.
+PREVIEW_ROWS_MIN = 3
 
 
 class RunSqlIn(BaseModel):
@@ -111,12 +157,32 @@ async def _run_sql(context: ToolContext, params: BaseModel) -> BaseModel:
         raise ToolError(str(error), code="engine_error") from error
 
     frame = execution.frame
+
+    def rendered(candidate: list[list[object]]) -> str:
+        """The payload those rows would produce, exactly as the model sees it."""
+        return _out(execution, frame, candidate).model_dump_json(indent=2)
+
+    shown = preview_rows(frame.rows, rendered)
+    return _out(execution, frame, shown)
+
+
+def _out(execution: Execution, frame: MaskedFrame, rows: list[list[object]]) -> RunSqlOut:
+    """One payload, built once, so the measurement and the result cannot differ.
+
+    The budget is only meaningful if what it measured is what gets sent. Two
+    constructions that drifted would put the check on one object and the model in
+    front of another — which is the shape of defect this file has now produced
+    twice, and is worth one small function to make impossible.
+    """
     return RunSqlOut(
         execution_id=str(execution.execution_id) if execution.execution_id else "",
         columns=list(frame.columns),
-        rows=[[encodable(value) for value in row] for row in frame.rows[:PREVIEW_ROWS]],
+        rows=rows,
         row_count=execution.row_count,
-        truncated=execution.truncated or len(frame.rows) > PREVIEW_ROWS,
+        # True when the DAL capped the result *or* when the budget did. The model
+        # is owed the fact that it is holding part of something, not which of our
+        # two limits produced it.
+        truncated=execution.truncated or len(rows) < len(frame.rows),
         masked_columns=list(frame.masked_columns),
         duration_ms=execution.duration_ms,
         # From the validator rather than from the SQL text: it resolved every
@@ -124,6 +190,37 @@ async def _run_sql(context: ToolContext, params: BaseModel) -> BaseModel:
         # or casing the model wrote (B-093).
         tables=[str(table) for table in execution.validated.tables],
     )
+
+
+def preview_rows(
+    rows: Sequence[Sequence[object]],
+    render: Callable[[list[list[object]]], str],
+) -> list[list[object]]:
+    """As many rows as the budget pays for, measured on what will be sent.
+
+    **`render` is passed in so the measurement is the payload itself.** The first
+    version of this counted `json.dumps(row)` compactly, which is a different
+    number from what `model_dump_json(indent=2)` produces — 1,944 characters
+    against 3,566 for the same 54 rows, an under-count of 1.8 times. Budgeting against
+    a proxy for the thing you are protecting is how a limit ends up not limiting;
+    the same mistake, measured rather than assumed, is what **B-109**'s entry
+    records under *a measurement built on a reconstruction*.
+
+    Rows are added whole and dropped from the end. A result sliced through the
+    middle of a row is one the model has to parse around, which is exactly what
+    the character budget exists to stop happening arbitrarily further down.
+    """
+    encoded = [[encodable(value) for value in row] for row in rows]
+    if not encoded or len(render(encoded)) <= PREVIEW_CHARS:
+        return encoded
+
+    # Proportional first guess, then step down. Two or three renders rather than
+    # one per row, and the floor is the only thing that stops it reaching zero.
+    over = len(render(encoded))
+    keep = max(PREVIEW_ROWS_MIN, len(encoded) * PREVIEW_CHARS // over)
+    while keep > PREVIEW_ROWS_MIN and len(render(encoded[:keep])) > PREVIEW_CHARS:
+        keep = max(PREVIEW_ROWS_MIN, keep * 4 // 5)
+    return encoded[:keep]
 
 
 RUN_SQL = Tool(
