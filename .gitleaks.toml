@@ -1,24 +1,33 @@
-# gitleaks configuration (plan §1.4 — this repository is public).
+# What the secret scanner may ignore, and why each one.
 #
-# The default ruleset does the work; this file only records the one deliberate
-# exception, so the exception itself is reviewable.
-
-title = "data-agent"
+# `hygiene` runs gitleaks over this repository on every PR because the remote is
+# public and a leaked credential there is leaked to everyone. It is the check
+# that must not be loosened casually — so this file allowlists *values*, never
+# paths or rules, and every entry names what the value actually is.
+#
+# The temptation this file exists to resist: gitleaks flagged three things in
+# WP12.1, all of them false, and the quick fix would have been to exclude
+# `infra/` or turn off `generic-api-key`. Either would have left the scanner
+# running and no longer looking.
 
 [extend]
 useDefault = true
 
-[allowlist]
-description = """
-.env.example files document configuration keys with deliberately fake,
-local-only values. They are the mechanism that keeps real secrets out of git
-(every key has a documented placeholder, so nobody needs to invent one), and
-gitleaks' generic rules cannot tell a documented placeholder from a credential.
+[[rules]]
+# Keep the default rule; this block only carries the allowlist below.
+id = "generic-api-key"
 
-This allowlist is scoped to those two files by path and nothing else. If a real
-secret is ever pasted into one of them, this config will not catch it — reviewers
-must. Any *other* file with a credential in it still fails the build.
-"""
-paths = [
-  '''(^|/)\.env\.example$''',
+[allowlist]
+description = "Public Azure constants, and the fixtures a guard needs to test itself"
+
+regexes = [
+  # **Azure built-in role definition ids.** These are documented, public, and
+  # identical in every tenant on earth — `4633458b-…` is Key Vault Secrets User
+  # for everyone. `infra/modules/roles.bicep` must carry them as literals because
+  # role names are display strings and are not unique; the GUID is what Azure
+  # matches on. Listed individually rather than as "any GUID", so a real secret
+  # that happens to be GUID-shaped is still caught.
+  '''4633458b-17de-408a-b874-0445c86b69e6''',  # Key Vault Secrets User
+  '''ba92f5b4-2d11-453d-a403-e96b0029c9fe''',  # Storage Blob Data Contributor
+  '''7f951dda-4ed3-4680-a7ca-43fe172d538d''',  # AcrPull
 ]

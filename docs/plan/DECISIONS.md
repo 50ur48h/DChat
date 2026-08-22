@@ -4,6 +4,39 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-041 — Phase 12 stands up dev only; prod is a documented next step
+Date: 2026-08-22 · Phase: 12 · PR: #92 (WP12.1) · Migration: none
+Context: Architecture 9.1 says in as many words *"two environments (`dev`,
+`prod`)"*, and plan WP12.4's gate is *"dev+prod live via Bicep only"* with
+`v1.0.0` tagged after a prod deploy. That is a deviation this entry has to
+record, because the code is about to stop matching the sentence.
+Options: (a) both environments, as written — two of everything, an approval
+gate, a second set of secrets, and a prod Postgres running from the day it is
+created; (b) dev only, prod deferred, `v1.0.0` tagged from dev; (c) dev only and
+delete the prod parameter file, so nothing suggests a prod that does not exist.
+Decision: **(b)**, the owner's call of 2026-08-22, with the gate rewritten rather
+than relaxed. **Every WP12.4 criterion still applies — the restore drill, the
+quota hard-stop, managed identity everywhere, the ASVS-lite checklist — just
+against dev.** Nothing is dropped; one environment is. (c) was refused because
+the point of the deferral is that prod costs an approval and a parameter file
+later, not a rewrite, and a parameter file nothing compiles is one that has
+already drifted.
+Consequences: `infra/params/prod.bicepparam` exists, is **not** deployed and is
+**not** referenced by any pipeline — and CI compiles it on every `infra/**` PR
+precisely because nothing else would notice it rotting. A parameter added to
+`main.bicep` and not to prod fails the build on the day it is added rather than
+on the day somebody needs prod. Its values are recorded with their reasoning and
+are explicitly a starting point rather than a decision: GeneralPurpose rather
+than Burstable, because a burstable tier accrues credits and then throttles,
+which is survivable in dev and is a latency cliff under load; `minReplicas: 1`
+rather than 0, because scale-to-zero costs a cold start that is a customer
+waiting rather than a developer. **Architecture 9.1 is amended in this PR** and
+plan WP12.4's gate is rewritten. The thing to be careful of when prod does
+arrive: this decision means `v1.0.0` will have been tagged from a subscription
+that never ran a production workload, so the first prod deploy is a *new* risk
+rather than a repeat of a proven one — and the restore drill and hardening
+checklist should be re-run there rather than inherited.
+
 ## D-040 — CI's model is a stub inside the shipped image, refused twice everywhere else
 Date: 2026-08-20 · Phase: 11 · PR: #87 (WP11.2b) · Migration: none
 Context: The M11 gate wants a browser driving the **real** product in CI — real

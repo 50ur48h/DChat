@@ -855,6 +855,8 @@ Format per WP: **Branch → Build → Tests → Accept** (accept = commands/chec
 **Human review on every PR.** Design: arch Part 9 (diagram 10), Part 14 acceptance.
 
 > **USER INPUT (WP12.1–12.3, ask in one batch):** subscription ID + target region + naming approval (`rg-dataagent-dev/prod`); permission to create the GitHub-OIDC app registration + federated credential (or user creates from my exact commands); budget alert email + monthly cap; which LLM/embedding keys go to Key Vault; optional custom domain.
+>
+> **Answered in full on 2026-08-22.** Region `southeastasia`; `rg-dataagent-dev` approved; the owner runs the OIDC commands and creates the GitHub environments from exact instructions; USD 50 a month, alert address supplied at deploy time and **never written to a tracked file**; `OPENAI_API_KEY` only, embeddings on the same key, **no Anthropic slot** while B-029 stays open; no custom domain; Postgres B-series with 7-day retention; and **dev only this phase** (**D-041**).
 
 ### WP12.1 — Bicep + what-if CI — `p12.1-bicep`
 - `infra/`: modules per arch 9.1 — log analytics + app insights (daily cap), Key Vault (RBAC mode), Postgres Flexible (B-series, pgvector enabled, private access per arch), storage (artifacts container), ACR (basic), Container Apps env + apps `api`/`web` (scale-to-zero, secrets from KV via managed identity), user-assigned identity + role assignments (KV Secrets User, AcrPull, Blob Contributor). `main.bicep` + `params/dev.bicepparam`, `params/prod.bicepparam`.
@@ -873,10 +875,10 @@ Format per WP: **Branch → Build → Tests → Accept** (accept = commands/chec
 - **Tests:** quota hard-stop integration (seed ledger near cap → run blocked with clear error, audited); log-scrubbing unit test (no SQL text/prompt body in emitted telemetry attributes).
 
 ### WP12.4 — Prod + hardening + v1.0 — `p12.4-prod-hardening` *(gate PR)*
-- Deploy prod (approval-gated); custom domain if provided.
+- ~~Deploy prod (approval-gated); custom domain if provided.~~ **Deferred (D-041).** No custom domain either — the owner chose none, so prod serves on the Container Apps default hostname whenever it does arrive.
 - Hardening pass with committed evidence in `docs/hardening-v1.md`: OWASP ASVS-lite checklist per arch M12 (authn, access control, injection, secrets, logging); dependency audit (`pip-audit`, `pnpm audit`) triaged (fix or BACKLOG with justification); **restore drill** — restore Postgres to a scratch server from backup, run migration check + RLS proof against it, destroy; rate-limit sanity (slowapi or CA ingress rules per arch); nightly evals enabled against dev with token cap.
 - Tag `v1.0.0`, move CHANGELOG Unreleased → 1.0.0.
-- **Accept/GATE (= arch Part 14 acceptance):** dev+prod live via Bicep only; managed identity everywhere (zero secrets in pipeline); quota hard-stop proven in dev; drill documented; checklist signed by user; STATUS shows every phase `[x]`.
+- **Accept/GATE (= arch Part 14 acceptance, amended by D-041):** **dev** live via Bicep only — prod is deferred and `v1.0.0` is tagged from dev; managed identity everywhere (zero secrets in pipeline); quota hard-stop proven in dev; restore drill documented, run against dev; ASVS-lite checklist signed by the user; STATUS shows every phase `[x]`. **Nothing is dropped — one environment is.** Every criterion above applied to prod before and applies to dev now, and the one thing the deferral genuinely costs is recorded in D-041: `v1.0.0` will be tagged from a subscription that has never run a production workload, so the first prod deploy is a new risk rather than a repeat of a proven one.
 
 ---
 

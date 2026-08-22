@@ -127,7 +127,7 @@ secrets.key: ## Print a fresh LOCAL_SECRETS_KEY line to paste into .env
 # images and seeds a database, which is minutes rather than a minute, and CI runs
 # it on its own job.
 .PHONY: preflight
-preflight: lint typecheck check.status check.backlog check.env test test.web.e2e ## Everything CI will run, in CI's order
+preflight: lint typecheck check.status check.backlog check.env check.infra test test.web.e2e ## Everything CI will run, in CI's order
 	@echo "Preflight clean. Safe to push."
 
 .PHONY: check.status
@@ -144,6 +144,15 @@ check.backlog: ## Fail if BACKLOG.md lost a row, an id, or its column shape
 check.env: ## Fail if a documented variable reaches no container and nothing says why
 	bash scripts/check_env.sh --selftest
 	bash scripts/check_env.sh
+
+.PHONY: check.infra
+check.infra: ## Fail if a secret value is written into a deployment template
+	bash scripts/check_infra_secrets.sh --selftest
+	bash scripts/check_infra_secrets.sh
+
+.PHONY: build.infra
+build.infra: ## Compile every Bicep module and both parameter files
+	$(SHELL) ops/scripts/build_infra.sh
 
 .PHONY: truths check.truths
 truths: ## Regenerate ops/seed/truths.json without touching the database

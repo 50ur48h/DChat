@@ -27,6 +27,7 @@ jobs:
     outputs:
       api: ${{ steps.filter.outputs.api }}
       web: ${{ steps.filter.outputs.web }}
+      infra: ${{ steps.filter.outputs.infra }}
       smoke: ${{ steps.filter.outputs.smoke }}
       connectors: ${{ steps.filter.outputs.connectors }}
     steps:
@@ -52,6 +53,9 @@ jobs:
               - 'apps/api/**'
               - 'ops/**'
               - 'Makefile'
+              - '.github/workflows/ci.yml'
+            infra:
+              - 'infra/**'
               - '.github/workflows/ci.yml'
             connectors:
               - 'apps/api/src/dataagent/connectors/**'
@@ -548,6 +552,51 @@ jobs:
       - name: Nothing to do
         if: env.RUN != 'true'
         run: echo "No changes under apps/web or apps/api — the smoke did not need to run."
+
+  # The deployment, compiled (plan WP12.1).
+  #
+  # `bicep build` is a real check, not a formality: it resolves every module,
+  # type-checks every parameter and rejects an API version that does not exist.
+  # It is also all that can run today — `what-if` needs the OIDC identity WP12.2
+  # creates, and until then there is nothing to authenticate as.
+  #
+  # Path-filtered per **D-007**: the job always runs so the check always reports,
+  # and its steps are what the filter gates.
+  infra:
+    needs: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RUN: ${{ needs.changes.outputs.infra }}
+      # **Obvious dummies, and deliberately not plausible ones.** Both parameter
+      # files read these from the environment rather than carrying them, so a
+      # lint run has to supply something. A value that looked real would be a
+      # value somebody eventually deployed.
+      POSTGRES_ADMIN_PASSWORD: lint-only-not-a-password
+      BUDGET_ALERT_EMAIL: lint@example.invalid
+    steps:
+      - uses: actions/checkout@v4
+      # Through the Makefile, so `make build.infra` and this job are the same
+      # command. It compiles both parameter files including prod's, which nothing
+      # deploys (D-041) — that file exists so standing prod up later is a
+      # parameter file rather than a rewrite, and that is only true while it
+      # still compiles.
+      - name: Compile every module and both parameter files
+        if: env.RUN == 'true'
+        run: make build.infra
+      # Its own file with its own selftest, like every other guard here. It
+      # started inline, where YAML escaping mangled the pattern into one that
+      # matched any assignment at all — it failed the build on correct code, and
+      # the obvious "fix" would have been to loosen it until it passed.
+      - name: The infra secret guard still catches one
+        if: env.RUN == 'true'
+        run: bash scripts/check_infra_secrets.sh --selftest
+      - name: No secret value is written into a template
+        if: env.RUN == 'true'
+        run: bash scripts/check_infra_secrets.sh
+      - name: Nothing to do
+        if: env.RUN != 'true'
+        run: echo "No changes under infra/ — skipping."
 
   # Proves both images still build. Pushing them arrives with Phase 12.
   docker:

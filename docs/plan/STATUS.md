@@ -1,60 +1,35 @@
 # STATUS — data-agent build
 
-Current position: **Phases 0–5 and 7–11 are done. Phase 6 merged, its gate
-                  partially met and deliberately unticked.**
-                  **Phase 11 is signed off** (owner, 2026-08-21), on the second
-                  walk: the first found B-105, B-106 and B-107 and did not sign.
-                  The gate line below carries the evidence and, as importantly,
-                  what it does **not** cover — small screens (B-101), Linux
-                  (B-108), and **B-044**, since twice in this walk the owner's
-                  stack silently served old code while the branch itself was
-                  fine.
-                  The session of 2026-08-19 was unusually productive for a reason
-                  worth repeating: **six defects were found by the owner walking
-                  the product by hand**, not by the suite — B-094, B-095, B-096,
-                  B-097, B-098, and the two screen defects in B-088's web half.
-                  Every one was invisible to a green build.
-Next step:        **Merge #87, then open Phase 12.** The gate is signed and the
-                  PR is out of draft; nothing in WP11.2b is outstanding.
-                  Phase 12 is `p12.1-bicep` and it is the phase whose every PR
-                  needs human review. Its **USER INPUT** batch is unanswered and
-                  blocks the first work package — subscription id, region, naming
-                  approval, the GitHub-OIDC app registration, a budget alert
-                  email and cap, which keys go to Key Vault, and any custom
-                  domain (plan §3.2 / §6 Phase 12).
-                  **B-113 and B-111 are done, and they were one seam.** The
-                  product had refused a question its data answers completely,
-                  because the composer saw 20 rows of 54. The preview is now
-                  budgeted **by shape** — derived from the render ceiling rather
-                  than chosen — and the composing prompt names whose limit a
-                  partial result is. Live, same question: before `answered=false`
-                  and no chart; after, all 54 rows, a coloured bar chart, and an
-                  answer naming per-channel peaks across eighteen months.
-                  **The order mattered**: the chart apology had been sitting on
-                  top of it. Cleaning the prose is what let the real constraint
-                  say its own name.
-                  **B-109 is four parts of four and stays open only on B-113's
-                  discovery**: charts carry
-                  a validated eight-hue categorical ramp where colour means a
-                  split and refuse it where it would repeat an axis — verified
-                  live — and **the prose no longer narrates the chart**: the
-                  field description was measured reaching the model and ignored,
-                  so the same words moved into the composing prompt, which worked
-                  on one live run.
-                  **B-110** (a schema-correspondence check and a dead-function
-                  pass), **B-111** (an answer overstating what it could not see)
-                  and **B-112** (the character cap nothing downstream can know
-                  about, now narrowed to the widest results but not closed) are
-                  **filed and not built**. B-110 carries the point
-                  worth keeping: **coverage cannot see that class by
-                  construction**, because carefully testing a capability is
-                  exactly what hides that nothing reaches it. B-109 carries its
-                  sibling: **a measurement built on a reconstruction is a second
-                  guess wearing a number.**
-                  **B-108 wants a Linux machine** and cannot be closed from this
-                  host. **B-101** (small screens) and **B-102**'s open half
-                  (nothing walks the documented path automatically) are the two
-                  things this phase deliberately left behind.
+Current position: **Phases 0–11 are done and signed off. Phase 12 has opened.**
+                  The owner answered the whole **USER INPUT** batch on
+                  2026-08-22, so nothing in this phase is blocked on them:
+                  subscription and region settled, `rg-dataagent-dev` approved,
+                  USD 50 a month, `OPENAI_API_KEY` only, no custom domain,
+                  Postgres B-series at 7-day retention.
+                  **The one decision that changes the plan is D-041: this phase
+                  stands up `dev` only.** Prod is deferred and `v1.0.0` is tagged
+                  from dev. Nothing is dropped from WP12.4's gate — the restore
+                  drill, the quota hard-stop, managed identity and the ASVS-lite
+                  checklist all still apply, against dev. Architecture 9.1 and
+                  the plan's gate are amended in the same PR.
+Next step:        **WP12.1 is built and in review (#92).** `infra/` carries
+                  `main.bicep` and nine modules, both parameter files, a
+                  `bicepconfig.json` that makes the linter fail a build rather
+                  than warn, and an `infra` CI job that compiles everything and
+                  runs a secret guard with its own selftest.
+                  **Two things are the owner's before WP12.2 can start**, and
+                  both are in #92's description as exact instructions: run the
+                  `az` commands that create the GitHub-OIDC app registration and
+                  its two federated credentials, and create the `dev` GitHub
+                  environment holding `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and
+                  `AZURE_SUBSCRIPTION_ID`. Until that identity exists there is
+                  nothing to authenticate as, which is why `what-if` is WP12.2's
+                  and not WP12.1's.
+                  **The budget alert address is deliberately not in this repo.**
+                  It is read from the environment at deploy time; the owner is
+                  asked for it when WP12.2 wires the deploy, not before.
+                  **Every Phase 12 PR needs human review**, including the ones
+                  that only touch `infra/`.
 Merge policy: ASK
 Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  (owner, 2026-08-17), so `nightly-evals.yml` can run — keep its
@@ -62,7 +37,7 @@ Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
                  tokens** for twenty questions. An Anthropic key would still
                  close **B-029 (P1)** and with it the Phase 6 gate; it blocks
                  nothing in Phase 11.
-Last updated: 2026-08-21 by Claude Code (B-113 and B-111 done — the preview is budgeted by shape and a partial result says whose limit it is)
+Last updated: 2026-08-22 by Claude Code (Phase 12 opened; WP12.1 built and in review, D-041 defers prod)
 
 ---
 
@@ -2917,7 +2892,17 @@ unexplained.
       hand, twice, after the fact.
 
 ## Phase 12 — Azure deploy + hardening (M12)  ⚠ human review on every PR
-- [ ] WP12.1 Bicep modules + env params + what-if in CI
+- [~] WP12.1 Bicep modules + env params + what-if in CI — **built, in review
+      (#92)**. Nine modules, one per service in architecture 9.1's justification
+      table and nothing beside it. Postgres is **private-access** rather than
+      firewalled, which costs a VNet, two delegated subnets and a private DNS
+      zone and buys a database with no public endpoint to mis-scope. Secrets are
+      never in a template: the vault is created empty, apps reference secrets by
+      URI and read them with a managed identity, and the two parameters that
+      would otherwise carry one are read from the environment at deploy time.
+      **`what-if` is not here and cannot be**: it needs the OIDC identity WP12.2
+      creates, so this work package is `bicep build` and the guards, exactly as
+      the plan says
 - [ ] WP12.2 OIDC deploy workflow → dev env + Key Vault backend + smoke
 - [ ] WP12.3 Observability wiring + quotas hard-stop + alerts
 - [ ] WP12.4 Prod env + ASVS-lite checklist + restore drill + v1.0 tag ← gate
