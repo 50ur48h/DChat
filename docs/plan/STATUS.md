@@ -1,43 +1,68 @@
 # STATUS — data-agent build
 
-Current position: **Phases 0–11 are done and signed off. Phase 12 has opened.**
-                  The owner answered the whole **USER INPUT** batch on
-                  2026-08-22, so nothing in this phase is blocked on them:
-                  subscription and region settled, `rg-dataagent-dev` approved,
-                  USD 50 a month, `OPENAI_API_KEY` only, no custom domain,
-                  Postgres B-series at 7-day retention.
+Current position: **Phases 0-11 are done and signed off. Phase 12 is under
+                  way: WP12.1 is merged (#92).** The owner answered the whole
+                  **USER INPUT** batch on 2026-08-22, so nothing in this phase
+                  waits on them for scope: subscription and region settled,
+                  `rg-dataagent-dev` approved, USD 50 a month, `OPENAI_API_KEY`
+                  only, no custom domain, Postgres B-series at 7-day retention.
                   **The one decision that changes the plan is D-041: this phase
                   stands up `dev` only.** Prod is deferred and `v1.0.0` is tagged
                   from dev. Nothing is dropped from WP12.4's gate — the restore
                   drill, the quota hard-stop, managed identity and the ASVS-lite
                   checklist all still apply, against dev. Architecture 9.1 and
-                  the plan's gate are amended in the same PR.
-Next step:        **WP12.1 is built and in review (#92).** `infra/` carries
-                  `main.bicep` and nine modules, both parameter files, a
-                  `bicepconfig.json` that makes the linter fail a build rather
-                  than warn, and an `infra` CI job that compiles everything and
-                  runs a secret guard with its own selftest.
-                  **Two things are the owner's before WP12.2 can start**, and
-                  both are in #92's description as exact instructions: run the
-                  `az` commands that create the GitHub-OIDC app registration and
-                  its two federated credentials, and create the `dev` GitHub
-                  environment holding `AZURE_CLIENT_ID`, `AZURE_TENANT_ID` and
-                  `AZURE_SUBSCRIPTION_ID`. Until that identity exists there is
-                  nothing to authenticate as, which is why `what-if` is WP12.2's
-                  and not WP12.1's.
+                  the plan's gate were amended in #92.
+                  **Nothing is deployed.** `infra/` compiles and has never been
+                  run against Azure; no resource group exists, and the first
+                  thing that touches the subscription is WP12.2's `what-if`.
+Next step:        **WP12.2 — OIDC deploy workflow, Key Vault backend, dev env**
+                  (`p12.2-deploy-dev`). Plan §6 Phase 12 WP12.2, architecture
+                  Part 9 and §4.2.
+                  **It cannot start until the owner has done two things**, both
+                  written out as exact instructions in #92's description:
+                  (1) run the `az` commands that create the GitHub-OIDC app
+                  registration and its two federated credentials, and (2) create
+                  the `dev` GitHub environment holding `AZURE_CLIENT_ID`,
+                  `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` and
+                  `POSTGRES_ADMIN_PASSWORD`. Until that identity exists there is
+                  nothing to authenticate as — which is why `what-if` belongs to
+                  WP12.2 rather than WP12.1, and why the very first task of the
+                  next session is to confirm those two are done rather than to
+                  write code.
+                  **One decision is still open and is the owner's**, raised in
+                  #92 and recorded here so it survives the session: `roles.bicep`
+                  creates three role assignments, and creating a role assignment
+                  needs `User Access Administrator` (or `Owner`) — a strictly
+                  larger permission than `Contributor`. Either grant the OIDC
+                  identity that role at the resource group, or create the three
+                  assignments by hand and drop `roles.bicep` from what the
+                  pipeline deploys. **Ask before writing the deploy workflow**,
+                  because the answer changes what the workflow may do.
                   **The budget alert address is deliberately not in this repo.**
-                  It is read from the environment at deploy time; the owner is
-                  asked for it when WP12.2 wires the deploy, not before.
+                  It is read from the environment at deploy time; ask the owner
+                  for `BUDGET_ALERT_EMAIL` when WP12.2 wires the deploy, and
+                  keep it out of every tracked file when they give it.
                   **Every Phase 12 PR needs human review**, including the ones
                   that only touch `infra/`.
 Merge policy: ASK
-Blocked on user: nothing blocking. The **OpenAI key is now a repository secret**
-                 (owner, 2026-08-17), so `nightly-evals.yml` can run — keep its
-                 token cap tight, because the local live run spent **223k
-                 tokens** for twenty questions. An Anthropic key would still
-                 close **B-029 (P1)** and with it the Phase 6 gate; it blocks
-                 nothing in Phase 11.
-Last updated: 2026-08-22 by Claude Code (Phase 12 opened; WP12.1 built and in review, D-041 defers prod)
+Blocked on user: **yes — WP12.2 cannot start.** Two owner tasks, written out as
+                 exact commands in #92's description: the `az` commands creating
+                 the GitHub-OIDC app registration and its two federated
+                 credentials, and the `dev` GitHub environment holding
+                 `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`
+                 and `POSTGRES_ADMIN_PASSWORD`. Plus one decision — whether the
+                 OIDC identity gets `User Access Administrator` or the three
+                 role assignments are made by hand (see `Next step:`), and one
+                 value to be asked for at deploy time and never committed,
+                 `BUDGET_ALERT_EMAIL`.
+                 Not blocking: the **OpenAI key is a repository secret** (owner,
+                 2026-08-17), so `nightly-evals.yml` can run — keep its token cap
+                 tight, because the local live run spent **223k tokens** for
+                 twenty questions. An Anthropic key would still close **B-029
+                 (P1)** and with it the Phase 6 gate; it blocks nothing in
+                 Phase 12 either, and WP12.4 turns nightly evals on against dev,
+                 so B-029 wants an answer before that gate rather than after.
+Last updated: 2026-08-22 by Claude Code (session end; WP12.1 merged (#92), WP12.2 next and blocked on the owner's OIDC setup)
 
 ---
 
@@ -2892,8 +2917,8 @@ unexplained.
       hand, twice, after the fact.
 
 ## Phase 12 — Azure deploy + hardening (M12)  ⚠ human review on every PR
-- [~] WP12.1 Bicep modules + env params + what-if in CI — **built, in review
-      (#92)**. Nine modules, one per service in architecture 9.1's justification
+- [x] WP12.1 Bicep modules + env params + what-if in CI — **merged (#92,
+      2026-08-22)**. Nine modules, one per service in architecture 9.1's justification
       table and nothing beside it. Postgres is **private-access** rather than
       firewalled, which costs a VNet, two delegated subnets and a private DNS
       zone and buys a database with no public endpoint to mis-scope. Secrets are
@@ -2902,15 +2927,68 @@ unexplained.
       would otherwise carry one are read from the environment at deploy time.
       **`what-if` is not here and cannot be**: it needs the OIDC identity WP12.2
       creates, so this work package is `bicep build` and the guards, exactly as
-      the plan says
+      the plan says. **Nothing has been deployed** — every claim in this line is
+      a claim about what compiles, and the first contact with Azure is WP12.2's
+      `what-if`. Two things were learned the hard way and are worth carrying:
+      a guard written inline in workflow YAML had its regex mangled into one
+      that matched any assignment at all, so it failed the build on correct code
+      and the tempting fix was to loosen it — it is a file with a selftest now,
+      like the three beside it; and a realistic-looking fake key in that
+      selftest tripped gitleaks, which cost a force-push to keep a plausible
+      credential out of a public repository's history rather than allowlisting
+      one forever
 - [ ] WP12.2 OIDC deploy workflow → dev env + Key Vault backend + smoke
 - [ ] WP12.3 Observability wiring + quotas hard-stop + alerts
-- [ ] WP12.4 Prod env + ASVS-lite checklist + restore drill + v1.0 tag ← gate
+- [ ] WP12.4 ~~Prod env~~ + ASVS-lite checklist + restore drill + v1.0 tag ← gate
+      — **prod is deferred (D-041)**; every other criterion applies, against dev
 - [ ] GATE: arch Part 14 acceptance; nightly evals on; user sign-off
+
+### What Phase 12 already owes, from the backlog
+
+**Sixteen open items name P12 as their suggested phase**, and none of them is
+scheduled inside a work package — so they are invisible until somebody reads all
+of BACKLOG.md. Listed here because the phase that closes the project is the last
+chance to take them, and because "suggested phase" has never been a commitment.
+Nine are P2 and the rest P3; nothing here is P1.
+
+**The three that belong to a Phase 12 work package by subject**, and should be
+taken there rather than separately:
+
+- **B-021** — nothing deletes an expired result. `result_artifacts.expires_at` is
+  written on every row and read by nothing, so retention is a promise with a date
+  attached. WP12.3 is where a scheduler and a real Blob container first exist.
+- **B-014** — nothing removes a secret when its organization goes away. Not
+  reachable today (there is no org-deletion API), and off-boarding a tenant must
+  not leave credentials in Key Vault. WP12.2 is where the KV backend lands.
+- **B-007** — every CI action still targets the Node 20 runtime. A warning today
+  and a broken pipeline when the shim is removed; one PR, all six actions.
+
+**The rest are genuine debt that Phase 12 inherited rather than caused** — five
+from the Phase 11 gate walk (**B-101** small screens, **B-102** the documented
+quickstart nothing walks, **B-104** a full page load throwing the session away,
+**B-108** the uid hole no one here can test, **B-112** a cap that flags nothing)
+and **B-110**, the two guards against this project's characteristic defect, which
+the owner scoped and deliberately did not build. **B-110 is the one to weigh
+first**: CLAUDE.md records four instances of *built, tested, unreachable*, not one
+of them caught by CI, and walking is still the only thing that has ever caught
+it. **Two P1 items are open and neither is P12-scheduled**, so nothing will surface
+them at the gate: **B-029** — no Anthropic key, which is still what holds the
+Phase 6 gate, and which WP12.4 makes newly relevant because that gate turns
+nightly evals on; and **B-109**, three parts of four built and verified live,
+the fourth deliberately left with the owner. Both want an answer before the
+Phase 12 gate rather than at it.
 
 ---
 
-## Next step
+## Next step — superseded, kept for the reasoning it carries
+
+> **This section is Phase 9's handoff and is history.** Everything it schedules
+> shipped: B-064 and B-018 are closed, Phase 10 and Phase 11 are signed off.
+> **The live next step is the `Next step:` field in the header of this file** —
+> that is the one the plan makes authoritative (§1.1) and the one a new session
+> reads first. This is kept rather than deleted because the reasoning below is
+> still the best statement of why conversation memory was a safety decision and
+> not a feature, and B-052's last paragraph is still open.
 
 **Phase 9 is signed off** (#60, 2026-08-16). Its GATE line above carries the
 evidence, including the live run at 12/20 and why that number is what it is.
