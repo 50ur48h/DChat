@@ -62,7 +62,84 @@ Blocked on user: **yes — WP12.2 cannot start.** Two owner tasks, written out a
                  (P1)** and with it the Phase 6 gate; it blocks nothing in
                  Phase 12 either, and WP12.4 turns nightly evals on against dev,
                  so B-029 wants an answer before that gate rather than after.
-Last updated: 2026-08-22 by Claude Code (session end; WP12.1 merged (#92), WP12.2 next and blocked on the owner's OIDC setup)
+Last updated: 2026-08-23 by Claude Code (new dev machine brought up and proved from a
+              fresh clone and an empty database; three findings filed as B-115/116/117;
+              WP12.2 still next and still blocked on the owner's OIDC setup)
+
+---
+
+## The new machine, 2026-08-23 — the documented path walked from nothing
+
+**No work package. A relocation**, and the second deliberate walk of the
+quickstart from a machine that had never run this. The owner moved hosts,
+carried `.env`, `.SampleData/`, `ops/.secrets/` and the artifact directories
+across, and left the Docker volumes behind — so the platform database was empty:
+no organization, no data source, no catalog, no run history. That is the exact
+starting state **B-102** says nothing exercises automatically, and it produced
+three findings, none of which any suite can see.
+
+### What the machine was missing, and what that cost
+
+`make` and the Docker daemon, both expected. `gh` was the one that matters,
+because it is not in the README's prerequisites and every merge here needs it —
+**B-116**. Node is **24.19.0** against `apps/web`'s `>=22 <23`, so every pnpm
+command warns; both web suites pass anyway, which is why it is P3 and not
+ignored. Docker Hub throttled the first two pull attempts to a dead stop before a
+third succeeded — a network condition rather than a repo defect, recorded here
+only so the next person reads a stalled `make up` as slow rather than broken.
+
+### B-115 — the provisioner builds an organization the product cannot query
+
+The finding worth the walk. With an empty database, the repo offers exactly one
+target that rebuilds the lost state: `make evals.setup`. It registers the pizza
+database at `SEED_PIZZA_HOST=localhost:6543` — the host-side address, correct for
+the harness that runs on the host and wrong for the API, which answers questions
+**inside the container**. Proven rather than argued: from `dataagent-api-1`,
+`localhost:6543` is `ConnectionRefusedError [Errno 111]` and `seed-pizza-pg:5432`
+is reachable. The org, the verified read-only credential and the six-table
+catalog are all real; every question asked of them in the browser dies at the
+connector.
+
+**It is B-102's shape one layer in.** The target is not broken for someone who
+knows it belongs to the host-side eval harness. It is broken for precisely the
+person a provisioning target exists to serve, and nothing distinguishes the two.
+
+### What is on the machine now
+
+Two organizations, deliberately. **`evals`** (`5eb716b6-…`) is what
+`make evals.setup` built, pointed at `localhost:6543`, and is for the harness.
+**`Demo`** (`92ba0ac2-…`) was provisioned from inside the api container against
+the compose names, and is what the browser uses: `Pizza demo`
+(`seed-pizza-pg:5432`, 6 tables, 33 columns, 4 sensitive columns masked) and
+`F&B sample` (`seed-fnb-pg:5432`, 35 tables, 280 columns, 43 relationships).
+All 41 table cards carry embeddings, so retrieval is hybrid rather than lexical.
+An Admin invitation into `Demo` was minted so the first sign-in needs no database
+edit. **The container-side provisioning script is not in the repo** — that gap is
+B-115's fix, not a workaround to keep.
+
+### The evidence, including the part that is not green
+
+Fixtures rebuilt and matching their own truths: pizza at 71,798 orders with the
+planted **−12.1%** overall decline and **−52.5%** on store 3 delivery; F&B at
+112,327 sales and 51,356 stock moves, 27 tables and 8 views.
+
+- `test.api` — **1547 passed, 20 skipped, 94% coverage** in 47m46s. Every skip is
+  the SQL Server suite, which needs the on-demand container.
+- `test.web` — **155 passed**. `lint`, `typecheck`, `check.status`,
+  `check.backlog`, `check.env`, `check.infra`, `check.truths` — all pass.
+- `evals` — **20/20** on the FakeLLM path.
+- `test.web.e2e` — **8 passed, 1 failed, twice, on a different test each time**
+  and the same hydration timeout underneath. Filed as **B-117**, which matters
+  because the config already chose `next build && next start` to prevent this
+  symptom and the symptom returned.
+
+Three live questions through the real model, run inside the container so the path
+is the product's own. *"How many orders were placed in July 2026?"* → **3718**,
+byte-equal to `truths.json` `.orders.in_july_2026`. *"What were our best-selling
+items?"* → `answered=False`, one model call, **no query executed**, and the
+sentence names the missing table rather than guessing. *"How many sales are
+recorded, and over what date range?"* against F&B → 112,327 over 2025, with the
+retrieval step reaching the customer's own views.
 
 ---
 
