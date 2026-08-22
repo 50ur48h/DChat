@@ -2954,6 +2954,14 @@ Nine are P2 and the rest P3; nothing here is P1.
 **The three that belong to a Phase 12 work package by subject**, and should be
 taken there rather than separately:
 
+- **B-114** — the artifact store can lose a result and nothing says so. Filed
+  2026-08-22 from a count of files against rows: 411 rows, 408 files, 2 gone,
+  1 with a NULL reference. **Not retention** — nothing is past `expires_at` and
+  B-021 records that no sweep exists. A citation still opens (the evidence panel
+  reads `sample_rows` from the database, not the file), so what it costs is a
+  chart that cannot be redrawn — and the refusal for *the store lost your
+  result* is the same sentence as for *the model named the wrong query*. Take it
+  with WP12.2, where the Blob backend makes the same conflation hide an outage.
 - **B-021** — nothing deletes an expired result. `result_artifacts.expires_at` is
   written on every row and read by nothing, so retention is a promise with a date
   attached. WP12.3 is where a scheduler and a real Blob container first exist.
