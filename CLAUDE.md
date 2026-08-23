@@ -24,6 +24,14 @@ make evals              # eval harness with FakeLLM (Phase 9+)
 - PR-only into protected main; squash merge; branch p{phase}.{wp}-{slug}.
 - Update docs/plan/STATUS.md in the same PR as the work.
 - New deferred work → docs/plan/BACKLOG.md entry (B-###) in the same PR.
+- **Allocate a B-### against a freshly-fetched `origin/main`, and expect to
+  renumber.** Two machines filing on the same day both took B-114 (#94 and #95);
+  `check_backlog.sh` caught the duplicate at merge, so nothing was corrupted, but
+  the second one to push pays — and the cost scales with how far the id has
+  spread. #95's had reached six files, because entries get cited in code
+  comments, `make help` text and the README, not only in the table. `git fetch`
+  before you pick the number; if you lose the race, renumber every citation, not
+  just the row.
 - Code TODOs must be `TODO(B-###)`; CI fails otherwise.
 - Never commit secrets; .env is local-only; .env.example documents keys.
 - Deviating from docs/architecture.md → DECISIONS.md entry + doc edit, same PR.
