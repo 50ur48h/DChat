@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import SecretStr
 
 from dataagent.config import Settings, find_env_file, get_settings
 
@@ -154,3 +155,59 @@ def test_audiences_split_on_commas() -> None:
 
 def test_a_single_audience_still_works() -> None:
     assert Settings(oidc_audience="dataagent-api").resolve_audiences() == ["dataagent-api"]
+
+
+# ---------------------------------------------------------------------------
+# The DSN the deployment hands over in two halves (WP12.2, B-120)
+# ---------------------------------------------------------------------------
+
+
+def _app_settings(**overrides: object) -> Settings:
+    # `app_db_password` is pinned to None in the base, not merely left out: the
+    # repository's own .env sets it, `Settings` reads that file, and a test that
+    # omitted the field would silently be testing the developer's password.
+    base: dict[str, object] = {
+        "app_database_url": "postgresql+asyncpg://u@h:5432/d?ssl=require",
+        "app_db_password": None,
+    }
+    return Settings(**(base | overrides))  # pyright: ignore[reportArgumentType]
+
+
+def test_the_password_is_joined_to_a_dsn_that_omits_it() -> None:
+    """`apps.bicep` keeps the password as the only part that comes from the vault,
+    so something has to put the two back together before anyone connects."""
+    settings = _app_settings(app_db_password=SecretStr("pa55"))
+
+    assert settings.require_app_database_url() == "postgresql+asyncpg://u:pa55@h:5432/d?ssl=require"
+
+
+def test_a_password_needing_escaping_survives_the_join() -> None:
+    """A generated password contains `@` and `/` often enough that not escaping
+    would work in testing and fail on a rotation."""
+    settings = _app_settings(app_db_password=SecretStr("p@ss/w:rd"))
+
+    assert "p%40ss%2Fw%3Ard@h:5432" in settings.require_app_database_url()
+
+
+def test_a_dsn_that_already_carries_one_is_left_alone() -> None:
+    """Local `.env` embeds the password. Overwriting it would make a developer's
+    stack depend on which of the two variables they happened to set last."""
+    settings = _app_settings(
+        app_database_url="postgresql+asyncpg://u:already@h:5432/d",
+        app_db_password=SecretStr("ignored"),
+    )
+
+    assert settings.require_app_database_url() == "postgresql+asyncpg://u:already@h:5432/d"
+
+
+def test_no_password_setting_leaves_the_dsn_untouched() -> None:
+    assert _app_settings().require_app_database_url().startswith("postgresql+asyncpg://u@h")
+
+
+def test_the_password_does_not_surface_in_a_settings_dump() -> None:
+    """SecretStr for the reason LOCAL_SECRETS_KEY is: a settings dump reaches
+    logs, and this one opens the platform database."""
+    settings = _app_settings(app_db_password=SecretStr("pa55"))
+
+    assert "pa55" not in repr(settings)
+    assert "pa55" not in str(settings.model_dump())

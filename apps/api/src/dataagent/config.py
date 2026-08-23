@@ -11,6 +11,7 @@ import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -60,6 +61,29 @@ def find_env_file(start: Path) -> Path | None:
 #: In a container there is no .env and configuration comes from the environment,
 #: which is how it should be; this is a local-development convenience only.
 _REPO_ENV_FILE = find_env_file(Path(__file__))
+
+
+def _with_password(dsn: str, password: SecretStr | None) -> str:
+    """Put a separately-supplied password back into a DSN that omits it.
+
+    **One helper, called from the two places that hand out a DSN**, because the
+    deployment templates keep the password out of the URL on purpose — one secret
+    in the vault, the rest readable — and something has to reassemble them. Doing
+    it where the DSN is handed out means no caller can be given the passwordless
+    one by mistake.
+
+    A URL that already carries a password wins. A local `.env` embeds one, and
+    silently overwriting it would make a developer's stack depend on which of the
+    two variables they happened to set last.
+    """
+    if password is None:
+        return dsn
+    parsed = urlsplit(dsn)
+    if parsed.password is not None or "@" not in parsed.netloc:
+        return dsn
+    user, _, host = parsed.netloc.rpartition("@")
+    joined = f"{user}:{quote(password.get_secret_value(), safe='')}@{host}"
+    return urlunsplit(parsed._replace(netloc=joined))
 
 
 class Settings(BaseSettings):
@@ -147,7 +171,32 @@ class Settings(BaseSettings):
         default=None,
         description=(
             "Runtime DSN, connecting as dataagent_app: no superuser, no BYPASSRLS, "
-            "owner of nothing. Everything the request path touches goes through it."
+            "owner of nothing. Everything the request path touches goes through it. "
+            "May omit the password, in which case APP_DB_PASSWORD supplies it."
+        ),
+    )
+    #: The owner's half of the same arrangement. Only the migration job is given
+    #: this; the API never is, which is the separation CLAUDE.md states as a hard
+    #: rule and the reason `dataagent_app` owns nothing.
+    db_password: SecretStr | None = Field(
+        default=None,
+        description=(
+            "The password for the migration/owner role, supplied separately so "
+            "the rest of DATABASE_URL can stay readable in a deployment template. "
+            "Locally the password is already inside DATABASE_URL and this is unset."
+        ),
+    )
+    #: SecretStr for the reason `local_secrets_key` is: it must not surface in a
+    #: repr, a traceback frame or a settings dump.
+    app_db_password: SecretStr | None = Field(
+        default=None,
+        description=(
+            "The password for dataagent_app, supplied separately so the rest of "
+            "the DSN can stay readable. The deployment templates build "
+            "APP_DATABASE_URL in the clear — host, database, sslmode — and take "
+            "only this from Key Vault, so a person reading the template can see "
+            "what the API connects to and never what it connects with. Locally "
+            "the password is already inside APP_DATABASE_URL and this is unset."
         ),
     )
 
@@ -596,7 +645,7 @@ class Settings(BaseSettings):
                 "DATABASE_URL is not set. Copy .env.example to .env (`make env`) "
                 "and start the platform database with `make up`."
             )
-        return self.database_url
+        return _with_password(self.database_url, self.db_password)
 
     def require_app_database_url(self) -> str:
         """The runtime DSN. Never falls back to the owner DSN.
@@ -611,7 +660,7 @@ class Settings(BaseSettings):
                 "APP_DATABASE_URL is not set. It must connect as dataagent_app, "
                 "not as the owner. Run `make db.setup` after `make up`."
             )
-        return self.app_database_url
+        return _with_password(self.app_database_url, self.app_db_password)
 
 
 @lru_cache(maxsize=1)
