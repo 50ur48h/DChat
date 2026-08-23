@@ -240,6 +240,15 @@ async def main() -> int:
         raise SystemExit("the catalog is empty; the evals would all fail on grounding")
 
     print(f"\nEVALS_ORG_ID={org_id}")
+    # **Say which network this organization is on** (**B-115**). It is registered
+    # at the address in `.env`, which is the host's view of the fixture — right
+    # for this harness, which runs in-process here and on a CI runner with no
+    # container, and unusable from the API, which answers inside one. Printing it
+    # costs a line and is the difference between a developer seeing the mismatch
+    # and spending an evening on a connector error in a browser.
+    print(f"  registered at {host}:{port} — the HOST's address, for this harness")
+    if host in {"localhost", "127.0.0.1", "::1"}:
+        print("  the api container cannot reach that. For the browser: make demo.setup")
     return 0
 
 

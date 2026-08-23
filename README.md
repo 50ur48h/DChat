@@ -102,6 +102,25 @@ Create an organization when asked. You are its Admin.
 
 ### 4. Register the demo database
 
+**Or skip steps 4 and 5 entirely:**
+
+```bash
+make demo.setup
+```
+
+That builds an organization called `Demo` with the seed databases registered,
+tested, discovered and profiled — everything the next two steps do by hand. It
+runs inside the api container, because that is where the API reaches those
+databases, and it ends by checking that every registered source is reachable from
+there. Ask an Admin of `Demo` to invite your account, or do steps 4 and 5 by hand
+to learn what it did.
+
+Do **not** use `make evals.setup` for this. It builds the eval harness's
+organization at the host's address (`localhost:6543`), which the API cannot
+reach — see backlog **B-115**, which is what that mistake cost.
+
+The manual route, which is worth walking once:
+
 The organization you just created is listed under **Your organizations** with a
 **Members** button — that button is the way in. From there choose **Data
 sources**, and fill in the **Register a database** form at the bottom:
