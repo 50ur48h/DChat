@@ -25,11 +25,12 @@ def build_secrets_provider(settings: Settings | None = None) -> SecretsProvider:
     resolved.assert_secrets_backend_is_production_safe()
 
     if resolved.secrets_backend == "keyvault":
-        raise RuntimeError(
-            "SECRETS_BACKEND=keyvault is not implemented yet — the Key Vault "
-            "provider arrives with the Azure deployment in WP12.2 (DECISIONS "
-            "D-001). Until then this deployment cannot hold credentials."
-        )
+        # Imported here rather than at module scope: this module is imported by
+        # every process, and the Azure SDK is only needed by the deployments
+        # that choose this backend.
+        from dataagent.secrets.keyvault import KeyVaultSecretsProvider
+
+        return KeyVaultSecretsProvider(vault_url=resolved.key_vault_url or "")
 
     return LocalSecretsProvider(
         key=resolved.require_local_secrets_key(),

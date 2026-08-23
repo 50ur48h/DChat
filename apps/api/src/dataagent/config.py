@@ -17,6 +17,10 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["local", "ci", "dev", "prod"]
 SecretsBackend = Literal["local", "keyvault"]
+#: Where whole query results live. Separate from SecretsBackend on purpose:
+#: the two have different stakes, and a single "use Azure" switch would make
+#: losing an artifact and leaking a credential the same decision.
+ArtifactsBackend = Literal["local", "blob"]
 
 #: How much encryption a connection to a *customer's* database must have, spelled
 #: the way libpq spells it so the words mean what an operator already thinks they
@@ -170,6 +174,19 @@ class Settings(BaseSettings):
         description=(
             "Where the local backend keeps its encrypted file. Defaults to "
             "ops/.secrets/secrets.json beside the repository's .env."
+        ),
+    )
+    #: Not a SecretStr, and deliberately: a vault's address is not a credential.
+    #: What guards it is the managed identity's role assignment, not obscurity —
+    #: and treating a URL as secret would hide it from the logs that make a
+    #: misconfigured deployment diagnosable.
+    key_vault_url: str | None = Field(
+        default=None,
+        description=(
+            "The vault holding customer credentials, e.g. "
+            "https://kv-dataagent-dev-xxxx.vault.azure.net/. Required when "
+            "SECRETS_BACKEND=keyvault; supplied by the deployment from the vault "
+            "the Bicep created. Reached with a managed identity, never a key."
         ),
     )
 
@@ -348,11 +365,36 @@ class Settings(BaseSettings):
         ),
     )
 
+    artifacts_backend: ArtifactsBackend = Field(
+        default="local",
+        description=(
+            "Where whole query results are kept. 'local' is files under "
+            "ARTIFACTS_PATH; 'blob' is Azure Blob Storage reached by managed "
+            "identity (WP12.2). Unlike SECRETS_BACKEND this one is not refused in "
+            "production — a lost artifact costs a redrawn chart, not a credential."
+        ),
+    )
+    artifacts_account_url: str | None = Field(
+        default=None,
+        description=(
+            "The storage account holding artifacts, e.g. "
+            "https://stdataagentdevxxxx.blob.core.windows.net/. Required when "
+            "ARTIFACTS_BACKEND=blob. Not a credential: access is the managed "
+            "identity's role assignment, not knowledge of the address."
+        ),
+    )
+    artifacts_container: str = Field(
+        default="artifacts",
+        description=(
+            "The blob container results are written to. Matches the container the "
+            "Bicep creates; the documents container is a separate one."
+        ),
+    )
     artifacts_path: Path = Field(
         default=Path("ops/artifacts"),
         description=(
-            "Where query results are kept locally, one directory per org. Blob "
-            "storage replaces this in Phase 12 behind the same interface."
+            "Where query results are kept locally, one directory per org. Used "
+            "when ARTIFACTS_BACKEND=local, which is the default."
         ),
     )
     artifact_retention_days: int = Field(

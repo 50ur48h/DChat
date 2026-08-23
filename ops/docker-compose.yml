@@ -105,6 +105,15 @@ services:
       SECRETS_BACKEND: ${SECRETS_BACKEND:-local}
       LOCAL_SECRETS_KEY: ${LOCAL_SECRETS_KEY:-}
       LOCAL_SECRETS_PATH: /app/ops/.secrets/secrets.json
+      # The Azure halves of the two stores (WP12.2). Passed here even though this
+      # stack has no Azure in it, and that is B-086's rule rather than an
+      # oversight: SECRETS_BACKEND is settable from .env, so a developer who sets
+      # it to `keyvault` must get the vault URL they also set, not a container
+      # that silently has neither. Empty by default, so nothing changes locally.
+      KEY_VAULT_URL: ${KEY_VAULT_URL:-}
+      ARTIFACTS_BACKEND: ${ARTIFACTS_BACKEND:-local}
+      ARTIFACTS_ACCOUNT_URL: ${ARTIFACTS_ACCOUNT_URL:-}
+      ARTIFACTS_CONTAINER: ${ARTIFACTS_CONTAINER:-artifacts}
       # Encryption to customer databases (B-013). Any address that is not on this
       # machine must use TLS; these two names are databases *in this network*,
       # serving no certificate that any name could match, so they are declared

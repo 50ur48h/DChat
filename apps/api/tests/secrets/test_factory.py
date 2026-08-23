@@ -48,8 +48,17 @@ def test_a_production_process_refuses_to_boot_with_it() -> None:
         create_app(settings=_settings(env="prod", auth_mode="entra", oidc_authority="https://x"))
 
 
-def test_key_vault_says_when_it_arrives_instead_of_failing_vaguely() -> None:
-    with pytest.raises(RuntimeError, match=r"WP12\.2"):
+def test_key_vault_now_exists_and_says_what_it_still_needs() -> None:
+    """This test used to assert the placeholder that said *"arrives in WP12.2"*.
+
+    WP12.2 is where it arrived, so the old assertion would now pass only if the
+    backend were still missing. Replaced rather than deleted: what is worth
+    holding is that choosing this backend without configuring it refuses at build
+    time and names the variable, instead of constructing a client that fails
+    later on a request path. The provider's own behaviour is in
+    `tests/secrets/test_keyvault.py`.
+    """
+    with pytest.raises(RuntimeError, match="KEY_VAULT_URL"):
         build_secrets_provider(_settings(secrets_backend="keyvault"))
 
 
