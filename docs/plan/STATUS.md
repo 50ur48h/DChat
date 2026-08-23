@@ -62,9 +62,9 @@ Blocked on user: **yes — WP12.2 cannot start.** Two owner tasks, written out a
                  (P1)** and with it the Phase 6 gate; it blocks nothing in
                  Phase 12 either, and WP12.4 turns nightly evals on against dev,
                  so B-029 wants an answer before that gate rather than after.
-Last updated: 2026-08-23 by Claude Code (new dev machine brought up and proved from a
-              fresh clone and an empty database; B-115 **fixed** (#95), B-116/117 filed;
-              WP12.2 still next and still blocked on the owner's OIDC setup)
+Last updated: 2026-08-23 by Claude Code (new dev machine brought up and proved; B-115
+              **fixed** (#95), B-116/117/118 filed, **B-119 (P1)** filed from the owner's
+              browser walk; WP12.2 still next and still blocked on the owner's OIDC setup)
 
 ---
 
@@ -141,6 +141,41 @@ check`** (`d7a4deb3-…`) is what `make demo.setup` built from clean to prove th
 fix; it was named before this entry was renumbered off B-114, which #94 took,
 and can be deleted whenever the owner likes. The owner's own account is an
 Admin of `Demo`; their `FNB` org, created by hand while this ran, has no sources.
+
+### B-119 — the browser walk found a fabricated refusal, and it is P1
+
+**The fourth question was the unproven one, and it earned its place.** *"Which
+outlet wastes the most, and what does it cost?"*, asked of the F&B sample, came
+back `answerable=false` with **no query executed** and this sentence: *"The
+available reference also prohibits combining `fact_waste` with `dim_outlet`, so
+the outlet name cannot be returned."*
+
+**There is no such prohibition.** `fact_waste.outlet_key → dim_outlet.outlet_key`
+is a declared foreign key at **confidence 1.00**; the run's own
+`capability_checked` event lists 20 unreachable pairs and this is not one of
+them, nor is it a chasm. It was `joinable` — a direct child→parent join. Run by
+hand it answers **Outlet C, 3.398**. The cost half of the question was refused
+honestly, because `est_cost` is NULL on both of `fact_waste`'s two rows; that
+half is not the defect.
+
+**The check was right and the answer was wrong**, which is the opposite of where
+the fault was first expected to be. Nothing deterministic imposed the rule the
+model asserted.
+
+**D-026's mitigation was correct and insufficient.** `runner.py` already phrases
+the chasm note as an instruction rather than a prohibition, and says why — a
+model told only *"do not"* would refuse a question it could have answered. That
+guards over-refusal of a **listed** pair. This is over-refusal of an **unlisted**
+pair whose table names appear in the list: 20 chasms and 20 gaps, `dim_outlet` in
+seven of them and `fact_waste` in thirteen, including `fact_member_visit ↔
+fact_waste via dim_outlet` — both names adjacent inside a sentence about not
+joining directly.
+
+**It cannot appear on the pizza fixture.** Six tables make a short note; F&B's
+thirty-five make forty pairs under two prohibition-flavoured headings. Every eval
+and every gate demo so far has run against the narrow fixture, which is why a
+second dataset was worth having and why the twentieth green eval said nothing
+about this.
 
 ### The evidence, including the part that is not green
 
