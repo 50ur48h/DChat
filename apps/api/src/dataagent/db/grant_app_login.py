@@ -34,6 +34,8 @@ import asyncio
 import os
 import sys
 
+from dataagent.config import get_settings
+
 #: The role migration 0002 creates. Named here rather than imported so this
 #: module does not drag the migration's module graph into a job that only needs
 #: one statement.
@@ -44,8 +46,10 @@ async def grant() -> int:
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import create_async_engine
 
-    from dataagent.config import get_settings
-
+    # Module-level so a test can substitute it the way the rest of this suite
+    # does (`monkeypatch.setattr(module, "get_settings", ...)`). The alternative
+    # — clearing the lru_cache — mutates process-wide state that every later test
+    # in the session then re-reads from the developer's own .env.
     settings = get_settings()
     password = os.environ.get("APP_DB_PASSWORD", "")
     if not password:

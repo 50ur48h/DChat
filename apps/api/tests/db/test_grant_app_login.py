@@ -16,31 +16,40 @@ about a role, and a fake would only assert what this test already believes.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterator
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from dataagent.config import get_settings
+from dataagent.config import Settings
+from dataagent.db import grant_app_login as module
 from dataagent.db.grant_app_login import APP_ROLE, grant
 
 pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture
-def owner_env(migrated_database: URL, monkeypatch: pytest.MonkeyPatch) -> Iterator[URL]:
-    """Point `Settings` at the temp database as the owner, the way the job is.
+def owner_env(migrated_database: URL, monkeypatch: pytest.MonkeyPatch) -> URL:
+    """Point the module's settings at the temp database, the way the job is.
 
-    The module reads `DATABASE_URL` through `require_database_url()`, so this is
-    the one thing that has to be true for it to be exercised on its real path
-    rather than through an argument a test invented.
+    **Substituting `get_settings` on the module, never clearing its cache.**
+    `get_settings` is an `lru_cache` singleton read once per process; clearing it
+    mid-session makes every later test re-read configuration from the developer's
+    own `.env` instead of whatever the session set up. That is not theoretical —
+    the first version of this file did exactly that and took 21 tenancy tests down
+    with it in CI, because `tests/db` runs before `tests/orgs`, `tests/runs` and
+    `tests/semantic`. Cross-org requests started returning 200 where they had
+    returned 404, which is the most alarming possible way to learn that a fixture
+    is too clever. `monkeypatch.setattr` is what the rest of this suite uses and
+    it is restored per test.
     """
-    monkeypatch.setenv("DATABASE_URL", migrated_database.render_as_string(hide_password=False))
-    get_settings.cache_clear()
-    yield migrated_database
-    get_settings.cache_clear()
+    resolved = Settings(  # pyright: ignore[reportArgumentType]
+        database_url=migrated_database.render_as_string(hide_password=False),
+        db_password=None,
+    )
+    monkeypatch.setattr(module, "get_settings", lambda: resolved)
+    return migrated_database
 
 
 async def _roles_of(dsn: URL) -> dict[str, bool]:
