@@ -142,12 +142,19 @@ async def test_a_password_full_of_quotes_survives(
 async def test_no_password_refuses_rather_than_granting_an_empty_one(
     owner_env: URL, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An empty password is a role anyone can be. Refusing stops the deploy."""
+    """An empty password is a role anyone can be. Refusing stops the deploy.
+
+    **Only the return value is asserted, deliberately.** The obvious extra check —
+    that the role still cannot log in — is unsound here, because `ALTER ROLE` is
+    cluster-global and conftest's own `app_database` fixture grants
+    `dataagent_app` a login for any earlier test that needed one. Asserting
+    `login is False` therefore depends on which tests ran first; it failed in CI
+    with `assert True is False` for exactly that reason. What this test can honestly
+    claim is that `grant` refuses, which is what stops the deploy.
+    """
     monkeypatch.delenv("APP_DB_PASSWORD", raising=False)
 
     assert await grant() == 1
-
-    assert (await _roles_of(owner_env))["login"] is False
 
 
 async def test_a_role_with_too_much_privilege_stops_the_deploy(
@@ -155,15 +162,40 @@ async def test_a_role_with_too_much_privilege_stops_the_deploy(
 ) -> None:
     """The check that earns this module its place.
 
-    Reproduces the state rather than asserting a message: the role really is
-    given BYPASSRLS, and the grant really does refuse — so the deploy stops
-    before the API is rolled onto a revision that would connect with more
-    privilege than RLS assumes.
+    Reproduces the state rather than asserting a message: a role really does have
+    BYPASSRLS, and the grant really does refuse — so a deploy stops before the API
+    is rolled onto a revision that would connect with more privilege than RLS
+    assumes.
+
+    **Against a throwaway role, never `dataagent_app`.** `ALTER ROLE` is
+    cluster-global in PostgreSQL, not scoped to the database the connection is
+    on, so giving the real role BYPASSRLS hands it to every other database in the
+    cluster — and to every test that runs afterwards if anything raises before the
+    restore. The first version of this test did that, `grant()` then failed on an
+    unrelated bug, and the whole rls_proof suite went red with "the API role can
+    bypass RLS". `grant()` takes a role argument for exactly this reason.
     """
     monkeypatch.setenv("APP_DB_PASSWORD", f"pw-{uuid.uuid4().hex}")
-    await _alter(owner_env, f"ALTER ROLE {APP_ROLE} WITH BYPASSRLS")
+    probe = f"dataagent_probe_{uuid.uuid4().hex[:12]}"
+    await _alter(owner_env, f"CREATE ROLE {probe} WITH BYPASSRLS")
+    try:
+        assert await grant(role=probe) == 1
+    finally:
+        await _alter(owner_env, f"DROP ROLE IF EXISTS {probe}")
 
-    assert await grant() == 1
-
-    await _alter(owner_env, f"ALTER ROLE {APP_ROLE} WITH NOBYPASSRLS")
+    # And the real role is untouched by any of it.
     assert (await _roles_of(owner_env))["bypassrls"] is False
+
+
+async def test_the_real_role_is_never_given_extra_privilege_by_these_tests(
+    owner_env: URL,
+) -> None:
+    """A tripwire, not a tautology.
+
+    If a future edit here reaches for `dataagent_app` again — the obvious thing to
+    do, and the thing that cost a red rls_proof suite — this fails in the file
+    that caused it rather than in twelve unrelated tests downstream.
+    """
+    facts = await _roles_of(owner_env)
+    assert facts["bypassrls"] is False
+    assert facts["super"] is False

@@ -41,8 +41,17 @@ from dataagent.config import get_settings
 #: one statement.
 APP_ROLE = "dataagent_app"
 
+#: `grant()` takes the role as an argument purely so its refusal path can be
+#: tested against a throwaway role. **`ALTER ROLE` is cluster-global in
+#: PostgreSQL, not per-database**, so a test that gave the real `dataagent_app`
+#: BYPASSRLS would be handing it to every other database in the cluster — and if
+#: anything raised before the restore, to every test that ran afterwards. That is
+#: not hypothetical: it happened, and it failed the entire rls_proof suite with
+#: "the API role can bypass RLS", which reads exactly like the security boundary
+#: had broken.
 
-async def grant() -> int:
+
+async def grant(role: str = APP_ROLE) -> int:
     from sqlalchemy import text
     from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -67,14 +76,23 @@ async def grant() -> int:
         async with engine.begin() as connection:
             # **A bound parameter cannot be used here.** `ALTER ROLE ... PASSWORD`
             # takes a literal, not a placeholder, so the value has to be inlined —
-            # and inlining it is exactly the shape of thing that becomes an
-            # injection. `quote_literal` is Postgres's own escaping, applied by
-            # the server to a *bound* parameter, so the password still never
-            # appears in a string this process concatenates.
+            # and inlining is exactly the shape of thing that becomes an
+            # injection. `format` with `%I` and `%L` is Postgres's own quoting,
+            # applied by the server to *bound* parameters, so neither the role
+            # name nor the password appears in a string this process concatenates.
+            #
+            # The `::text` casts are not decoration. Without them asyncpg cannot
+            # infer a type for a parameter whose only use is inside `format()`
+            # and refuses the statement with `IndeterminateDatatypeError: could
+            # not determine data type of parameter $1` — which is what CI said
+            # the first time this ran.
             statement = (
                 await connection.execute(
-                    text(f"SELECT format('ALTER ROLE {APP_ROLE} WITH LOGIN PASSWORD %L', :pw)"),
-                    {"pw": password},
+                    text(
+                        "SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', "
+                        ":role::text, :pw::text)"
+                    ),
+                    {"role": role, "pw": password},
                 )
             ).scalar_one()
             await connection.exec_driver_sql(statement)
@@ -88,7 +106,7 @@ async def grant() -> int:
                         "SELECT rolcanlogin, rolsuper, rolbypassrls, rolcreatedb, rolcreaterole "
                         "FROM pg_roles WHERE rolname = :r"
                     ),
-                    {"r": APP_ROLE},
+                    {"r": role},
                 )
             ).one()
         can_login, is_super, can_bypass, can_createdb, can_createrole = row
@@ -96,17 +114,17 @@ async def grant() -> int:
         await engine.dispose()
 
     print(
-        f"{APP_ROLE}: login={can_login} superuser={is_super} bypassrls={can_bypass} "
+        f"{role}: login={can_login} superuser={is_super} bypassrls={can_bypass} "
         f"createdb={can_createdb} createrole={can_createrole}"
     )
     if not can_login:
-        print(f"{APP_ROLE} still cannot log in.", file=sys.stderr)
+        print(f"{role} still cannot log in.", file=sys.stderr)
         return 1
     if is_super or can_bypass or can_createdb or can_createrole:
         # Refusing here stops the deploy before the API is rolled onto a
         # revision that would connect with more privilege than the design allows.
         print(
-            f"{APP_ROLE} has privileges it must not have. The API connects as this "
+            f"{role} has privileges it must not have. The API connects as this "
             "role and RLS is the tenant boundary; refusing to continue.",
             file=sys.stderr,
         )
