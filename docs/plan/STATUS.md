@@ -68,6 +68,41 @@ Last updated: 2026-08-23 by Claude Code (new dev machine brought up and proved; 
 
 ---
 
+## WP12.2 started, 2026-08-23 — the first thing that ever touched Azure
+
+**Both owner prerequisites are done, verified rather than assumed.** The app
+registration `dataagent-github-oidc` exists with two federated credentials —
+`github-dev` and `github-prod`, both on `repo:50ur48h/DChat:environment:…` — and
+the GitHub `dev` environment holds `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
+`AZURE_SUBSCRIPTION_ID` and `POSTGRES_ADMIN_PASSWORD`.
+
+**The open role-assignment decision answered itself in the subscription.** The
+OIDC identity holds **Contributor**, **User Access Administrator** *and* **Key
+Vault Secrets Officer**, all scoped to `rg-dataagent-dev`. So `roles.bicep` stays
+in what the pipeline deploys; the alternative — three assignments made by hand
+and the module dropped — is not needed. `rg-dataagent-dev` exists in
+`southeastasia` and is **empty**; `Microsoft.App` and `Microsoft.DBforPostgreSQL`
+are both registered.
+
+**`what-if` succeeded.** `status: Succeeded`, `error: null`, **14 resources, all
+`Create`, nothing modified and nothing deleted**: the budget, ACR, App Insights,
+Key Vault, the user-assigned identity, the private DNS zone and its vnet link,
+the vnet, the Log Analytics workspace, the storage account with its two
+containers and the artifact lifecycle policy. Three `NestedDeploymentShortCircuited`
+warnings — `postgres`, `roles`, `apps` — which is what Azure returns for modules
+whose parameters come from an earlier module's `reference()` output, and is
+expected rather than a fault.
+
+Run with obvious dummies for the two secrets the params file deliberately does
+not carry, because `what-if` creates nothing and a secure string is not evaluated.
+
+**One item still owed by the owner, and it is not in this repo on purpose:**
+`BUDGET_ALERT_EMAIL`. Wanted as a **`dev` environment secret** rather than a
+value passed in conversation, so it reaches the workflow without ever appearing
+in a tracked file or a transcript.
+
+---
+
 ## The new machine, 2026-08-23 — the documented path walked from nothing
 
 **No work package. A relocation**, and the second deliberate walk of the
