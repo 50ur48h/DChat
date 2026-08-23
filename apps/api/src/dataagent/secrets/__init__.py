@@ -21,15 +21,18 @@ from dataagent.secrets.base import (
     validate_ref,
 )
 from dataagent.secrets.factory import build_secrets_provider, get_secrets_provider
+from dataagent.secrets.keyvault import KeyVaultSecretsProvider, secret_name_for
 from dataagent.secrets.local import LocalSecretsProvider, SecretDecryptionError
 
 __all__ = [
     "InvalidSecretRefError",
+    "KeyVaultSecretsProvider",
     "LocalSecretsProvider",
     "SecretDecryptionError",
     "SecretNotFoundError",
     "SecretsProvider",
     "build_secrets_provider",
     "get_secrets_provider",
+    "secret_name_for",
     "validate_ref",
 ]

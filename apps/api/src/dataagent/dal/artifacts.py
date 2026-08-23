@@ -28,13 +28,14 @@ from collections.abc import Iterable
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, cast, runtime_checkable
 
 from dataagent.config import Settings, get_settings
 from dataagent.dal.masking import MaskedFrame
 
 __all__ = [
     "ArtifactStore",
+    "BlobArtifactStore",
     "LocalArtifactStore",
     "StoredArtifactError",
     "artifact_store",
@@ -97,9 +98,98 @@ class LocalArtifactStore:
         return candidate
 
 
+class BlobArtifactStore:
+    """Azure Blob Storage. The deployed answer (WP12.2, architecture 6.4).
+
+    The same key scheme as the local store — ``{org_id}/{execution_id}.json`` —
+    so the tenant prefix is a property of the reference rather than of the
+    backend, and the isolation check below is the same check for the same reason.
+    Blob names are opaque to the service, so no translation is needed here; that
+    is the difference from `KeyVaultSecretsProvider`, whose names are constrained.
+
+    **Managed identity, no connection string.** The container app's user-assigned
+    identity holds `Storage Blob Data Contributor` on the account, so this class
+    holds no credential and there is none to leak. A connection string would have
+    been fewer lines and would have put a key in the app's environment, which is
+    the thing architecture 9 is built to avoid.
+
+    **A missing blob is `None`, not an error**, exactly as the local store's
+    missing file is: an expired or swept result is an ordinary outcome, and
+    B-114 records what happens when the *reasons* for `None` are conflated —
+    that conflation is one layer up, in `chart._frame_for`, and is not fixed here.
+    """
+
+    def __init__(
+        self,
+        *,
+        account_url: str,
+        container: str,
+        client: object | None = None,
+    ) -> None:
+        if not account_url:
+            raise StoredArtifactError(
+                "ARTIFACTS_BACKEND=blob needs ARTIFACTS_ACCOUNT_URL. The deployment "
+                "sets it from the storage account the Bicep created."
+            )
+        self._container_name = container
+        if client is not None:
+            self._service = client
+            return
+        # Deferred for the reason `secrets/keyvault.py` defers its own: the SDK
+        # is in the image for the deployment's sake and costs every other process
+        # an import it will never use.
+        from azure.identity.aio import DefaultAzureCredential
+        from azure.storage.blob.aio import BlobServiceClient
+
+        self._service = BlobServiceClient(
+            account_url=account_url, credential=DefaultAzureCredential()
+        )
+
+    def _blob(self, reference: str) -> Any:
+        service = cast(Any, self._service)
+        return service.get_blob_client(container=self._container_name, blob=reference)
+
+    async def put(self, *, org_id: uuid.UUID, execution_id: uuid.UUID, payload: bytes) -> str:
+        reference = f"{org_id}/{execution_id}.json"
+        await self._blob(reference).upload_blob(payload, overwrite=True)
+        return reference
+
+    async def get(self, *, org_id: uuid.UUID, reference: str) -> bytes | None:
+        from azure.core.exceptions import ResourceNotFoundError
+
+        self._check_tenant(org_id, reference)
+        try:
+            stream = await self._blob(reference).download_blob()
+            return cast(bytes, await stream.readall())
+        except ResourceNotFoundError:
+            return None
+
+    @staticmethod
+    def _check_tenant(org_id: uuid.UUID, reference: str) -> None:
+        """Refuse a reference belonging to another organization.
+
+        The same guard `LocalArtifactStore._resolve` applies, and it earns its
+        place here for a different reason: a blob name is not a path, so there is
+        no `..` to climb with — but there is also no filesystem to stop a
+        perfectly well-formed name from reaching another tenant's prefix.
+        """
+        if not reference.startswith(f"{org_id}/"):
+            raise StoredArtifactError("That artifact belongs to another organization.")
+
+
 def artifact_store(settings: Settings | None = None) -> ArtifactStore:
-    """The store this deployment uses. One line to change in Phase 12."""
+    """The store this deployment uses.
+
+    Chosen by `ARTIFACTS_BACKEND`, the way `SECRETS_BACKEND` chooses the
+    credential store. Defaults to local, so nothing about a developer's stack
+    changes; a deployment sets `blob` and supplies the account URL.
+    """
     resolved = settings if settings is not None else get_settings()
+    if resolved.artifacts_backend == "blob":
+        return BlobArtifactStore(
+            account_url=resolved.artifacts_account_url or "",
+            container=resolved.artifacts_container,
+        )
     return LocalArtifactStore(resolved.artifacts_path)
 
 

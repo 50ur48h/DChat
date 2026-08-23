@@ -1,0 +1,154 @@
+# Deploy to Azure (plan §4.2, WP12.2).
+#
+# **No secret in this file, and none in its logs.** Authentication is GitHub's
+# OIDC token exchanged for an Azure one against the `dataagent-github-oidc` app
+# registration's federated credential for `repo:50ur48h/DChat:environment:dev`.
+# There is no service-principal password to rotate, and `permissions:
+# id-token: write` is what makes the exchange possible — remove it and every job
+# here fails at login rather than falling back to something weaker.
+#
+# **Manual only, for now.** Plan §4.2 sketches `push: { branches: [main] }`, and
+# that is deliberately not enabled yet: every merge would deploy, and this
+# pipeline has never run. `workflow_dispatch` first, the push trigger once dev
+# has come up cleanly more than once. The line is commented rather than absent so
+# the decision is visible.
+#
+# **Only `dev` exists** (DECISIONS **D-041**). The `deploy-prod` job §4.2
+# describes is not written here rather than written and disabled: a job nobody
+# can run is a job nobody maintains, and prod arrives with its own work package.
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy. Defaults to this commit's sha."
+        required: false
+        type: string
+  # push: { branches: [main] }   # enable once dev has deployed cleanly twice
+
+# The whole security model of this file. `contents: read` is the least that lets
+# a checkout work; `id-token: write` is what mints the OIDC assertion.
+permissions:
+  id-token: write
+  contents: read
+
+# One deploy at a time. Two overlapping runs would race on the same revision and
+# the migration job below, and the loser would be deciding the schema.
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  deploy-dev:
+    runs-on: ubuntu-latest
+    # Holds AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID,
+    # POSTGRES_ADMIN_PASSWORD and BUDGET_ALERT_EMAIL. The last is a personal
+    # address and this repository is public, which is why it is an environment
+    # secret and not a parameter file (see infra/params/dev.bicepparam).
+    environment: dev
+    env:
+      RESOURCE_GROUP: rg-dataagent-dev
+      IMAGE_TAG: ${{ inputs.image_tag || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sign in to Azure with OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # **what-if before create, every time.** It is the cheapest possible
+      # review of a template against the subscription it is about to change, it
+      # costs seconds, and it is the step that turns "14 resources will be
+      # created" from an assumption into a line in the log. It does not gate the
+      # deploy — reading it is a person's job — but an unreadable plan here is a
+      # deploy worth stopping by hand.
+      - name: What the deployment would change
+        env:
+          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          BUDGET_ALERT_EMAIL: ${{ secrets.BUDGET_ALERT_EMAIL }}
+        run: |
+          az deployment group what-if \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters infra/params/dev.bicepparam
+
+      # The registry has to exist before an image can be pushed to it, and the
+      # apps have to exist before a revision can be swapped. One deployment
+      # creates everything; the image tag it is given on this first pass is
+      # whatever is already there, because the image does not exist yet.
+      - name: Deploy the infrastructure
+        id: infra
+        env:
+          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          BUDGET_ALERT_EMAIL: ${{ secrets.BUDGET_ALERT_EMAIL }}
+        run: |
+          az deployment group create \
+            --name "deploy-${IMAGE_TAG:0:12}" \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters infra/params/dev.bicepparam \
+            --query properties.outputs -o json > outputs.json
+          # Read back rather than reconstructed: the registry and vault names
+          # carry a `uniqueString` suffix, so anything that guessed them here
+          # would be right until the resource group changed.
+          {
+            echo "registry=$(jq -r .registryLoginServer.value outputs.json)"
+            echo "key_vault=$(jq -r .keyVaultName.value outputs.json)"
+            echo "web_url=$(jq -r .webUrl.value outputs.json)"
+          } >> "$GITHUB_OUTPUT"
+
+      # `az acr build` rather than docker build + push: the build happens in the
+      # registry's own build service, so this runner never holds a registry
+      # credential and there is nothing to leak in a log. It also means the
+      # image is built on the same architecture it will run on.
+      - name: Build and push the images
+        run: |
+          registry='${{ steps.infra.outputs.registry }}'
+          acr="${registry%%.*}"
+          az acr build --registry "$acr" --image "dataagent-api:${IMAGE_TAG}" \
+            --build-arg "GIT_SHA=${GITHUB_SHA}" --target prod apps/api
+          az acr build --registry "$acr" --image "dataagent-web:${IMAGE_TAG}" \
+            --build-arg "GIT_SHA=${GITHUB_SHA}" --target prod apps/web
+
+      # **Migrations run before the new revision serves traffic, never after.**
+      # A revision that starts against a schema it does not expect answers
+      # requests wrongly rather than failing, which is the worst of the three
+      # possible orderings. Run as a one-off Container Apps job so it executes
+      # inside the vnet — the Postgres server has no public endpoint — and as the
+      # owner role, which the running API deliberately is not.
+      - name: Migrate the platform database
+        run: bash ops/scripts/deploy_migrate.sh
+        env:
+          RESOURCE_GROUP: ${{ env.RESOURCE_GROUP }}
+          REGISTRY: ${{ steps.infra.outputs.registry }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+
+      # Now the apps point at the tag that was just built and migrated for.
+      - name: Roll the apps onto the new image
+        env:
+          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          BUDGET_ALERT_EMAIL: ${{ secrets.BUDGET_ALERT_EMAIL }}
+        run: |
+          az deployment group create \
+            --name "revision-${IMAGE_TAG:0:12}" \
+            --resource-group "$RESOURCE_GROUP" \
+            --template-file infra/main.bicep \
+            --parameters infra/params/dev.bicepparam \
+            --parameters imageTag="$IMAGE_TAG"
+
+      - name: Smoke the deployment
+        run: bash ops/scripts/deploy_smoke.sh
+        env:
+          WEB_URL: ${{ steps.infra.outputs.web_url }}
+          KEY_VAULT: ${{ steps.infra.outputs.key_vault }}
+          RESOURCE_GROUP: ${{ env.RESOURCE_GROUP }}
+
+      - name: Say where it is
+        run: |
+          echo "### Deployed \`${IMAGE_TAG:0:12}\` to dev" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- ${{ steps.infra.outputs.web_url }}" >> "$GITHUB_STEP_SUMMARY"

@@ -39,6 +39,28 @@ dependencies = [
     # relied on transitively: without it the route raises at import time with a
     # message about "python-multipart" that says nothing about which route.
     "python-multipart>=0.0.20",
+    # Azure, for the two backends that replace the local ones in a deployment
+    # (WP12.2, DECISIONS D-001). `azure-identity` supplies the managed identity
+    # that makes "zero secrets in the pipeline" true — nothing here ever holds a
+    # Key Vault or Storage credential, it asks the platform who it is.
+    #
+    # **All three are unconditional dependencies, not an optional extra.** The
+    # image that runs in Azure is built from this file, and an extra would mean
+    # the production path depends on a build flag being remembered; the local
+    # stack pays a few megabytes it never imports, because `keyvault.py` and the
+    # Blob store import lazily inside their constructors.
+    "azure-identity>=1.19",
+    "azure-keyvault-secrets>=4.9",
+    "azure-storage-blob>=12.24",
+    # **`azure-core[aio]`, not bare `azure-core`, and a test is why.** The three
+    # packages above declare `azure-core` without its async extra, so installing
+    # them gets you SDK clients whose `.aio` variants raise
+    # `ImportError: aiohttp package is not installed` the first time anything
+    # constructs one. Nothing above catches that: the unit tests inject a fake
+    # client, so the only code path that builds a real one is the deployment.
+    # Caught here by the factory-selection test — the "prove it is reached" rule
+    # in CLAUDE.md — which builds the store the way `artifact_store()` does.
+    "azure-core[aio]>=1.30",
 ]
 
 [dependency-groups]

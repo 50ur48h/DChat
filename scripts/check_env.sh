@@ -36,6 +36,28 @@
 #   5. Does every `Settings` field have a `.env.example` line? `config.py` is
 #      where the API decides what is configurable, and a field nobody documents
 #      is a knob with no label.
+#   6. Does every environment variable the **deployment templates** set on a
+#      container name something `Settings` actually reads? This is B-120's
+#      question, and it is questions 1-5 asked of the other environment.
+#   7. When a template selects a non-default backend, does it also set what that
+#      backend needs? `SECRETS_BACKEND=keyvault` without `KEY_VAULT_URL` is an
+#      app that boots and then refuses the first route that matters.
+#
+# **B-120 is why questions 6 and 7 exist, and it is worth reading before editing
+# this file.** For a whole work package the guard compared `.env.example` with
+# `ops/docker-compose.yml` and nothing else, so `infra/` -- the environment the
+# product is actually *deployed* into -- was unexamined. WP12.1's Bicep compiled,
+# CI was green, and it set `AZURE_KEY_VAULT_URI`, `ARTIFACTS_BLOB_ENDPOINT` and
+# `APP_DB_PASSWORD`, none of which `Settings` has ever read. A green build proves
+# the parts work and never that they meet.
+#
+# **What questions 6 and 7 still cannot see, stated rather than left to be
+# discovered:** a variable the template *omits*. `ARTIFACTS_BACKEND` was never
+# set at all, so results would have been written to a container filesystem that
+# vanishes on the next revision -- and no correspondence check can flag an
+# absence, because most settings are absent on purpose and correctly defaulted.
+# Question 7 covers the one shape of that which is knowable (a backend selected
+# without its companion); the general case needs a person.
 #
 # Usage:
 #   bash scripts/check_env.sh              # the repo's own files
@@ -51,6 +73,7 @@ set -euo pipefail
 ENV_EXAMPLE_FILE=${ENV_EXAMPLE_FILE:-.env.example}
 COMPOSE_FILE=${COMPOSE_FILE:-ops/docker-compose.yml}
 SETTINGS_FILE=${SETTINGS_FILE:-apps/api/src/dataagent/config.py}
+INFRA_DIR=${INFRA_DIR:-infra/modules}
 
 # ---------------------------------------------------------------------------
 # The declaration
@@ -82,12 +105,23 @@ SEED_FNB_READONLY_PASSWORD | As above.
 MSSQL_DB | Read by `ops/scripts/seed_mssql.sh`, which runs on the host against the on-demand SQL Server container.
 MSSQL_PIZZA_READONLY_USER | Created by that seed script and typed into the data-source form, exactly like the Postgres read-only login.
 MSSQL_PIZZA_READONLY_PASSWORD | As above.
+DB_PASSWORD | Deployment-only (WP12.2). Locally the owner password is inside DATABASE_URL and nothing needs it separately; in Azure the template builds the DSN in the clear and takes only this from Key Vault, and only the migration job is given it. Passing it to a compose service would add a second source of truth for a password that is already in the URL beside it.
 '
 
 # Keys the image or the build sets, which a person never puts in a `.env` and
 # which therefore have no `.env.example` line. Declared so that check 4 and
 # check 5 do not each need a special case -- and so that adding a third one is a
 # visible decision.
+# Environment variables the deployment sets that `Settings` deliberately does not
+# read -- they belong to the platform or to a library, not to this application's
+# configuration. Declared for the same reason HOST_ONLY is: the alternative is a
+# guard that everyone switches off the first time it is right about something
+# boring.
+readonly PLATFORM_ENV='
+AZURE_CLIENT_ID | Read by `DefaultAzureCredential` to pick the user-assigned managed identity, not by `Settings`. Without it a container with more than one identity cannot tell which to present.
+APPLICATIONINSIGHTS_CONNECTION_STRING | Read by the OpenTelemetry exporter (WP12.3), not by this application. Set here so the wiring exists before the code that uses it.
+'
+
 readonly SET_BY_THE_BUILD='
 GIT_SHA | Baked in at `docker build` time by the Makefile so `/healthz` can say which commit is running. A value in a .env would be a claim about an image it did not build.
 BUILD_ENV | Set by the Dockerfile target that built the process, and the reason the prod image can physically exclude the dev token issuer. A person setting it would be asserting something about an image rather than configuring one.
@@ -151,6 +185,43 @@ declared_reason() {
 
 contains() {
   printf '%s\n' "$2" | grep -qxF "$1"
+}
+
+# Every environment variable the deployment templates set on a container, as
+# `name: 'KEY'` inside a Bicep `env` array. Comment lines are stripped first, for
+# the reason compose_keys() strips them: prose about a variable is not a variable.
+# Reads every module rather than a named one, so a new template is covered by
+# existing here rather than by somebody remembering to add it.
+infra_env_keys() {
+  local files
+  # `set -e` plus `pipefail` makes this delicate, and getting it wrong is worse
+  # than the defect it looks for: an unmatched glob hands `sed` a literal path,
+  # `sed` exits non-zero, the pipeline fails, and the whole guard exits **1 with
+  # no message at all** -- a red build that says nothing. So the file list is
+  # built first and an empty one returns cleanly.
+  files=$(find "$INFRA_DIR" -maxdepth 1 -name '*.bicep' 2>/dev/null || true)
+  [[ -n $files ]] || return 0
+  # shellcheck disable=SC2086
+  cat $files 2>/dev/null | tr -d '\015' |
+    { grep -vE '^[[:space:]]*//' || true; } |
+    { grep -oE "name: '[A-Z_][A-Z0-9_]*'" || true; } |
+    sed -E "s/name: '//; s/'$//" | sort -u
+  return 0
+}
+
+# What a template actually assigns to a key, so question 7 can tell
+# `SECRETS_BACKEND: 'keyvault'` from `SECRETS_BACKEND: 'local'`.
+infra_value_for() {
+  local key=$1 files
+  files=$(find "$INFRA_DIR" -maxdepth 1 -name '*.bicep' 2>/dev/null || true)
+  [[ -n $files ]] || return 0
+  # shellcheck disable=SC2086
+  cat $files 2>/dev/null | tr -d '\015' |
+    { grep -vE '^[[:space:]]*//' || true; } |
+    { grep -A2 -E "name: '$key'" || true; } |
+    { grep -oE "value: '[^']*'" || true; } |
+    sed -E "s/value: '//; s/'$//" | head -n 1
+  return 0
 }
 
 # --- 1. A documented key is passed, or it is declared -----------------------
@@ -245,6 +316,50 @@ check_every_declaration_has_a_reason() {
   done < <(declared_keys "$block")
 }
 
+# --- 7. The deployment sets nothing this application does not read ----------
+
+check_every_infra_key_is_read() {
+  local settings=$1 platform=$2 build=$3 key
+  while read -r key; do
+    [[ -n $key ]] || continue
+    contains "$key" "$settings" && continue
+    contains "$key" "$platform" && continue
+    contains "$key" "$build" && continue
+    fail "$INFRA_DIR sets $key on a container and Settings never reads it.
+    A deployment that sets a name the application does not read configures
+    nothing, and the application falls back to a default nobody chose -- which is
+    invisible until something is deployed. Either rename it to the Settings field
+    it was meant to be, add the field, or declare it in PLATFORM_ENV with the
+    reason something other than Settings reads it. This is B-120."
+  done < <(infra_env_keys)
+}
+
+# --- 8. A selected backend gets what it needs -------------------------------
+#
+# `KEY | VALUE | COMPANION` -- when a template sets KEY to VALUE, it must also set
+# COMPANION. Two entries, and both are couplings the application cannot default
+# its way out of: the backend is chosen and the address it needs is not.
+readonly BACKEND_REQUIRES='
+SECRETS_BACKEND | keyvault | KEY_VAULT_URL
+ARTIFACTS_BACKEND | blob | ARTIFACTS_ACCOUNT_URL
+'
+
+check_selected_backends_have_what_they_need() {
+  local infra_keys line key want companion
+  infra_keys=$(infra_env_keys)
+  while IFS='|' read -r key want companion; do
+    key=${key// /}; want=${want// /}; companion=${companion// /}
+    [[ -n $key ]] || continue
+    contains "$key" "$infra_keys" || continue
+    [[ $(infra_value_for "$key") == "$want" ]] || continue
+    contains "$companion" "$infra_keys" && continue
+    fail "$INFRA_DIR sets $key=$want and does not set $companion.
+    The backend is chosen and the address it needs is missing, so the deployed
+    application boots and then refuses the first request that reaches that
+    backend. Set $companion in the same template."
+  done <<<"$BACKEND_REQUIRES"
+}
+
 run_checks() {
   local host_only_block=$1 build_block=$2
   local documented compose settings host_only build
@@ -264,6 +379,9 @@ run_checks() {
   check_every_setting_is_documented "$documented" "$settings" "$build"
   check_every_declaration_has_a_reason "$host_only_block" HOST_ONLY
   check_every_declaration_has_a_reason "$build_block" SET_BY_THE_BUILD
+  check_every_infra_key_is_read "$settings" "$(declared_keys "$PLATFORM_ENV")" "$build"
+  check_every_declaration_has_a_reason "$PLATFORM_ENV" PLATFORM_ENV
+  check_selected_backends_have_what_they_need
 }
 
 # ---------------------------------------------------------------------------
@@ -325,6 +443,11 @@ class Settings(BaseSettings):
 def other() -> None:
     pass
 FIXTURE
+    # An empty infra directory by default: the existing cases are about compose
+    # and Settings, and a template fixture they never asked for would make every
+    # one of them also a test of the B-120 checks. The cases that want a template
+    # write their own.
+    mkdir -p "$dir/infra"
   }
 
   # Runs this script against a fixture, with HOST_KEY declared unless told not to.
@@ -333,6 +456,7 @@ FIXTURE
     ENV_EXAMPLE_FILE="$dir/.env.example" \
       COMPOSE_FILE="$dir/compose.yml" \
       SETTINGS_FILE="$dir/config.py" \
+      INFRA_DIR="$dir/infra" \
       SELFTEST_HOST_ONLY="$declaration" \
       bash "${BASH_SOURCE[0]}" --with-declaration
   }
@@ -391,6 +515,52 @@ PASSED_KEY | Claimed host-only while compose passes it.'
   write_fixture "$dir"
   printf '      # ${PROSE_KEY:-} appears only in a comment\n' >>"$dir/compose.yml"
   expect 0 "a variable named only inside a compose comment is not a reference" guard "$dir"
+
+  # B-120's cases. The first is the defect itself: a template setting a name the
+  # application never reads. The second is its companion, a backend selected
+  # without the address it needs. The third is the control -- without it the two
+  # above would pass just as well against a check that failed everything.
+  dir="$workspace/infra-unread"
+  write_fixture "$dir"
+  cat >>"$dir/infra/apps.bicep" <<'FIXTURE'
+            {
+              name: 'MYSTERY_ENV'
+              value: 'x'
+            }
+FIXTURE
+  expect 1 "an infra env name Settings never reads fails" guard "$dir"
+
+  dir="$workspace/infra-backend"
+  write_fixture "$dir"
+  cat >>"$dir/infra/apps.bicep" <<'FIXTURE'
+            {
+              name: 'SECRETS_BACKEND'
+              value: 'keyvault'
+            }
+FIXTURE
+  {
+    echo 'SECRETS_BACKEND=local'
+  } >>"$dir/.env.example"
+  {
+    echo '      SECRETS_BACKEND: ${SECRETS_BACKEND:-local}'
+  } >>"$dir/compose.yml"
+  {
+    echo 'class Settings(BaseSettings):'
+    echo '    passed_key: str = "x"'
+    echo '    optional_key: str | None = None'
+    echo '    secrets_backend: str = "local"'
+  } >"$dir/config.py"
+  expect 1 "a backend selected in infra without its companion fails" guard "$dir"
+
+  dir="$workspace/infra-clean"
+  write_fixture "$dir"
+  cat >"$dir/infra/apps.bicep" <<'FIXTURE'
+            {
+              name: 'PASSED_KEY'
+              value: 'x'
+            }
+FIXTURE
+  expect 0 "a template setting only names Settings reads passes" guard "$dir"
 
   printf 'check_env --selftest: %d passed, %d failed\n' "$passed" "$failed"
   ((failed == 0))

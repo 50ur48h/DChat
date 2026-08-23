@@ -200,6 +200,7 @@ module apps 'modules/apps.bicep' = {
     imageTag: imageTag
     postgresHost: postgres.outputs.fullyQualifiedDomainName
     postgresDatabase: postgres.outputs.databaseName
+    postgresAdminLogin: postgresAdminLogin
     blobEndpoint: storage.outputs.blobEndpoint
     minReplicas: minReplicas
     maxReplicas: maxReplicas

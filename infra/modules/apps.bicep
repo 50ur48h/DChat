@@ -56,6 +56,9 @@ param postgresHost string
 @description('The platform database name.')
 param postgresDatabase string
 
+@description('The owner/migration login. Only the migration job is given it; the API connects as dataagent_app and owns nothing.')
+param postgresAdminLogin string
+
 @description('Blob endpoint, for the artifact store.')
 param blobEndpoint string
 
@@ -209,11 +212,24 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
               value: 'keyvault'
             }
             {
-              name: 'AZURE_KEY_VAULT_URI'
+              // **These names are the `Settings` field names, and that is a
+              // constraint rather than a preference** (**B-120**). This template
+              // previously set `AZURE_KEY_VAULT_URI` and `ARTIFACTS_BLOB_ENDPOINT`,
+              // which read well and which `config.py` has never looked for — so a
+              // deployed API would have had `SECRETS_BACKEND=keyvault` and no
+              // vault address, and written artifacts to a container filesystem
+              // that vanishes on the next revision. `scripts/check_env.sh` now
+              // compares this file against `Settings` and fails on a name nothing
+              // reads.
+              name: 'KEY_VAULT_URL'
               value: keyVaultUri
             }
             {
-              name: 'ARTIFACTS_BLOB_ENDPOINT'
+              name: 'ARTIFACTS_BACKEND'
+              value: 'blob'
+            }
+            {
+              name: 'ARTIFACTS_ACCOUNT_URL'
               value: blobEndpoint
             }
             {
@@ -238,6 +254,90 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
         minReplicas: minReplicas
         maxReplicas: maxReplicas
       }
+    }
+  }
+}
+
+// **The migration job** (WP12.2). A one-off Container Apps job rather than a step
+// in the pipeline, and the reasons are structural rather than convenience:
+//
+//   * The Postgres server has **no public endpoint**. It answers inside this
+//     environment's subnet and nowhere else, so a GitHub runner cannot reach it
+//     — and the answer to that is not a firewall rule opening the platform
+//     database to a cloud provider's address range.
+//   * Migrations run as the **owner** role and the API deliberately does not.
+//     That separation is a hard rule; a migration step borrowing the app's
+//     credential would collapse it quietly.
+//
+// `manualTriggerConfig` with no schedule: it runs when `deploy.yml` starts it,
+// between pushing the image and swapping the app revision. Nothing runs it on a
+// timer, because a migration that happens when nobody asked is a schema change
+// nobody reviewed.
+resource migrate 'Microsoft.App/jobs@2024-03-01' = {
+  name: 'cj-dataagent-migrate-${env}'
+  location: location
+  tags: tags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${identityId}': {}
+    }
+  }
+  properties: {
+    environmentId: environment.id
+    configuration: {
+      triggerType: 'Manual'
+      // Ten minutes, matching what `ops/scripts/deploy_migrate.sh` waits for.
+      // Two numbers that must agree, and the script names this one.
+      replicaTimeout: 600
+      // **No retries.** Alembic is not idempotent mid-failure: a migration that
+      // died halfway leaves a partial transaction the next attempt would run
+      // against a schema neither revision describes. A person looks instead.
+      replicaRetryLimit: 0
+      manualTriggerConfig: {
+        parallelism: 1
+        replicaCompletionCount: 1
+      }
+      registries: registryConfig
+      secrets: [
+        {
+          name: secretNames.databasePassword
+          keyVaultUrl: '${keyVaultUri}secrets/${secretNames.databasePassword}'
+          identity: identityId
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'migrate'
+          image: '${registryLoginServer}/dataagent-api:${imageTag}'
+          command: ['alembic']
+          args: ['upgrade', 'head']
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: [
+            {
+              // The owner DSN, password-less here and rejoined by
+              // `_with_password` in config.py — the same arrangement the API
+              // uses for its own role, and the reason DB_PASSWORD is a field
+              // rather than a name the template invented (**B-120**).
+              name: 'DATABASE_URL'
+              value: 'postgresql+asyncpg://${postgresAdminLogin}@${postgresHost}:5432/${postgresDatabase}?ssl=require'
+            }
+            {
+              name: 'DB_PASSWORD'
+              secretRef: secretNames.databasePassword
+            }
+            {
+              name: 'ENV'
+              value: env
+            }
+          ]
+        }
+      ]
     }
   }
 }
