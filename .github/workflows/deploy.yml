@@ -76,74 +76,83 @@ jobs:
             --template-file infra/main.bicep \
             --parameters infra/params/dev.bicepparam
 
-      # The registry has to exist before an image can be pushed to it, and the
-      # apps have to exist before a revision can be swapped. One deployment
-      # creates everything; the image tag it is given on this first pass is
-      # whatever is already there, because the image does not exist yet.
+      # **Phase 1 — infrastructure only.** `deployApps=false` and
+      # `deployJobs=false`, because neither can start before the vault holds what
+      # they read, and the vault does not exist until this deployment creates it.
+      # That circularity is what made the first deploy impossible before WP12.2
+      # added these flags: there was no moment at which the secrets could be
+      # written.
       - name: Deploy the infrastructure
         id: infra
         env:
           POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
           BUDGET_ALERT_EMAIL: ${{ secrets.BUDGET_ALERT_EMAIL }}
         run: |
-          az deployment group create \
-            --name "deploy-${IMAGE_TAG:0:12}" \
-            --resource-group "$RESOURCE_GROUP" \
-            --template-file infra/main.bicep \
-            --parameters infra/params/dev.bicepparam \
-            --query properties.outputs -o json > outputs.json
+          az deployment group create             --name "infra-${IMAGE_TAG:0:12}"             --resource-group "$RESOURCE_GROUP"             --template-file infra/main.bicep             --parameters infra/params/dev.bicepparam             --parameters deployApps=false deployJobs=false             --query properties.outputs -o json > outputs.json
           # Read back rather than reconstructed: the registry and vault names
           # carry a `uniqueString` suffix, so anything that guessed them here
           # would be right until the resource group changed.
           {
             echo "registry=$(jq -r .registryLoginServer.value outputs.json)"
             echo "key_vault=$(jq -r .keyVaultName.value outputs.json)"
-            echo "web_url=$(jq -r .webUrl.value outputs.json)"
           } >> "$GITHUB_OUTPUT"
+
+      # **Phase 2 — the vault, before anything reads it.**
+      - name: Seed the vault
+        run: bash ops/scripts/deploy_seed_secrets.sh
+        env:
+          KEY_VAULT: ${{ steps.infra.outputs.key_vault }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
 
       # `az acr build` rather than docker build + push: the build happens in the
       # registry's own build service, so this runner never holds a registry
-      # credential and there is nothing to leak in a log. It also means the
-      # image is built on the same architecture it will run on.
+      # credential and there is nothing to leak in a log. It also means the image
+      # is built on the architecture it will run on.
       - name: Build and push the images
         run: |
           registry='${{ steps.infra.outputs.registry }}'
           acr="${registry%%.*}"
-          az acr build --registry "$acr" --image "dataagent-api:${IMAGE_TAG}" \
-            --build-arg "GIT_SHA=${GITHUB_SHA}" --target prod apps/api
-          az acr build --registry "$acr" --image "dataagent-web:${IMAGE_TAG}" \
-            --build-arg "GIT_SHA=${GITHUB_SHA}" --target prod apps/web
+          az acr build --registry "$acr" --image "dataagent-api:${IMAGE_TAG}"             --build-arg "GIT_SHA=${GITHUB_SHA}" --target prod apps/api
+          az acr build --registry "$acr" --image "dataagent-web:${IMAGE_TAG}"             --build-arg "GIT_SHA=${GITHUB_SHA}" --target prod apps/web
 
-      # **Migrations run before the new revision serves traffic, never after.**
-      # A revision that starts against a schema it does not expect answers
-      # requests wrongly rather than failing, which is the worst of the three
-      # possible orderings. Run as a one-off Container Apps job so it executes
-      # inside the vnet — the Postgres server has no public endpoint — and as the
-      # owner role, which the running API deliberately is not.
-      - name: Migrate the platform database
+      # **Phase 3 — the migration job, still without the apps.** It exists now
+      # because the vault has what it reads and the image it runs exists.
+      - name: Create the migration job
+        env:
+          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          BUDGET_ALERT_EMAIL: ${{ secrets.BUDGET_ALERT_EMAIL }}
+        run: |
+          az deployment group create             --name "job-${IMAGE_TAG:0:12}"             --resource-group "$RESOURCE_GROUP"             --template-file infra/main.bicep             --parameters infra/params/dev.bicepparam             --parameters deployApps=false deployJobs=true imageTag="$IMAGE_TAG"
+
+      # **Migrations run before any revision serves traffic, never after.** A
+      # revision started against a schema it does not expect answers requests
+      # wrongly rather than failing, which is the worst of the three orderings.
+      # The job also gives `dataagent_app` its login, which nothing else can:
+      # the Postgres server has no public endpoint.
+      - name: Migrate, and give the app role its login
         run: bash ops/scripts/deploy_migrate.sh
         env:
           RESOURCE_GROUP: ${{ env.RESOURCE_GROUP }}
           REGISTRY: ${{ steps.infra.outputs.registry }}
           IMAGE_TAG: ${{ env.IMAGE_TAG }}
 
-      # Now the apps point at the tag that was just built and migrated for.
+      # **Phase 4 — now the apps.** Everything they read exists, and the schema
+      # they were built against is the one in the database.
       - name: Roll the apps onto the new image
+        id: apps
         env:
           POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
           BUDGET_ALERT_EMAIL: ${{ secrets.BUDGET_ALERT_EMAIL }}
         run: |
-          az deployment group create \
-            --name "revision-${IMAGE_TAG:0:12}" \
-            --resource-group "$RESOURCE_GROUP" \
-            --template-file infra/main.bicep \
-            --parameters infra/params/dev.bicepparam \
-            --parameters imageTag="$IMAGE_TAG"
+          az deployment group create             --name "apps-${IMAGE_TAG:0:12}"             --resource-group "$RESOURCE_GROUP"             --template-file infra/main.bicep             --parameters infra/params/dev.bicepparam             --parameters deployApps=true deployJobs=true imageTag="$IMAGE_TAG"             --query properties.outputs -o json > apps-outputs.json
+          echo "web_url=$(jq -r .webUrl.value apps-outputs.json)" >> "$GITHUB_OUTPUT"
 
       - name: Smoke the deployment
         run: bash ops/scripts/deploy_smoke.sh
         env:
-          WEB_URL: ${{ steps.infra.outputs.web_url }}
+          WEB_URL: ${{ steps.apps.outputs.web_url }}
+          EXPECT_GIT_SHA: ${{ github.sha }}
           KEY_VAULT: ${{ steps.infra.outputs.key_vault }}
           RESOURCE_GROUP: ${{ env.RESOURCE_GROUP }}
 
@@ -151,4 +160,4 @@ jobs:
         run: |
           echo "### Deployed \`${IMAGE_TAG:0:12}\` to dev" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- ${{ steps.infra.outputs.web_url }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- ${{ steps.apps.outputs.web_url }}" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,160 @@
+"""Giving `dataagent_app` its login in a deployment (WP12.2, B-121).
+
+**The read-back is what is under test, not the ALTER ROLE.** Granting a login is
+one statement and it either works or raises. What this module adds — and what
+would be worth nothing if it silently stopped working — is that it *checks what
+the role can actually do afterwards* and refuses the deploy if the answer is
+wrong. `ops/sql/app_role.sql` has done the same read-back since Phase 1 for the
+same reason: the API connects as this role and RLS is the tenant boundary, so a
+role that came back with `rolsuper` would make every isolation claim in this
+project false, and a deploy is the moment to find out rather than later.
+
+Run against a real Postgres, because what is asserted is what the *server* reports
+about a role, and a fake would only assert what this test already believes.
+"""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Iterator
+
+import pytest
+from sqlalchemy import text
+from sqlalchemy.engine import URL
+from sqlalchemy.ext.asyncio import create_async_engine
+
+from dataagent.config import get_settings
+from dataagent.db.grant_app_login import APP_ROLE, grant
+
+pytestmark = pytest.mark.asyncio
+
+
+@pytest.fixture
+def owner_env(migrated_database: URL, monkeypatch: pytest.MonkeyPatch) -> Iterator[URL]:
+    """Point `Settings` at the temp database as the owner, the way the job is.
+
+    The module reads `DATABASE_URL` through `require_database_url()`, so this is
+    the one thing that has to be true for it to be exercised on its real path
+    rather than through an argument a test invented.
+    """
+    monkeypatch.setenv("DATABASE_URL", migrated_database.render_as_string(hide_password=False))
+    get_settings.cache_clear()
+    yield migrated_database
+    get_settings.cache_clear()
+
+
+async def _roles_of(dsn: URL) -> dict[str, bool]:
+    engine = create_async_engine(dsn)
+    try:
+        async with engine.begin() as connection:
+            row = (
+                await connection.execute(
+                    text(
+                        "SELECT rolcanlogin, rolsuper, rolbypassrls, rolcreatedb, rolcreaterole "
+                        "FROM pg_roles WHERE rolname = :r"
+                    ),
+                    {"r": APP_ROLE},
+                )
+            ).one_or_none()
+    finally:
+        await engine.dispose()
+    assert row is not None, f"{APP_ROLE} does not exist"
+    keys = ("login", "super", "bypassrls", "createdb", "createrole")
+    return dict(zip(keys, row, strict=True))
+
+
+async def _alter(dsn: URL, statement: str) -> None:
+    engine = create_async_engine(dsn, isolation_level="AUTOCOMMIT")
+    try:
+        async with engine.connect() as connection:
+            await connection.exec_driver_sql(statement)
+    finally:
+        await engine.dispose()
+
+
+async def test_the_grant_gives_a_login_and_nothing_else(
+    owner_env: URL, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The happy path, and the properties the whole tenancy design rests on."""
+    monkeypatch.setenv("APP_DB_PASSWORD", f"pw-{uuid.uuid4().hex}")
+
+    assert await grant() == 0
+
+    facts = await _roles_of(owner_env)
+    assert facts["login"] is True
+    assert facts["super"] is False
+    assert facts["bypassrls"] is False
+    assert facts["createdb"] is False
+    assert facts["createrole"] is False
+
+
+async def test_the_granted_password_actually_connects(
+    owner_env: URL, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Proof it is *reached*: the credential this writes is one asyncpg accepts.
+
+    A test that only read `pg_roles` would pass against a grant that set some
+    other role's password, or the right role's to something else.
+    """
+    password = f"pw-{uuid.uuid4().hex}"
+    monkeypatch.setenv("APP_DB_PASSWORD", password)
+    assert await grant() == 0
+
+    engine = create_async_engine(owner_env.set(username=APP_ROLE, password=password))
+    try:
+        async with engine.begin() as connection:
+            who = (await connection.execute(text("SELECT current_user"))).scalar_one()
+    finally:
+        await engine.dispose()
+    assert who == APP_ROLE
+
+
+async def test_a_password_full_of_quotes_survives(
+    owner_env: URL, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`ALTER ROLE ... PASSWORD` takes a literal, not a placeholder, so the value
+    has to be inlined — and inlining is where injection lives. The statement is
+    built by Postgres's own `format(%L)` from a bound parameter, so a password
+    full of quotes is escaped by the server rather than by string handling here.
+    """
+    password = "a'b''c\"d;--" + uuid.uuid4().hex
+    monkeypatch.setenv("APP_DB_PASSWORD", password)
+
+    assert await grant() == 0
+
+    engine = create_async_engine(owner_env.set(username=APP_ROLE, password=password))
+    try:
+        async with engine.begin() as connection:
+            assert (await connection.execute(text("SELECT 1"))).scalar_one() == 1
+    finally:
+        await engine.dispose()
+
+
+async def test_no_password_refuses_rather_than_granting_an_empty_one(
+    owner_env: URL, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An empty password is a role anyone can be. Refusing stops the deploy."""
+    monkeypatch.delenv("APP_DB_PASSWORD", raising=False)
+
+    assert await grant() == 1
+
+    assert (await _roles_of(owner_env))["login"] is False
+
+
+async def test_a_role_with_too_much_privilege_stops_the_deploy(
+    owner_env: URL, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The check that earns this module its place.
+
+    Reproduces the state rather than asserting a message: the role really is
+    given BYPASSRLS, and the grant really does refuse — so the deploy stops
+    before the API is rolled onto a revision that would connect with more
+    privilege than RLS assumes.
+    """
+    monkeypatch.setenv("APP_DB_PASSWORD", f"pw-{uuid.uuid4().hex}")
+    await _alter(owner_env, f"ALTER ROLE {APP_ROLE} WITH BYPASSRLS")
+
+    assert await grant() == 1
+
+    await _alter(owner_env, f"ALTER ROLE {APP_ROLE} WITH NOBYPASSRLS")
+    assert (await _roles_of(owner_env))["bypassrls"] is False

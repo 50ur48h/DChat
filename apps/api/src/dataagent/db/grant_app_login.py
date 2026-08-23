@@ -1,0 +1,118 @@
+"""Give ``dataagent_app`` its login in a deployed environment (WP12.2).
+
+    python -m dataagent.db.grant_app_login
+
+**This is the Phase 12 half of `ops/sql/app_role.sql`**, whose own header has
+promised it since Phase 1: *"in Phase 12 this step is replaced by Key Vault and a
+managed identity, and the migration is unchanged."* Half of that is delivered
+here — the password comes from Key Vault, and no migration contains a credential.
+The other half is not: the API still authenticates to Postgres with a password
+rather than as its managed identity, which is filed as **B-121** and deferred
+deliberately rather than quietly.
+
+**Why this cannot be a migration.** Migration 0002 creates the role and every
+grant it holds, and a migration must never contain a credential — the file is in
+git, and a password in it would be in git forever. So the role arrives without a
+login and something outside the migration gives it one: `make db.setup` locally,
+this module in a deployment.
+
+**Why it runs in the migration job and not the pipeline.** The Postgres server
+has no public endpoint. It answers inside the Container Apps environment's subnet
+and nowhere else, so the only process that can reach it is one running in that
+environment — and the only such process holding the *owner* credential is the
+migration job. The API runs as `dataagent_app` and could not do this even if it
+were asked to, which is the separation working rather than an inconvenience.
+
+**Idempotent, and it never logs the password.** Runs on every deploy; `ALTER
+ROLE` is the same statement whether the password is new or unchanged, which also
+makes it the rotation path — change the vault secret, redeploy, done.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import sys
+
+#: The role migration 0002 creates. Named here rather than imported so this
+#: module does not drag the migration's module graph into a job that only needs
+#: one statement.
+APP_ROLE = "dataagent_app"
+
+
+async def grant() -> int:
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from dataagent.config import get_settings
+
+    settings = get_settings()
+    password = os.environ.get("APP_DB_PASSWORD", "")
+    if not password:
+        print(
+            "APP_DB_PASSWORD is not set, so dataagent_app would have no login and "
+            "the API could not connect. The deploy seeds it from Key Vault.",
+            file=sys.stderr,
+        )
+        return 1
+
+    # The owner connection. `require_database_url` rejoins the password the
+    # template deliberately kept out of the URL.
+    engine = create_async_engine(settings.require_database_url(), isolation_level="AUTOCOMMIT")
+    try:
+        async with engine.begin() as connection:
+            # **A bound parameter cannot be used here.** `ALTER ROLE ... PASSWORD`
+            # takes a literal, not a placeholder, so the value has to be inlined —
+            # and inlining it is exactly the shape of thing that becomes an
+            # injection. `quote_literal` is Postgres's own escaping, applied by
+            # the server to a *bound* parameter, so the password still never
+            # appears in a string this process concatenates.
+            statement = (
+                await connection.execute(
+                    text(f"SELECT format('ALTER ROLE {APP_ROLE} WITH LOGIN PASSWORD %L', :pw)"),
+                    {"pw": password},
+                )
+            ).scalar_one()
+            await connection.exec_driver_sql(statement)
+
+            # Read back what the role can actually do, exactly as app_role.sql
+            # does. If any of these is true, tenant isolation is not what this
+            # project claims it is — and a deploy is the moment to find out.
+            row = (
+                await connection.execute(
+                    text(
+                        "SELECT rolcanlogin, rolsuper, rolbypassrls, rolcreatedb, rolcreaterole "
+                        "FROM pg_roles WHERE rolname = :r"
+                    ),
+                    {"r": APP_ROLE},
+                )
+            ).one()
+        can_login, is_super, can_bypass, can_createdb, can_createrole = row
+    finally:
+        await engine.dispose()
+
+    print(
+        f"{APP_ROLE}: login={can_login} superuser={is_super} bypassrls={can_bypass} "
+        f"createdb={can_createdb} createrole={can_createrole}"
+    )
+    if not can_login:
+        print(f"{APP_ROLE} still cannot log in.", file=sys.stderr)
+        return 1
+    if is_super or can_bypass or can_createdb or can_createrole:
+        # Refusing here stops the deploy before the API is rolled onto a
+        # revision that would connect with more privilege than the design allows.
+        print(
+            f"{APP_ROLE} has privileges it must not have. The API connects as this "
+            "role and RLS is the tenant boundary; refusing to continue.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
+def main() -> int:
+    return asyncio.run(grant())
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

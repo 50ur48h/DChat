@@ -83,6 +83,14 @@ CMD ["uvicorn", "dataagent.main:app", "--host", "0.0.0.0", "--port", "8000", "--
 FROM base AS build
 COPY --from=deps-runtime /app/.venv /app/.venv
 COPY pyproject.toml uv.lock README.md ./
+# **alembic.ini travels with the image** (WP12.2). The deployed database is
+# migrated by a Container Apps job running *this* image — the Postgres server has
+# no public endpoint, so nothing outside the environment can reach it — and
+# `alembic upgrade head` without its config exits with `No config file
+# 'alembic.ini' found`. The versions themselves are under `src/`, so this one
+# file is the whole difference between an image that can migrate and one that
+# cannot.
+COPY alembic.ini ./alembic.ini
 COPY src ./src
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev
 
@@ -110,6 +118,7 @@ RUN sh /tmp/install-odbc.sh && rm /tmp/install-odbc.sh
 WORKDIR /app
 COPY --from=build --chown=app:app /app/.venv /app/.venv
 COPY --from=build --chown=app:app /app/src /app/src
+COPY --from=build --chown=app:app /app/alembic.ini /app/alembic.ini
 
 # The development token issuer is physically absent from this image. Settings
 # already refuse AUTH_MODE=dev in a prod build; removing the module means even a
