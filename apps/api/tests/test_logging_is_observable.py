@@ -51,9 +51,7 @@ def test_no_application_logger_is_disabled(migrated_database: URL) -> None:
     disabled = sorted(
         name
         for name, entry in logging.Logger.manager.loggerDict.items()
-        if name.startswith("dataagent")
-        and isinstance(entry, logging.Logger)
-        and entry.disabled
+        if name.startswith("dataagent") and isinstance(entry, logging.Logger) and entry.disabled
     )
 
     assert not disabled, (
