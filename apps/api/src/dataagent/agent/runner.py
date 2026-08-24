@@ -1105,6 +1105,11 @@ async def _finish(
         run_id=run_id,
         status=status,
         failure_reason=("The run could not be completed." if status == "failed" else None),
+        # **The ending's other half** (**B-133**). It has always been in `totals`
+        # below and `totals` goes only to the trace, so no screen could ask
+        # whether a `completed` run answered or refused — and the card called both
+        # "answered", which is the one claim a refusal exists to deny.
+        answered=outcome.answered if outcome is not None else False,
         totals={
             "llm_calls": working.budget.llm_calls,
             "queries": working.budget.queries,

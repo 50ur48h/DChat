@@ -242,6 +242,14 @@ class RunView:
     #: as a broken feature every time.
     definitions_applied: list[str] = field(default_factory=list[str])
     definitions_available: int = 0
+    #: Whether this run answered or refused (**B-133**). `None` for runs that
+    #: ended before revision 0029, and for runs that have not ended.
+    #:
+    #: **Separate from `status` on purpose, and the screen needs both.** WP7.2b's
+    #: rule is that a run which could not answer *completes* — `failed` is
+    #: reserved for the platform breaking — so `completed` alone cannot tell an
+    #: answer from an honest refusal, and the card was calling both "answered".
+    answered: bool | None = None
     #: The chart this answer carries, or the reason it carries none (WP11.1).
     #: `{"spec": …}` or `{"declined": …, "code": …}`; None when no chart was
     #: asked for. A refusal is here rather than in `limitations` because that
@@ -745,6 +753,7 @@ async def _run_view(session: AsyncSession, run: AgentRun) -> RunView:
             )
             for finding in findings
         ],
+        answered=run.answered,
         started_at=run.started_at,
         finished_at=run.finished_at,
         failure_reason=run.failure_reason,
@@ -915,6 +924,7 @@ async def transition(
     run_id: uuid.UUID,
     status: str,
     failure_reason: str | None = None,
+    answered: bool | None = None,
     totals: dict[str, object] | None = None,
 ) -> RunView:
     """Move a run, and write the event that says so.
@@ -950,6 +960,12 @@ async def transition(
         if status in TERMINAL_STATUSES:
             run.finished_at = now
             run.failure_reason = failure_reason
+            # **Recorded beside `failure_reason` because it is the same kind of
+            # fact**: what this ending was, written when it happened (**B-133**).
+            # It stays in `totals` as well — the trace is the record of the run —
+            # but the trace is not something a screen can read per run without a
+            # query each.
+            run.answered = answered
         await session.flush()
 
         event, payload = _event_for(status, run=run, totals=totals, first_start=first_start)

@@ -94,6 +94,18 @@ not what a deterministic rule looks like.
 trial would have recorded B-119 as resolved today. Repetition is now a requirement
 of the trial loop's first version, written into its section above.
 
+**And the observation from that run is settled, not left open** (**B-133**). The
+card was badged **answered**, marked **no supporting query**, and said *"The data
+does not establish which outlet wastes the most"* — three statements, one
+contradicting the other two. WP7.2b's rule is that a run which could not answer
+*completes*, so `completed` covers an answer and a refusal alike, and the card
+rendered the status word for both. `RunOutcome.answered` had been computed on
+every run since WP7.2b and stored only in a trace event, so the screen had no way
+to ask: **B-100's defect, one field over**, fixed the way B-100 was — a column
+(revision 0029), carried on `RunView` and `RunOut`, rendered as *"could not
+answer"*. It is a fifth instance of the class CLAUDE.md enumerates, whose count of
+four is now stale.
+
 ---
 
 # SESSION-END HANDOFF — 2026-08-25
