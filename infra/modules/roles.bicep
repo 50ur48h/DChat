@@ -50,7 +50,7 @@ param registryName string
 // than this pipeline holds. If the extra verbs Officer carries — backup,
 // restore, recover, purge — ever matter, the custom role is the answer and this
 // comment is where to start.
-var keyVaultSecretsOfficer = 'b86a8fe4-44ce-4948-aff7-8adaef4a4c62'
+var keyVaultSecretsOfficer = 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
 
 // Storage Blob Data Contributor — read and write blobs within the account.
 // Contributor rather than Reader because the artifact store writes; not

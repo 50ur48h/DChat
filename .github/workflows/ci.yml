@@ -77,6 +77,19 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Every TODO has a backlog ID
         run: bash scripts/check_todos.sh
+      # **The half of the role check that needs no Azure** (B-130). A public role
+      # definition id looks exactly like a leaked key to gitleaks' entropy
+      # heuristic, so `.gitleaks.toml` allowlists each one by value — and that
+      # list drifted from the template the moment #107 swapped the vault role.
+      # Nothing noticed, because the id #107 introduced was invented and happened
+      # not to trip the heuristic; correcting it made `hygiene` fail on the fix.
+      #
+      # Checked in both directions: an id the template uses and the allowlist
+      # omits fails the scanner on a public value, and an id the allowlist keeps
+      # after the template drops it is a standing exemption a real secret could
+      # inherit. The `az` half runs in `deploy.yml`, where there is a session.
+      - name: The role ids and the secret-scanner allowlist agree
+        run: sh ops/scripts/check_role_definitions.sh --allowlist-only
       # **The workflows are the one kind of code here that nothing could run
       # before it ran in production** (**B-128**). `check_env.sh` has a
       # `--selftest`, `check_status.sh` has one, the Python has pytest — and a

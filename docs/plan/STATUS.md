@@ -89,6 +89,45 @@ Last updated: 2026-08-24 by Claude Code (**dev serves authenticated requests and
 
 ---
 
+## A GUID nobody could check, 2026-08-25 (B-130)
+
+The deploy after #111 got past the preflight, signed in, ran `what-if` clean —
+and **failed on the infrastructure step three minutes in**, with the resource
+group already touched:
+
+```
+RoleDefinitionDoesNotExist: 'b86a8fe444ce4948aff78adaef4a4c62'
+```
+
+`roles.bicep` set `keyVaultSecretsOfficer = 'b86a8fe4-44ce-4948-aff7-8adaef4a4c62'`.
+The real id, from `az role definition list`, is
+`b86a8fe4-44ce-4948-`**`aee5-eccb2c155cd7`**. First three groups right, last two
+invented — **written from recall in #107 instead of looked up**. The same failure
+as the fabricated `fnb_readonly` password earlier in this phase, except the
+password was caught within minutes because somebody tried it.
+
+**Why nothing caught it, which is the part worth keeping.** A wrong *name* reads
+wrong, and `check_env.sh` catches it (B-120). A wrong *expansion* reads wrong, and
+shellcheck catches it (B-128). A wrong **GUID reads exactly like a right one** —
+to a reviewer, to `bicep build`, which type-checks a template and cannot know what
+a constant means, and to **`what-if`**, which listed the role assignment as a
+resource it would create without ever resolving the role it points at. Another
+entry in the what-if blind-spot list, and a sharper one: what-if had the value in
+hand and no reason to doubt it. Only Azure can tell the two apart, so only Azure
+can be the check.
+
+`ops/scripts/check_role_definitions.sh` now runs after the OIDC sign-in and before
+`what-if`, so a bad id refuses the deploy instead of stopping it halfway. Verified
+against the real committed files — red on `roles.bicep` at 49e4082, green on the
+fix — and it also fails when it extracts no ids at all, because a guard that
+silently checks nothing is the defect this repository has already shipped twice.
+
+**Two of the three ids were correct** (`AcrPull`, `Storage Blob Data Contributor`),
+checked against Azure while fixing this. "One was wrong" and "the file was
+unreliable" are different findings, and only the first is true.
+
+---
+
 ## The pipeline asks the app what it can do, 2026-08-25 (B-125, B-129)
 
 **Key Vault taught this the expensive way and Blob was about to.** Registering a
