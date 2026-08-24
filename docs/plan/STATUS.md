@@ -77,9 +77,11 @@ Last updated: 2026-08-24 by Claude Code (**dev serves authenticated requests and
               through, and **B-127** — no test here could ever observe a log line, which is
               why the silent failure survived. Both merged (#108). **The re-dispatch then
               failed before touching Azure**: #107's new preflight step read
-              `${${$name}}`, a bash parse error, so the step that checks the deployment has
-              its values could never pass — **B-128**, instance five of a check failing for
-              a reason unrelated to what it checks)
+              `${${$name}}`, so the step that checks the deployment has its values could never
+              pass — **B-128**, instance five of a check failing for a reason unrelated to
+              what it checks. Fixed in #109; the workflows are linted with shellcheck now,
+              which is what would actually have caught it — `bash -n` would not, because the
+              failure is runtime rather than syntax)
               each failing on something no check here could see — OIDC subject, a log
               destination needing a key, BuildKit, an extension allow-list, a browser bundle
               built for localhost. The owner has ruled that **dev proves the deployment path

@@ -77,6 +77,31 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Every TODO has a backlog ID
         run: bash scripts/check_todos.sh
+      # **The workflows are the one kind of code here that nothing could run
+      # before it ran in production** (**B-128**). `check_env.sh` has a
+      # `--selftest`, `check_status.sh` has one, the Python has pytest — and a
+      # `run:` block was first exercised by the dispatch it gated. That is how
+      # `eval "value=${${$name}}"` reached main inside the step whose whole job is
+      # to say whether the deployment has its values: the deploy died with
+      # `bad substitution` on a configuration where all eight were present.
+      #
+      # **`bash -n` would not have caught it, and it is worth saying why rather
+      # than adding the cheaper guard.** That expansion is a *runtime* failure,
+      # not a syntax error: the line before it executes, and `bash -n` exits 0 on
+      # the defective script. A syntax check would have been a guard that does not
+      # guard.
+      #
+      # `actionlint` does catch it, because it extracts every `run:` block and
+      # runs **shellcheck** over it — `SC2082 (error)`, which names `${!name}`,
+      # the fix that was actually applied. Verified by running this image against
+      # the workflow at the defective commit before adding the step.
+      #
+      # Pinned by digest, not by tag: this is a public repository and a linter
+      # that can change under us is a step that can start failing, or stop
+      # catching, without a commit.
+      - name: Lint the workflows, with shellcheck over every `run:` block
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo             rhysd/actionlint:latest@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667             -color
       # Runs before the check it tests, so a guard that has stopped catching
       # anything fails loudly instead of passing everything (B-019).
       - name: The STATUS guard still catches a gutted file

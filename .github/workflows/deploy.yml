@@ -267,6 +267,11 @@ jobs:
 
       - name: Say where it is
         run: |
-          echo "### Deployed \`${IMAGE_TAG:0:12}\` to dev" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- ${{ steps.apps.outputs.web_url }}" >> "$GITHUB_STEP_SUMMARY"
+          # One redirect rather than three (shellcheck SC2129). The workflow lint
+          # in ci.yml runs shellcheck over every `run:` block now, and a lint with
+          # a standing exception is a lint people learn to scroll past.
+          {
+            echo "### Deployed \`${IMAGE_TAG:0:12}\` to dev"
+            echo ""
+            echo "- ${{ steps.apps.outputs.web_url }}"
+          } >> "$GITHUB_STEP_SUMMARY"
