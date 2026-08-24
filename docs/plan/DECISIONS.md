@@ -4,6 +4,39 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-043 — Phase 12 stops after WP12.2; WP12.3 and WP12.4 are deferred, not cancelled
+Date: 2026-08-25 · Phase: 12 · PR: this one · Migration: none
+Context: WP12.2 has taken far longer than planned and produced eleven merged PRs,
+because every defect it found was real and none was visible from the repository —
+B-120, B-123, B-124, B-125, B-126, B-127, B-128, B-130. The deployment path is now
+proven end to end bar one blocker (**B-131**). What has *not* moved in that time is
+the product: the owner's F&B trial found five genuine defects in the agent's
+schema understanding, and the UI is still the Phase 7 skeleton. The owner's
+judgement on 2026-08-25 is that further hardening of an environment nobody uses is
+worth less than either of those.
+Options: (a) finish Phase 12 as written — observability, quotas, the restore
+drill, ASVS-lite, `v1.0.0`; (b) stop after WP12.2 and pivot to product work,
+cancelling 12.3 and 12.4; (c) stop after WP12.2 and **defer** 12.3 and 12.4 with
+their remaining scope written down.
+Decision: **(c)**. Phase 12 ends at WP12.2. The next two work packages are an
+**engine trial loop** and a **UI rebuild**, in that order.
+Consequences, stated plainly because the cost is real:
+**There is no `v1.0.0` tag**, and there will not be one until WP12.4 is resumed.
+Nothing in the repository should claim otherwise; architecture Part 14's
+acceptance list stays as written and stays unmet.
+**The deployed app has no quotas** (**B-025**) **and no retention sweep**
+(**B-021**). Dev is externally reachable with a $1.00 per-run cost cap as the only
+spend control, and `LLM_RUN_COST_LIMIT_USD` is a per-run ceiling, not a budget —
+n runs cost n dollars. The Azure budget alert is the backstop and it alerts rather
+than stops.
+**Observability is wired and unread.** `APPLICATIONINSIGHTS_CONNECTION_STRING` is
+set on both containers and declared in `PLATFORM_ENV` as belonging to an exporter
+that does not exist yet; no OpenTelemetry code is in `apps/api`. Container console
+logs reach Log Analytics and that is the whole of it.
+**Neither deferral is a scope cut in disguise.** What each still owes is written
+out in STATUS under *"Deferred: what WP12.3 and WP12.4 still owe"*, at the
+granularity needed to resume without rereading plan §6.
+
 ## D-042 — WP12.4's gate, amended for a dev that holds no data
 Date: 2026-08-24 · Phase: 12 · PR: #107 · Migration: none
 Context: the owner ruled on 2026-08-24 that **dev proves the deployment path and
