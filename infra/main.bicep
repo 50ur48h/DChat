@@ -237,6 +237,9 @@ output webUrl string = deployApps ? 'https://${apps.outputs.webFqdn}' : ''
 @description('The api, reachable only inside the environment.')
 output apiInternalFqdn string = deployApps ? apps.outputs.apiFqdn : ''
 
+@description('The API the browser calls. Needed at web *build* time, because NEXT_PUBLIC_* is inlined into the bundle.')
+output apiUrl string = 'https://ca-dataagent-api-${env}.${apps.outputs.defaultDomain}'
+
 @description('Where images are pushed and pulled.')
 output registryLoginServer string = acr.outputs.loginServer
 
