@@ -194,6 +194,7 @@ jobs:
         run: bash ops/scripts/deploy_smoke.sh
         env:
           WEB_URL: ${{ steps.apps.outputs.web_url }}
+          API_URL: ${{ steps.infra.outputs.api_url }}
           EXPECT_GIT_SHA: ${{ github.sha }}
           KEY_VAULT: ${{ steps.infra.outputs.key_vault }}
           RESOURCE_GROUP: ${{ env.RESOURCE_GROUP }}

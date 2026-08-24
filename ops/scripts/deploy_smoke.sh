@@ -17,21 +17,28 @@
 # What it does prove:
 #
 #   1. The web app answers on its public hostname.
-#   2. The API answers /healthz **from inside the environment**, and reports the
-#      git sha this deploy pushed — so a green smoke against a stale revision is
-#      not possible.
-#   3. An unauthenticated call to a tenant route is refused. A deployment whose
-#      auth was misconfigured would serve it, and that is worth one curl.
+#   2. The API answers /healthz on **its** public hostname and names the git sha
+#      this deploy pushed — so a green smoke against a stale revision, which is
+#      what a failed rollout looks like from outside, is not possible.
+#   3. An unauthenticated call to `/v1/me` is refused. A deployment whose auth was
+#      misconfigured would serve it, and that is worth one curl.
 #   4. Key Vault holds what the deployment expects, **by name only**. No value is
 #      read, and this script has no permission to read one.
+#
+# **Checks 2 and 3 were wrong in the direction that matters, and are the reason
+# this header is worth reading.** They ran `az containerapp exec`, which prints
+# `INFO: Connecting to the container 'api'...` on stdout before anything the
+# command returns — so both compared that banner to what they expected and
+# reported a *working* deployment as broken. A check that cries wolf teaches
+# people to skip it, and the second red smoke against a healthy system is the one
+# that does the damage. They ask the API directly now, which is possible because
+# its ingress is external (see `apps.bicep`) and is also what a browser does.
 
 set -eu
 
 : "${WEB_URL:?WEB_URL is not set}"
+: "${API_URL:?API_URL is not set}"
 : "${KEY_VAULT:?KEY_VAULT is not set}"
-: "${RESOURCE_GROUP:?RESOURCE_GROUP is not set}"
-
-API_APP="${API_APP_NAME:-ca-dataagent-api-dev}"
 failures=0
 
 fail() {
@@ -55,31 +62,42 @@ while [ "$i" -lt 10 ]; do
 done
 [ "$i" -lt 10 ] || fail "the web app returned $code after a minute of trying"
 
-echo "2. The API answers /healthz inside the environment"
-# `exec` in the container rather than a request from here: the API's ingress is
-# internal, which is the arrangement being verified as much as the health.
-HEALTH=$(az containerapp exec \
-  --name "$API_APP" \
-  --resource-group "$RESOURCE_GROUP" \
-  --command "sh -c 'curl -sf http://localhost:8000/healthz'" 2>/dev/null || echo '')
+echo "2. The API answers /healthz, and names the sha this deploy pushed"
+# **`curl`, not `az containerapp exec`, and the previous version lied because of
+# it.** `exec` prints `INFO: Connecting to the container 'api'...` on stdout
+# ahead of anything the command produces, so the check compared that banner to
+# `"status":"ok"` and reported a perfectly healthy deployment as broken — twice,
+# in the same run, because check 3 then compared the same banner to a git sha.
+#
+# A check that lies is worse than no check: the second time somebody reads a red
+# smoke against a working system, they stop reading it. `exec` was only ever
+# needed because the API had no public hostname; it has one now, so the smoke can
+# ask the API the same question a user's browser will.
+HEALTH=$(curl -s --max-time 30 "${API_URL}/healthz" || echo '')
 case "$HEALTH" in
 *'"status":"ok"'*) echo "   $HEALTH" ;;
-*) fail "the API did not report healthy from inside the environment: ${HEALTH:-no response}" ;;
+*) fail "the API did not report healthy at ${API_URL}/healthz: ${HEALTH:-no response}" ;;
 esac
 
+# **The sha check is what makes the health check mean something.** Without it a
+# green smoke is satisfied by the *previous* revision still serving, which is
+# exactly what a failed rollout looks like from outside.
 if [ -n "${EXPECT_GIT_SHA:-}" ]; then
   case "$HEALTH" in
-  *"$EXPECT_GIT_SHA"*) : ;;
-  *) fail "healthz does not name the sha this deploy pushed — a stale revision is serving" ;;
+  *"$EXPECT_GIT_SHA"*) echo "   serving ${EXPECT_GIT_SHA}" ;;
+  *) fail "healthz does not name ${EXPECT_GIT_SHA} — a stale revision is serving" ;;
   esac
 fi
 
-echo "3. An unauthenticated tenant request is refused"
-UNAUTH=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$WEB_URL/api/v1/me" || echo 000)
+echo "3. An unauthenticated request to a tenant route is refused"
+# Asked of the API directly rather than through the web origin. The previous
+# version guessed at a proxy path that does not exist, got a 404, and called it
+# inconclusive — which is a check that cannot fail and therefore proves nothing.
+UNAUTH=$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 "${API_URL}/v1/me" || echo 000)
 case "$UNAUTH" in
-401 | 403 | 404) echo "   refused with $UNAUTH" ;;
-2*) fail "an unauthenticated call to a tenant route returned $UNAUTH — auth is not on" ;;
-*) echo "   inconclusive ($UNAUTH); the web app does not proxy that path" ;;
+401 | 403) echo "   refused with $UNAUTH" ;;
+2*) fail "an unauthenticated call to /v1/me returned $UNAUTH — the API is not checking tokens" ;;
+*) fail "an unauthenticated call to /v1/me returned $UNAUTH, which is neither a refusal nor a success" ;;
 esac
 
 echo "4. Key Vault holds the expected secrets, by name"
