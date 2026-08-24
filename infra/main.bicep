@@ -197,7 +197,7 @@ module apps 'modules/apps.bicep' = {
     env: env
     tags: tags
     infrastructureSubnetId: network.outputs.appsSubnetId
-    logAnalyticsCustomerId: logs.outputs.workspaceCustomerId
+    logAnalyticsWorkspaceId: logs.outputs.workspaceId
     insightsConnectionString: logs.outputs.insightsConnectionString
     identityId: identity.outputs.id
     identityClientId: identity.outputs.clientId

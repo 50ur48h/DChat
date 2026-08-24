@@ -29,8 +29,8 @@ param tags object
 @description('The subnet from network.bicep that this environment is injected into.')
 param infrastructureSubnetId string
 
-@description('Log Analytics workspace GUID — the environment wants the customer id, not the ARM id.')
-param logAnalyticsCustomerId string
+@description('The Log Analytics workspace resource id. A diagnostic setting routes the environment logs there; the environment itself is told nothing about the workspace, which is what keeps this template free of a shared key.')
+param logAnalyticsWorkspaceId string
 
 @description('Application Insights connection string, for OTel.')
 param insightsConnectionString string
@@ -90,7 +90,12 @@ var secretNames = {
   databasePassword: 'database-password'
 }
 
-resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = {
+// **Deployed only when something will run in it** (`deployApps || deployJobs`).
+// It was unconditional, and that made a phase-4 resource fail in phase 1 — the
+// first real deploy stopped here with `deployApps=false`, which is a lie about
+// where the risk is. The migration job needs the environment as much as the apps
+// do, so the condition is the disjunction and not `deployApps` alone.
+resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = if (deployApps || deployJobs) {
   name: 'cae-dataagent-${env}'
   location: location
   tags: tags
@@ -102,14 +107,21 @@ resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = {
       // the whole environment internal, which would also hide the web app.
       internal: false
     }
+    // **`azure-monitor`, not `log-analytics`, and the difference is a
+    // credential.** This block used to say `log-analytics` with a `customerId`
+    // and a comment claiming the environment writes with its own identity. It
+    // does not: that destination requires `customerId` **and** `sharedKey`, and
+    // Azure refuses the environment at preflight with `LogAnalyticsConfiguration
+    // is invalid` — which is how the first real deploy failed, after the template
+    // had compiled, passed `check.infra` and passed `what-if`.
+    //
+    // The comment's intent was right and its mechanism was not. `azure-monitor`
+    // is the keyless destination: the environment emits, and a diagnostic setting
+    // below routes to the workspace. No shared key exists anywhere in this
+    // template, which is the property WP12.1 chose and the reason not to solve
+    // this with `listKeys()`.
     appLogsConfiguration: {
-      destination: 'log-analytics'
-      logAnalyticsConfiguration: {
-        customerId: logAnalyticsCustomerId
-        // No shared key: the environment writes with its own identity. A key
-        // here would be the one credential this template could not avoid, and
-        // it can.
-      }
+      destination: 'azure-monitor'
     }
     workloadProfiles: [
       {
@@ -256,6 +268,28 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
         maxReplicas: maxReplicas
       }
     }
+  }
+}
+
+// Where the environment's logs actually go. `appLogsConfiguration:
+// azure-monitor` says *emit*; this says *to here*. Split in two because the
+// routing is a property of the subscription's monitoring, not of the
+// application — and because it is the half that needs no credential.
+resource environmentDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (deployApps || deployJobs) {
+  name: 'send-to-log-analytics'
+  scope: environment
+  properties: {
+    workspaceId: logAnalyticsWorkspaceId
+    logs: [
+      {
+        category: 'ContainerAppConsoleLogs'
+        enabled: true
+      }
+      {
+        category: 'ContainerAppSystemLogs'
+        enabled: true
+      }
+    ]
   }
 }
 
@@ -406,7 +440,7 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
   }
 }
 
-output environmentId string = environment.id
+output environmentId string = environment.?id ?? ''
 output apiFqdn string = api.?properties.?configuration.?ingress.?fqdn ?? ''
 output webFqdn string = web.?properties.?configuration.?ingress.?fqdn ?? ''
 output secretNames object = secretNames

@@ -72,6 +72,79 @@ they document what the format used to be, and a credential that stops matching i
 a refusal rather than a widening — the failure mode is a deploy that will not
 start, which is the safe direction.
 
+## What `what-if` did not look at
+
+**A green `what-if` is a smaller claim than it appears, and this directory has
+now paid for that twice.** Every run against `rg-dataagent-dev` ended
+`status: Succeeded, error: null` — and every one of them also printed:
+
+```
+NestedDeploymentShortCircuited: A nested deployment got short-circuited and all
+its resources got skipped from validation. This is due to a nested template
+having a parameter that was not fully evaluated (e.g. contains a reference()
+function).
+  target: .../deployments/apps
+  target: .../deployments/roles
+  target: .../deployments/postgres
+```
+
+**Three of ten modules were never validated at all**, and they are exactly the
+three that matter most: the apps, the role assignments, and the database. The
+reason is structural rather than incidental — a module whose parameters come from
+an earlier module's outputs cannot be evaluated before that earlier module has
+run, so ARM skips it. Any template built the way this one is, with modules
+composed through outputs, has the same hole in the same places.
+
+**What it cost.** `apps.bicep` declared a Container Apps environment with
+`destination: 'log-analytics'` and no `sharedKey`, on the reasoning that the
+environment writes with its own identity. It does not; that destination requires
+both, and Azure refuses at preflight with `LogAnalyticsConfiguration is invalid`.
+The template compiled, `check.infra` passed, `what-if` passed, and the first real
+deployment failed on it — after creating ten resources. Nothing before that
+moment could have caught it, because the only check that would have looked at
+that module is the one ARM skipped.
+
+**So, when reading a `what-if` result:**
+
+* Read the `diagnostics` array, not only `status`. Every `NestedDeploymentShortCircuited`
+  entry names a module that was **not** checked.
+* Treat the first deployment of a short-circuited module as the real validation,
+  and expect it to fail in ways nothing local predicted.
+* Prefer failures that land in the phase that owns them. The environment above
+  was unconditional, so a phase-4 resource failed a phase-1 pass — which is a lie
+  about where the risk is. It is now gated on `deployApps || deployJobs`.
+
+This is the same family as **B-120**: parts that are individually correct and
+were never checked against each other. There the gap was between the templates
+and `Settings`; here it is between the template and Azure, and the honest summary
+is that only a deployment closes it.
+
+### Three failures, one shape
+
+Standing up `dev` for the first time took three dispatches, and it is worth
+listing them together because the *pattern* is more useful than any of them:
+
+| Failed at | Why | What could have caught it beforehand |
+|---|---|---|
+| Azure sign-in | GitHub now issues an **ID-qualified** OIDC subject; the federated credentials matched the documented format | Nothing. The instructions were right when written and the platform default moved |
+| Container Apps environment | `destination: 'log-analytics'` requires a `sharedKey` the template deliberately refuses to hold | Nothing. `what-if` short-circuits the `apps` module every time |
+| Image build | `az acr build` uses the classic Docker builder; the Dockerfile uses `RUN --mount=`, which is BuildKit-only | Nothing. Local, CI and the compose smoke all use BuildKit, so the file is correct everywhere it had been exercised |
+
+**Every one is a file that was correct everywhere it had been exercised, meeting
+a platform that does it differently.** Not one was a mistake in the sense of
+somebody writing something they should have known was wrong; not one was
+reachable by any check in this repository; and each was found in seconds once the
+real platform saw it. The compiled template, the passing guard and the green
+`what-if` were all true statements about things that turned out not to be the
+question.
+
+The practical consequence for anyone doing this again: **budget for the first
+deployment of anything to fail two or three times, and make each failure cheap
+rather than trying to prevent it.** That is why the pipeline is phased — a
+failure in phase 3 leaves phases 1 and 2 done and idempotent, so the next attempt
+starts where the last one stopped instead of from nothing. All three of these
+were resumable, and the resource group was never left half-written.
+
 ## Two rules that shaped every file
 
 **No secret value appears in this directory.** Key Vault is created empty and its
