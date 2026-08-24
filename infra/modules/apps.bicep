@@ -70,14 +70,24 @@ param minReplicas int
 @minValue(1)
 param maxReplicas int
 
+@description('Deploy the two container apps. False for the first pass of a deploy, before the vault has been seeded and before the migration has run — an app revision cannot start without its secrets, and must not start before its schema.')
+param deployApps bool = true
+
+@description('Deploy the migration job. Separated from deployApps so a deploy can create the job, run it, and only then roll the apps — which is the ordering the plan requires and the one a single flag cannot express.')
+param deployJobs bool = true
+
 // **Named here rather than inline**, so the set of secrets the platform expects
 // is one readable list. Each is a Key Vault secret name; the vault is created
 // empty and these are written out of band before the first deploy.
+// **`local-secrets-key` is deliberately absent** (B-120's third finding). This
+// template sets `SECRETS_BACKEND=keyvault` and `config.py` refuses the local
+// backend in a production build, so the Fernet key is unreadable by construction
+// — and a Key Vault secret that must exist for nothing to read is a secret to
+// rotate, audit and explain forever. Three secrets, each of which something uses.
 var secretNames = {
   openAiApiKey: 'openai-api-key'
   appDatabasePassword: 'app-database-password'
   databasePassword: 'database-password'
-  localSecretsKey: 'local-secrets-key'
 }
 
 resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = {
@@ -136,7 +146,7 @@ var commonEnv = [
   }
 ]
 
-resource api 'Microsoft.App/containerApps@2024-03-01' = {
+resource api 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
   name: 'ca-dataagent-api-${env}'
   location: location
   tags: tags
@@ -168,11 +178,6 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
           keyVaultUrl: '${keyVaultUri}secrets/${secretNames.appDatabasePassword}'
           identity: identityId
         }
-        {
-          name: secretNames.localSecretsKey
-          keyVaultUrl: '${keyVaultUri}secrets/${secretNames.localSecretsKey}'
-          identity: identityId
-        }
       ]
     }
     template: {
@@ -200,10 +205,6 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'OPENAI_API_KEY'
               secretRef: secretNames.openAiApiKey
-            }
-            {
-              name: 'LOCAL_SECRETS_KEY'
-              secretRef: secretNames.localSecretsKey
             }
             {
               // Key Vault is the secrets backend in Azure, and `config.py`
@@ -273,7 +274,7 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = {
 // between pushing the image and swapping the app revision. Nothing runs it on a
 // timer, because a migration that happens when nobody asked is a schema change
 // nobody reviewed.
-resource migrate 'Microsoft.App/jobs@2024-03-01' = {
+resource migrate 'Microsoft.App/jobs@2024-03-01' = if (deployJobs) {
   name: 'cj-dataagent-migrate-${env}'
   location: location
   tags: tags
@@ -305,6 +306,11 @@ resource migrate 'Microsoft.App/jobs@2024-03-01' = {
           keyVaultUrl: '${keyVaultUri}secrets/${secretNames.databasePassword}'
           identity: identityId
         }
+        {
+          name: secretNames.appDatabasePassword
+          keyVaultUrl: '${keyVaultUri}secrets/${secretNames.appDatabasePassword}'
+          identity: identityId
+        }
       ]
     }
     template: {
@@ -312,8 +318,16 @@ resource migrate 'Microsoft.App/jobs@2024-03-01' = {
         {
           name: 'migrate'
           image: '${registryLoginServer}/dataagent-api:${imageTag}'
-          command: ['alembic']
-          args: ['upgrade', 'head']
+          // **Two steps, in this order, and the second is not optional.**
+          // `alembic upgrade head` creates `dataagent_app` and its grants
+          // (migration 0002) but deliberately gives it no password — a migration
+          // in git must never contain a credential. `grant_app_login` supplies
+          // one from the vault and then reads back what the role can actually
+          // do, refusing the deploy if it can log in with more privilege than
+          // RLS assumes. Without it the role exists and cannot connect at all,
+          // which is the state a deployed API would otherwise have found.
+          command: ['sh', '-c']
+          args: ['alembic upgrade head && python -m dataagent.db.grant_app_login']
           resources: {
             cpu: json('0.5')
             memory: '1Gi'
@@ -332,6 +346,14 @@ resource migrate 'Microsoft.App/jobs@2024-03-01' = {
               secretRef: secretNames.databasePassword
             }
             {
+              // The password this job is about to give `dataagent_app`. The job
+              // holds it because it is the only process that can reach the
+              // server; the API receives the same value as its own connection
+              // secret and never sets it.
+              name: 'APP_DB_PASSWORD'
+              secretRef: secretNames.appDatabasePassword
+            }
+            {
               name: 'ENV'
               value: env
             }
@@ -342,7 +364,7 @@ resource migrate 'Microsoft.App/jobs@2024-03-01' = {
   }
 }
 
-resource web 'Microsoft.App/containerApps@2024-03-01' = {
+resource web 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
   name: 'ca-dataagent-web-${env}'
   location: location
   tags: tags
@@ -385,6 +407,6 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = {
 }
 
 output environmentId string = environment.id
-output apiFqdn string = api.properties.configuration.ingress.fqdn
-output webFqdn string = web.properties.configuration.ingress.fqdn
+output apiFqdn string = api.?properties.?configuration.?ingress.?fqdn ?? ''
+output webFqdn string = web.?properties.?configuration.?ingress.?fqdn ?? ''
 output secretNames object = secretNames

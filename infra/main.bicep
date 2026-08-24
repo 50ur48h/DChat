@@ -81,6 +81,12 @@ param budgetAlertEmail string
 @description('Budget period start, YYYY-MM-01. Azure refuses a start date in the past.')
 param budgetStartDate string
 
+@description('Deploy the two container apps. The deploy pipeline sets this false on its first pass, before the vault is seeded and before the migration has run.')
+param deployApps bool = true
+
+@description('Deploy the migration job. Separate from deployApps so the job can be created and run before any app revision is rolled.')
+param deployJobs bool = true
+
 // Derived, not passed. A globally-unique suffix nobody types is a suffix nobody
 // typos, and it is stable for the life of the resource group — so a redeploy
 // finds the same registry and the same vault rather than making new ones.
@@ -204,6 +210,8 @@ module apps 'modules/apps.bicep' = {
     blobEndpoint: storage.outputs.blobEndpoint
     minReplicas: minReplicas
     maxReplicas: maxReplicas
+    deployApps: deployApps
+    deployJobs: deployJobs
   }
   // **The one ordering that has to be written down.** The apps read their
   // secrets from Key Vault at start-up using the managed identity. If the role
@@ -224,10 +232,10 @@ module budget 'modules/budget.bicep' = {
 }
 
 @description('The public address of the web app.')
-output webUrl string = 'https://${apps.outputs.webFqdn}'
+output webUrl string = deployApps ? 'https://${apps.outputs.webFqdn}' : ''
 
 @description('The api, reachable only inside the environment.')
-output apiInternalFqdn string = apps.outputs.apiFqdn
+output apiInternalFqdn string = deployApps ? apps.outputs.apiFqdn : ''
 
 @description('Where images are pushed and pulled.')
 output registryLoginServer string = acr.outputs.loginServer
