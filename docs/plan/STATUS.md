@@ -75,7 +75,11 @@ Last updated: 2026-08-24 by Claude Code (**dev serves authenticated requests and
               four `LLM_*` variables, so every run dies at its first model call — **B-126
               (P1)**, fixed on `p12.2-llm-config` along with the three things that let it
               through, and **B-127** — no test here could ever observe a log line, which is
-              why the silent failure survived. #107 is merged; this is not deployed yet)
+              why the silent failure survived. Both merged (#108). **The re-dispatch then
+              failed before touching Azure**: #107's new preflight step read
+              `${${$name}}`, a bash parse error, so the step that checks the deployment has
+              its values could never pass — **B-128**, instance five of a check failing for
+              a reason unrelated to what it checks)
               each failing on something no check here could see — OIDC subject, a log
               destination needing a key, BuildKit, an extension allow-list, a browser bundle
               built for localhost. The owner has ruled that **dev proves the deployment path
