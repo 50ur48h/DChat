@@ -81,6 +81,12 @@ param budgetAlertEmail string
 @description('Budget period start, YYYY-MM-01. Azure refuses a start date in the past.')
 param budgetStartDate string
 
+@description('Where the identity provider publishes its discovery document. Supplied at deploy time: it names the owner tenant and this repository is public.')
+param oidcAuthority string
+
+@description('The audience every accepted token must carry.')
+param oidcAudience string
+
 @description('Deploy the two container apps. The deploy pipeline sets this false on its first pass, before the vault is seeded and before the migration has run.')
 param deployApps bool = true
 
@@ -199,6 +205,8 @@ module apps 'modules/apps.bicep' = {
     infrastructureSubnetId: network.outputs.appsSubnetId
     logAnalyticsWorkspaceId: logs.outputs.workspaceId
     insightsConnectionString: logs.outputs.insightsConnectionString
+    oidcAuthority: oidcAuthority
+    oidcAudience: oidcAudience
     identityId: identity.outputs.id
     identityClientId: identity.outputs.clientId
     registryLoginServer: acr.outputs.loginServer

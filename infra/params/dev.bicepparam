@@ -65,3 +65,10 @@ param monthlyBudgetUsd = 50
 // first of a month. Moved forward whenever this is next deployed into a new
 // group; an existing budget ignores it.
 param budgetStartDate = '2026-09-01'
+
+// **Read from the environment, like the other two that are not in this file.**
+// These name the owner's identity tenant, and this repository is public. Not
+// secrets — a tenant id and an audience are in every token the SPA holds — but
+// not ours to publish either, so the deploy supplies them from GitHub variables.
+param oidcAuthority = readEnvironmentVariable('OIDC_AUTHORITY')
+param oidcAudience = readEnvironmentVariable('OIDC_AUDIENCE')

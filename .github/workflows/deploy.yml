@@ -70,6 +70,8 @@ jobs:
         env:
           POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
           BUDGET_ALERT_EMAIL: ${{ secrets.BUDGET_ALERT_EMAIL }}
+          OIDC_AUTHORITY: ${{ vars.OIDC_AUTHORITY }}
+          OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
         run: |
           az deployment group what-if \
             --resource-group "$RESOURCE_GROUP" \
@@ -87,6 +89,8 @@ jobs:
         env:
           POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
           BUDGET_ALERT_EMAIL: ${{ secrets.BUDGET_ALERT_EMAIL }}
+          OIDC_AUTHORITY: ${{ vars.OIDC_AUTHORITY }}
+          OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
         run: |
           az deployment group create             --name "infra-${IMAGE_TAG:0:12}"             --resource-group "$RESOURCE_GROUP"             --template-file infra/main.bicep             --parameters infra/params/dev.bicepparam             --parameters deployApps=false deployJobs=false             --query properties.outputs -o json > outputs.json
           # Read back rather than reconstructed: the registry and vault names
@@ -164,6 +168,8 @@ jobs:
         env:
           POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
           BUDGET_ALERT_EMAIL: ${{ secrets.BUDGET_ALERT_EMAIL }}
+          OIDC_AUTHORITY: ${{ vars.OIDC_AUTHORITY }}
+          OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
         run: |
           az deployment group create             --name "job-${IMAGE_TAG:0:12}"             --resource-group "$RESOURCE_GROUP"             --template-file infra/main.bicep             --parameters infra/params/dev.bicepparam             --parameters deployApps=false deployJobs=true imageTag="$IMAGE_TAG"
 
@@ -186,6 +192,8 @@ jobs:
         env:
           POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
           BUDGET_ALERT_EMAIL: ${{ secrets.BUDGET_ALERT_EMAIL }}
+          OIDC_AUTHORITY: ${{ vars.OIDC_AUTHORITY }}
+          OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
         run: |
           az deployment group create             --name "apps-${IMAGE_TAG:0:12}"             --resource-group "$RESOURCE_GROUP"             --template-file infra/main.bicep             --parameters infra/params/dev.bicepparam             --parameters deployApps=true deployJobs=true imageTag="$IMAGE_TAG"             --query properties.outputs -o json > apps-outputs.json
           echo "web_url=$(jq -r .webUrl.value apps-outputs.json)" >> "$GITHUB_OUTPUT"
