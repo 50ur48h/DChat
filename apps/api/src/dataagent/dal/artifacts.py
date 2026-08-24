@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import Iterable
+from contextlib import suppress
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -141,9 +142,31 @@ class BlobArtifactStore:
         from azure.identity.aio import DefaultAzureCredential
         from azure.storage.blob.aio import BlobServiceClient
 
-        self._service = BlobServiceClient(
-            account_url=account_url, credential=DefaultAzureCredential()
-        )
+        # The credential is held rather than passed inline so `aclose` can close
+        # it: closing the service client does not close a credential it was
+        # handed, and both own an HTTP connection pool.
+        self._credential: object = DefaultAzureCredential()
+        self._service = BlobServiceClient(account_url=account_url, credential=self._credential)
+
+    async def aclose(self) -> None:
+        """Release the connection pools this store holds.
+
+        **For short-lived processes**, which is where it matters: a long-running
+        API closes them by exiting, but `dataagent.ops.selfcheck` is a one-shot
+        job whose entire output is a diagnosis, and an unclosed `aiohttp` session
+        prints `Unclosed client session` on the way out. Noise in the one tool
+        whose job is clarity is worse than it sounds — it is two lines of
+        traceback-shaped text under the sentence somebody needs to read.
+
+        Not on the `ArtifactStore` protocol: the local store has nothing to close,
+        and widening the protocol would oblige every test double to grow a method
+        that does nothing. Callers that care use `getattr`.
+        """
+        for holder in (self._service, self._credential):
+            close = getattr(holder, "close", None)
+            if close is not None:
+                with suppress(Exception):
+                    await close()
 
     def _blob(self, reference: str) -> Any:
         service = cast(Any, self._service)
