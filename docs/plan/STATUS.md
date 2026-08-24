@@ -1,91 +1,291 @@
 # STATUS — data-agent build
 
-Current position: **Phases 0-11 are done and signed off. Phase 12 is under
-                  way: WP12.1 is merged (#92).** The owner answered the whole
-                  **USER INPUT** batch on 2026-08-22, so nothing in this phase
-                  waits on them for scope: subscription and region settled,
-                  `rg-dataagent-dev` approved, USD 50 a month, `OPENAI_API_KEY`
-                  only, no custom domain, Postgres B-series at 7-day retention.
-                  **The one decision that changes the plan is D-041: this phase
-                  stands up `dev` only.** Prod is deferred and `v1.0.0` is tagged
-                  from dev. Nothing is dropped from WP12.4's gate — the restore
-                  drill, the quota hard-stop, managed identity and the ASVS-lite
-                  checklist all still apply, against dev. Architecture 9.1 and
-                  the plan's gate were amended in #92.
-                  **Dev is deployed and serving** (superseding this paragraph's
-                  original claim that nothing was): `rg-dataagent-dev` exists,
-                  the web app and API answer on their public hostnames, and a
-                  person can sign in, invite, and register a customer database.
-                  What it cannot yet do is answer a question — see B-126.
-Next step:        **WP12.2 — OIDC deploy workflow, Key Vault backend, dev env**
-                  (`p12.2-deploy-dev`). Plan §6 Phase 12 WP12.2, architecture
-                  Part 9 and §4.2.
-                  **It cannot start until the owner has done two things**, both
-                  written out as exact instructions in #92's description:
-                  (1) run the `az` commands that create the GitHub-OIDC app
-                  registration and its two federated credentials, and (2) create
-                  the `dev` GitHub environment holding `AZURE_CLIENT_ID`,
-                  `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` and
-                  `POSTGRES_ADMIN_PASSWORD`. Until that identity exists there is
-                  nothing to authenticate as — which is why `what-if` belongs to
-                  WP12.2 rather than WP12.1, and why the very first task of the
-                  next session is to confirm those two are done rather than to
-                  write code.
-                  **One decision is still open and is the owner's**, raised in
-                  #92 and recorded here so it survives the session: `roles.bicep`
-                  creates three role assignments, and creating a role assignment
-                  needs `User Access Administrator` (or `Owner`) — a strictly
-                  larger permission than `Contributor`. Either grant the OIDC
-                  identity that role at the resource group, or create the three
-                  assignments by hand and drop `roles.bicep` from what the
-                  pipeline deploys. **Ask before writing the deploy workflow**,
-                  because the answer changes what the workflow may do.
-                  **The budget alert address is deliberately not in this repo.**
-                  It is read from the environment at deploy time; ask the owner
-                  for `BUDGET_ALERT_EMAIL` when WP12.2 wires the deploy, and
-                  keep it out of every tracked file when they give it.
-                  **Every Phase 12 PR needs human review**, including the ones
-                  that only touch `infra/`.
+Current position: **Phases 0-11 are done and signed off. Phase 12 STOPS AFTER
+                  WP12.2 (D-043).** WP12.3 and WP12.4 are **deferred, not
+                  cancelled** — see *"Deferred: what WP12.3 and WP12.4 still owe"*
+                  below. **There is no `v1.0.0` tag and there will not be one
+                  until WP12.4 resumes.**
+                  **Dev is deployed and reachable**, running the image built from
+                  **942e93c** (#106) — which predates the model configuration, so
+                  **it still cannot answer a question**. A person can sign in,
+                  create users, send invitations and register a data source.
+                  Everything that fixes the question path is merged to `main`
+                  (#108, #110, #111, #112) and **not deployed**, because the
+                  deploy is blocked by **B-131** — one command for a person, in
+                  *"What the next session must do first"*.
+                  D-041 still holds: `dev` only, no prod. D-042 amended WP12.4's
+                  gate for a dev that holds no data; D-043 defers that gate.
+Next step:        **Not WP12.3.** The next two work packages, in order:
+                  **(a) an engine trial loop** — point the product at unfamiliar
+                  datasets, run probe questions, find where schema understanding
+                  breaks, repeatably. The owner's F&B trial found five real
+                  defects this way and the method is currently in their head.
+                  **(b) a UI rebuild** — persistent chats with a sidebar, chat
+                  creation and management, system instructions, tone and model
+                  selection; target feel Claude/ChatGPT web.
+                  Both are specified under *"The next work, in order"* below,
+                  with the backend inventory for (b).
+                  Before either: **unblock the deploy (B-131)**, which is two `az`
+                  commands and a re-dispatch, so that what is merged is what is
+                  running.
 Merge policy: ASK
-Blocked on user: **no.** (This entry described the two owner tasks that gated the
-                 start of WP12.2; both were done on 2026-08-23 and the deploy has
-                 run many times since. Kept below for the record of what was
-                 needed, because the same two are needed again for any second
-                 environment.) Two owner tasks, written out as
-                 exact commands in #92's description: the `az` commands creating
-                 the GitHub-OIDC app registration and its two federated
-                 credentials, and the `dev` GitHub environment holding
-                 `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`
-                 and `POSTGRES_ADMIN_PASSWORD`. Plus one decision — whether the
-                 OIDC identity gets `User Access Administrator` or the three
-                 role assignments are made by hand (see `Next step:`), and one
-                 value to be asked for at deploy time and never committed,
-                 `BUDGET_ALERT_EMAIL`.
-                 Not blocking: the **OpenAI key is a repository secret** (owner,
-                 2026-08-17), so `nightly-evals.yml` can run — keep its token cap
-                 tight, because the local live run spent **223k tokens** for
-                 twenty questions. An Anthropic key would still close **B-029
-                 (P1)** and with it the Phase 6 gate; it blocks nothing in
-                 Phase 12 either, and WP12.4 turns nightly evals on against dev,
-                 so B-029 wants an answer before that gate rather than after.
-Last updated: 2026-08-24 by Claude Code (**dev serves authenticated requests and answers
-              no questions.** B-123 is merged (#105) and the owner has signed in, created a
-              user, sent an invitation and registered a customer database through the UI.
-              Asking it anything fails: `apps.bicep` ships `OPENAI_API_KEY` and none of the
-              four `LLM_*` variables, so every run dies at its first model call — **B-126
-              (P1)**, fixed on `p12.2-llm-config` along with the three things that let it
-              through, and **B-127** — no test here could ever observe a log line, which is
-              why the silent failure survived. Both merged (#108). **The re-dispatch then
-              failed before touching Azure**: #107's new preflight step read
-              `${${$name}}`, so the step that checks the deployment has its values could never
-              pass — **B-128**, instance five of a check failing for a reason unrelated to
-              what it checks. Fixed in #109; the workflows are linted with shellcheck now,
-              which is what would actually have caught it — `bash -n` would not, because the
-              failure is runtime rather than syntax)
-              each failing on something no check here could see — OIDC subject, a log
-              destination needing a key, BuildKit, an extension allow-list, a browser bundle
-              built for localhost. The owner has ruled that **dev proves the deployment path
-              and never hosts a demo**; the deployed database stays empty on purpose)
+Blocked on user: **yes, on one thing, and it is two commands.** **B-131** — a role
+                 assignment created by hand on 2026-08-24 to work around B-125 now
+                 collides with the one `roles.bicep` creates, so every deploy fails
+                 in the `roles` module with `RoleAssignmentExists`. Azure's
+                 uniqueness is on the (scope, principal, role) triple, not the
+                 assignment name, so the template cannot adopt or overwrite it.
+                 The commands are in *"What the next session must do first"*. It
+                 needs a person because it briefly removes the identity's ability
+                 to write secrets, between the delete and the redeploy.
+                 Not blocking, and still true: an **Anthropic key** would close
+                 **B-029 (P1)** and with it the Phase 6 gate. The **OpenAI key** is
+                 a repository secret (owner, 2026-08-17), so `nightly-evals.yml`
+                 can run — keep its token cap tight; the local live run spent
+                 **223k tokens** for twenty questions.
+                 The two WP12.2 setup tasks that used to sit here — the GitHub-OIDC
+                 app registration with its two federated credentials, and the `dev`
+                 environment holding `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
+                 `AZURE_SUBSCRIPTION_ID`, `POSTGRES_ADMIN_PASSWORD` — were done on
+                 2026-08-23. Recorded because a second environment needs both again.
+Last updated: 2026-08-25 by Claude Code (**session-end handoff.** Phase 12 stops after
+              WP12.2 per **D-043**; WP12.3 and WP12.4 deferred with their remaining scope
+              written out below. Eleven PRs this session, every one of them a real defect
+              found by walking rather than by CI: B-120, B-123, B-124, B-125, B-126, B-127,
+              B-128, B-130. Dev is one person-command from serving the current build —
+              **B-131**. The next work is the engine trial loop, then the UI rebuild)
+
+---
+
+# SESSION-END HANDOFF — 2026-08-25
+
+Everything a next session needs is in this file, `BACKLOG.md` and `DECISIONS.md`.
+Nothing below is only in someone's head.
+
+## What the next session must do first
+
+**Unblock the deploy (B-131).** Every fix for the question path is merged and none
+of it is running. The vault holds two role assignments for the app identity, and
+the hand-made one collides with the template's. Both ids are below; the scope is
+`/subscriptions/<sub>/resourceGroups/rg-dataagent-dev/providers/Microsoft.KeyVault/vaults/kv-dataagent-dev-v4ilto`.
+
+* `fe5ff098-052c-4b6c-a8bb-72762c332524` — **Key Vault Secrets Officer**, created by
+  hand on 2026-08-24 while B-125 was open. **Delete it** so `roles.bicep` can create
+  its own deterministic assignment for the same triple.
+* `3be8d90b-1990-5a8f-9305-bdef2270589a` — **Key Vault Secrets User**, the pre-#107
+  template's assignment. Officer is a superset, so this grants nothing extra and
+  makes the vault's access list say something untrue. **Delete it too** — that
+  closes B-125's remaining open half.
+
+Then `gh workflow run deploy.yml --ref main`.
+
+Between the first delete and the redeploy the identity **cannot write secrets**, so
+registering a data source will fail in that window. Re-dispatch immediately.
+
+The deploy then runs, in order: preflight, role-id check, what-if, infra, vault
+seed, build, migration job, migrate, roll, smoke, and finally the **identity
+self-check**. That last step is new (#111) and has never executed: it proves the app
+identity can write and delete a Key Vault secret and write and read a Blob artifact.
+**No run has ever written an artifact in Azure**, so that step is the first exercise
+of the Blob path.
+
+Once it is green the F&B questions can be asked against the deployed app.
+
+## Deferred: what WP12.3 and WP12.4 still owe
+
+Deferred by **D-043**, not cancelled. Written at the granularity needed to resume
+without rereading plan §6.
+
+### WP12.3 — observability, quotas, alerts
+
+* **OpenTelemetry is not wired at all.** `APPLICATIONINSIGHTS_CONNECTION_STRING` is
+  set on both container apps and declared in `check_env.sh`'s `PLATFORM_ENV` with
+  the reason *"read by the OpenTelemetry exporter (WP12.3), not by this
+  application"*. There is **no** `opentelemetry` import anywhere in `apps/api`. What
+  exists today is container console logs reaching Log Analytics, plus a diagnostic
+  setting on the managed environment. Owed: traces spanning a run, the exporter, and
+  whatever of architecture Part 11 still applies.
+* **`quotas/` does not exist** (**B-025**, P2, open). `usage_ledger` has held every
+  call with tokens, model, role, tier and cost since Phase 6, and
+  `ix_usage_ledger_org_id_created_at` exists for exactly the window query a quota
+  needs. Nothing reads it. Architecture 8.3 wants per-org daily and monthly token
+  and query quotas checked **at run start and at each LLM call**, soft warn at 80%,
+  hard stop at 100%. It must treat `cost_usd IS NULL` — an unpriced model — as
+  *unknown*, never as free.
+* **Alerts.** A budget alert exists (`budget.bicep`) and alerts rather than stops.
+  Nothing alerts on failure rate, on run latency, or on the `degraded` health state
+  the probe can now report.
+
+### WP12.4 — hardening, restore drill, ASVS-lite, v1.0.0
+
+* **`docs/hardening-v1.md` does not exist.** It is where the evidence goes.
+* **ASVS-lite checklist**, dependency audit, rate limits, managed-identity review.
+* **Restore drill**: restore the Postgres backup to a fresh server, run the
+  migration check and the `rls_proof` suite against it. Per **D-042** it records
+  that it restored an **empty schema** — dev holds no customer data, and the
+  evidence must say so, or a later reader takes it for a guarantee it never made.
+* **Quota hard-stop proven in dev**, per D-042 amendment 1: seed `usage_ledger`
+  directly and watch the deployed API refuse. No data source needed.
+* **Nightly evals against dev is dropped**, per D-042 amendment 2 — they need the
+  pizza fixture, which is a compose service, and deploying a seed database is
+  precisely the forbidden thing. They stay local and in CI.
+* **`v1.0.0` tagged from dev.** Not done. Nothing in the repository should claim a
+  v1 until it is.
+
+## The next work, in order
+
+### (a) An engine trial loop — repeatable, not remembered
+
+**Why this first.** The owner's F&B trial found five real defects in the agent's
+schema understanding — B-057's join direction, B-060's source ambiguity, B-085's
+unbound metrics, B-092's unranked codes, B-119's fabricated refusal. Every one came
+from pointing the product at an unfamiliar dataset and asking probe questions, and
+**none was reachable from the test suite**, which is the defect class CLAUDE.md
+opens with. The method works and currently exists only as the owner's habit.
+
+What the loop needs, roughly in build order:
+
+1. **A cheap way to attach an unfamiliar dataset.** `load_sqlite.py` and
+   `make seed.fnb SQLITE=…` already do this for SQLite; the gap is a documented path
+   for *"here is a database I have never seen — register it, crawl it, profile it,
+   card it"* without hand-running four things in order.
+2. **A probe question set that is not the golden evals.** The evals assert known
+   answers against a known fixture. A trial asks questions whose answers nobody
+   knows yet, and its output is a **judgement** about whether the run understood the
+   schema: which tables it chose, what it refused, what it silently assumed.
+3. **A per-trial record** that makes that judgement possible without a database
+   client — the question, the tables offered, the tables read, the SQL, the
+   limitations, the refusal reason. Most of this is already in `agent_events` and
+   the trace; what is missing is a way to read a whole trial at once.
+4. **A place to file what it finds.** That is `BACKLOG.md`, and the five entries
+   above are the template for what a good finding looks like.
+
+Two open P1s belong to this loop: **B-060** (two defensible sources, answers two
+orders of magnitude apart) and **B-119** (a fabricated platform constraint). Both
+are diagnosed and deliberately unfixed.
+
+### (b) A UI rebuild — persistent chats, sidebar, controls
+
+Target feel: Claude / ChatGPT web. Persistent chats in a sidebar, chat creation and
+management, system instructions, tone selection, model selection.
+
+**What the backend already has** — more than it looks:
+
+* **Conversations.** `conversations` since revision 0012; `archived_at` since 0026
+  (WP11.2a); a data source per conversation (D-022, revision 0014). List, create and
+  archive exist in the API and the screens use them.
+* **Messages and runs.** `messages` and `agent_runs`. Posting a message returns 202
+  with a run id and the client polls the run. Findings, chart, method and
+  `failure_reason` all hang off the run.
+* **Traces.** `agent_events`, twenty-one event types, read by `read_events`. The
+  evidence panel already renders them.
+* **Model selection has a backend already.** `LLM_ROLE_MAP` maps role to tier and
+  `LLM_MODELS` maps provider to tier to model id. A UI model picker is a per-run or
+  per-conversation **override of the role map** — it does not need a new model
+  abstraction, it needs somewhere to put the override and a decision about who may
+  set it.
+
+**What is missing:**
+
+* **No system-instruction storage anywhere**, and no prompt layer for one. The
+  prompt is layered L0–L5, so an organization instruction is a new layer needing a
+  truncation rule and a trust framing — the same argument `DefinitionFrame` versus
+  `KnowledgeFrame` settles for definitions against retrieved text. That is a
+  **design decision, not a field**: organization-authored instruction sits between
+  platform rules and customer text. Read D-029 and D-032 first.
+* **No tone control.** Nothing in the composer takes a style parameter.
+* **No per-conversation model override** — the role map is deployment-wide.
+* **No chat rename.** Archive exists; the title is derived, not editable.
+* **No persistent shell.** Conversations are a screen, not a sidebar, and the layout
+  is the Phase 7 skeleton with Phase 11 polish on top.
+
+Read before starting: `docs/design.md` (CSS Modules and a token set, no component
+library — adding one needs a DECISIONS entry, B-004), and CLAUDE.md's three web
+container quirks, which have cost a gate between them.
+
+## Open P1s — and what each blocks
+
+| id | one line | blocks |
+|----|----------|--------|
+| **B-029** | The LLM abstraction has never run against a second provider. | The **Phase 6 gate**, still open. Needs an Anthropic key — an owner decision, not a code task. |
+| **B-060** | The same question, paraphrased, picks a different source and answers two orders of magnitude apart. Four defensible readings span a factor of **538**. | Trust in any answer over an ambiguous schema. Diagnosed, deliberately unfixed; the engine trial loop is where it gets resolved. |
+| **B-119** | The model invented a platform constraint and refused half a question the data could answer. | Honest refusals. A refusal that is a fabrication is worse than a wrong answer, because it looks like integrity. |
+
+**Three, not six.** B-090, B-092 and B-093 shipped in #76 and #78 and their status
+cells still read *in progress*; corrected in this handoff. Worth noting as a habit:
+a status cell written mid-flight is rarely flipped by the PR that finishes the work.
+
+## Deferred operational debt, in one place
+
+None of these is forgotten; each is a deliberate deferral with a reason.
+
+* **CI takes 30+ minutes and `coverage` is a required check that depends on the
+  slowest job.** `coverage` needs `[api, mssql]`, so it begins only after the longest
+  job — roughly thirteen minutes in — which means every PR's mergeability rests on a
+  second, late runner acquisition. One such acquisition already failed: on #107 the
+  job queued for fifteen minutes, was reaped with zero steps and no log, and blocked
+  a merge where everything else was green. Re-running fixed it. Not restructured,
+  because the fix is either dropping a required check or splitting the `api` job, and
+  both are larger than the flake.
+* **No quotas on a publicly reachable deployment** (**B-025**). The only spend
+  control is `LLM_RUN_COST_LIMIT_USD=1.00`, which is **per run** — n runs cost n
+  dollars. The Azure budget alert warns; it does not stop.
+* **No retention sweep** (**B-021**). `result_artifacts.expires_at` is written on
+  every row and read by nothing. In Azure the storage account's `expire-artifacts`
+  lifecycle rule does delete the blobs, so the **files** are covered and the **rows**
+  are not. Locally neither is.
+* **No usage-ledger sweep** (**B-026**). One row per LLM call, kept forever.
+* **B-029 leaves the Phase 6 gate open** (above).
+* **B-014**: 14 of 17 refs in the local `ops/.secrets/secrets.json` are orphaned —
+  their organization no longer exists. Contained locally; the same ratio against Key
+  Vault is a bill and an audit finding.
+* **B-007**: every CI action still targets the Node 20 runtime and is being forced
+  onto 24. A warning today, a broken pipeline when the shim is removed.
+* **B-129**: `storage.bicep` creates a `documents` container nothing uses, outside
+  the retention rule and with no tenant-prefix convention behind it.
+
+## State: what runs where, and what data is where
+
+### Local (this clone, Windows host)
+
+* `make up` brings up **platform-pg**, **seed-pizza-pg**, **seed-fnb-pg**, **api**
+  and **web**. SQL Server is on demand: `make up.mssql`.
+* The **pizza demo** is `make seed`. The **F&B sample** loads from `.SampleData/` —
+  gitignored as a whole directory — via `make seed.fnb SQLITE=…`.
+* `ops/scripts/demo_setup.sh` registers both seed databases against an org and ends
+  with a reachability report over every source (B-115).
+* The full API suite is slow here (~40 minutes) and has one **Windows-only flake**:
+  `tests/secrets/test_local_provider.py::test_concurrent_writes_do_not_lose_entries`
+  fails under full-suite load with `PermissionError [WinError 5]` on `os.replace`,
+  and passes 3/3 in isolation. The temp file is named per **process**
+  (`os.getpid()`) while the provider does its file I/O in a worker **thread**, so
+  concurrent writers inside one process race on the same temp path. Green on Linux
+  CI. Not filed as a defect because it has not been shown to affect a single-writer
+  path — worth confirming before anyone calls it cosmetic.
+
+### Deployed (`rg-dataagent-dev`, southeastasia)
+
+* **Web**: `https://ca-dataagent-web-dev.redhill-410ea877.southeastasia.azurecontainerapps.io`
+* **API**: `https://ca-dataagent-api-dev.redhill-410ea877.southeastasia.azurecontainerapps.io`
+* Both currently serve the image built from **942e93c** (#106), which is **behind
+  `main`** and predates the model configuration — hence no questions.
+* Resources: `cae-dataagent-dev`, `crdataagentdevv4ilto`, `psql-dataagent-dev`
+  (private endpoint, no public access), `kv-dataagent-dev-v4ilto`,
+  `stdataagentdevv4ilto`, `id-dataagent-dev`, `log-dataagent-dev`,
+  `appi-dataagent-dev`, `vnet-dataagent-dev`, and the `cj-dataagent-migrate-dev`
+  job. **`cj-dataagent-selfcheck-dev` does not exist yet** — it is in `apps.bicep`
+  on `main` and has never deployed, because no deploy has succeeded since it merged.
+* **Dev holds no fixtures and no seed database**, deliberately: *dev exists to prove
+  the deployment path, not to host a demo* (owner, 2026-08-24; D-042).
+* **The standing rule: no customer database credential in dev without a separate
+  decision.** One customer-style database exists —
+  `pg-fnb-demo-sk.postgres.database.azure.com`, in a **separate resource group with
+  no relationship to the app's infrastructure**, created by the owner for a trial and
+  holding the F&B sample behind a `fnb_readonly` login. Its credential was registered
+  through the UI **by the owner**, not by this pipeline, and it is theirs to delete.
+  Nothing in this repository stores it.
+* The platform database is reachable only from inside the environment's subnet,
+  which is why migrations run as a Container Apps job rather than from the runner.
 
 ---
 
