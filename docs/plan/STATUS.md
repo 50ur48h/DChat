@@ -12,9 +12,11 @@ Current position: **Phases 0-11 are done and signed off. Phase 12 is under
                   drill, the quota hard-stop, managed identity and the ASVS-lite
                   checklist all still apply, against dev. Architecture 9.1 and
                   the plan's gate were amended in #92.
-                  **Nothing is deployed.** `infra/` compiles and has never been
-                  run against Azure; no resource group exists, and the first
-                  thing that touches the subscription is WP12.2's `what-if`.
+                  **Dev is deployed and serving** (superseding this paragraph's
+                  original claim that nothing was): `rg-dataagent-dev` exists,
+                  the web app and API answer on their public hostnames, and a
+                  person can sign in, invite, and register a customer database.
+                  What it cannot yet do is answer a question — see B-126.
 Next step:        **WP12.2 — OIDC deploy workflow, Key Vault backend, dev env**
                   (`p12.2-deploy-dev`). Plan §6 Phase 12 WP12.2, architecture
                   Part 9 and §4.2.
@@ -45,7 +47,11 @@ Next step:        **WP12.2 — OIDC deploy workflow, Key Vault backend, dev env*
                   **Every Phase 12 PR needs human review**, including the ones
                   that only touch `infra/`.
 Merge policy: ASK
-Blocked on user: **yes — WP12.2 cannot start.** Two owner tasks, written out as
+Blocked on user: **no.** (This entry described the two owner tasks that gated the
+                 start of WP12.2; both were done on 2026-08-23 and the deploy has
+                 run many times since. Kept below for the record of what was
+                 needed, because the same two are needed again for any second
+                 environment.) Two owner tasks, written out as
                  exact commands in #92's description: the `az` commands creating
                  the GitHub-OIDC app registration and its two federated
                  credentials, and the `dev` GitHub environment holding
@@ -62,15 +68,95 @@ Blocked on user: **yes — WP12.2 cannot start.** Two owner tasks, written out a
                  (P1)** and with it the Phase 6 gate; it blocks nothing in
                  Phase 12 either, and WP12.4 turns nightly evals on against dev,
                  so B-029 wants an answer before that gate rather than after.
-Last updated: 2026-08-24 by Claude Code (**dev deploys end to end and cannot serve an
-              authenticated request**: `/v1/me` 500s because the API has always used the
-              *owner* connection for eight request-path lookups, which CLAUDE.md forbids.
-              **B-123 (P1)** — dev stays broken until the separation is real, the owner's
-              call. Analysis done, fix not written)
+Last updated: 2026-08-24 by Claude Code (**dev serves authenticated requests and answers
+              no questions.** B-123 is merged (#105) and the owner has signed in, created a
+              user, sent an invitation and registered a customer database through the UI.
+              Asking it anything fails: `apps.bicep` ships `OPENAI_API_KEY` and none of the
+              four `LLM_*` variables, so every run dies at its first model call — **B-126
+              (P1)**, fixed on `p12.2-llm-config` along with the three things that let it
+              through, and **B-127** — no test here could ever observe a log line, which is
+              why the silent failure survived. #107 is merged; this is not deployed yet)
               each failing on something no check here could see — OIDC subject, a log
               destination needing a key, BuildKit, an extension allow-list, a browser bundle
               built for localhost. The owner has ruled that **dev proves the deployment path
               and never hosts a demo**; the deployed database stays empty on purpose)
+
+---
+
+## Every question failed, 2026-08-24 — a credential with no configuration (B-126)
+
+The owner registered the F&B customer database through the UI, asked it two
+questions, and both came back **failed / "The run could not be completed."**
+
+**The cause.** `apps.bicep` set `OPENAI_API_KEY` and not one of `LLM_PROVIDERS`,
+`LLM_MODELS`, `LLM_ROLE_MAP` or `LLM_PRICES`. `llm_providers` falls back to
+`('openai',)` and `llm_models` to `{}`, so `registry.resolve` raised *"LLM_MODELS
+names no models for provider 'openai'"* at the first model call of every run.
+
+`ops/docker-compose.yml` **already carries that exact sentence**, from when the
+same thing happened in Phase 7: *"a key that exists only in the developer's shell
+reaches the smoke script and never the product."* Compose was fixed then. This
+template was written afterwards and repeated it.
+
+### Three things let it through, and they are the part worth keeping
+
+**The guard was right and its coverage was the gap.** `MODE_REQUIREMENTS` and the
+`degraded` probe shipped in #107 *for this shape of failure* — the docstring says
+"a configuration that promises a mode it cannot serve" — and covered `auth_mode`,
+`secrets_backend` and `artifacts_backend` and not the LLM. So `/healthz` reported
+`ok` while every question failed. Nothing about the mechanism was wrong; its list
+was short. **This is the third time that distinction has mattered** (B-124 is the
+second), and it is worth stating because the instinct on finding a defect past a
+new guard is to distrust the guard — here the repair is two names, not a redesign.
+
+**`check_env.sh` passed**, because its couplings are `KEY=VALUE → COMPANION` and
+this is not a mode being selected. Check 9 is the new shape — `RUN_REQUIRED`, what
+a *run* needs in every mode — and per B-124 it was run against the unfixed tree
+first and reported both missing names before anything was changed.
+
+**The failure was silent where an operator looks.** `_record_failure` wrote the
+reason to `agent_events` and called no logger: 300 lines of API log, no error.
+The person asking saw a generic reason; the operator saw a healthy service; the
+actual sentence needed the platform DSN and a SQL client to read. The owner's
+instruction was to fix that in the same pass rather than defer it to WP12.3.
+
+### And why nobody noticed the missing logging for eleven phases — B-127
+
+**No test in this repository could observe a log line, and none had ever tried.**
+Alembic's `env.py` called `fileConfig(...)`, whose `disable_existing_loggers`
+defaults to **True**, so migrating at session start switched off every
+`dataagent.*` logger for the rest of the process.
+
+**The asymmetry is the finding.** An assertion that a line *is* logged fails
+loudly — that is how this was found. An assertion that *nothing* was logged
+passes **vacuously**, and that is exactly the shape a **control** case takes:
+B-126's own "a successful run logs no error", written to prove the positive tests
+are not satisfied by a runner that logs on every path, would have passed against
+a runner that logged nothing anywhere. Fourth instance of a check that cannot
+fail.
+
+**Measured rather than assumed:** searching the suite for `caplog`,
+`LogCaptureFixture`, `assertLogs`, `capsys`/`capfd` and logger patching returns
+**one file — the one B-126 added**. So nothing was quietly passing; the capability
+had never been used, and the unfalsifiability was latent until somebody tried.
+Thirteen call sites across nine modules were unobservable, including the records
+of last resort — `auth/audit.py` when an audit row cannot be written,
+`db/security_events.py` when a security event cannot be written — where the log
+line *is* the record.
+
+**Not a production outage**, and worth saying so: nothing under `src/dataagent`
+runs Alembic in-process, so the deployed API's logs were always real. What was
+disabled was the ability to test logging. Fixed here, with
+`tests/test_logging_is_observable.py` as the guard — and that guard requests the
+migration fixture on purpose, because without it the guard passes against the
+defect and becomes the fifth instance.
+
+### What is not fixed
+
+Nothing is deployed from this yet. Two PRs are open: **#107** (Key Vault Secrets
+Officer, `MODE_REQUIREMENTS`, degraded `/healthz`, D-042) and this one, which is
+branched from it because it builds directly on `missing_for_mode`. #107 merges
+first.
 
 ---
 

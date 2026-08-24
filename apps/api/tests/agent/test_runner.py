@@ -24,6 +24,7 @@ reading failures.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 from datetime import UTC, date, datetime
@@ -954,3 +955,97 @@ async def test_the_verdict_schema_is_enforced(context: ToolContext, fake_llm: Fa
     # The run does not silently accept it. It fails as a platform error rather
     # than passing an unvalidated verdict off as a review.
     assert outcome.status == "failed"
+
+
+# ---------------------------------------------------------------------------
+# The failure an operator has to be able to read (B-126)
+# ---------------------------------------------------------------------------
+
+
+async def test_a_deployment_with_no_model_configuration_fails_every_run(
+    context: ToolContext, fake_llm: FakeLLM, caplog: pytest.LogCaptureFixture
+) -> None:
+    """**The configuration that shipped to dev, driven the way the product does.**
+
+    `apps.bicep` set `OPENAI_API_KEY` and none of the `LLM_*` variables, so the
+    deployed API had a credential and an empty `llm_models`. Every question asked
+    in the browser ended `failed` with *"The run could not be completed."* — and
+    the API logs held no error at all, so there was no way to tell a broken
+    platform from a bad question without the platform DSN and a SQL client.
+
+    This drives `execute_run` with exactly that configuration rather than calling
+    `registry.resolve` directly, because the defect was never in `resolve` — it
+    raised precisely as designed. What was missing was anything that carried its
+    sentence to somebody who could act on it.
+    """
+    run_id = await _run_for(context, "How many shops?")
+
+    with caplog.at_level(logging.ERROR, logger="dataagent.agent.runner"):
+        outcome = await execute_run(
+            org_id=context.org_id,
+            run_id=run_id,
+            data_source_id=context.data_source_id or uuid.uuid4(),
+            actor_user_id=context.actor_user_id,
+            settings=build_settings(llm_models={}),
+        )
+
+    assert outcome.status == "failed"
+
+    # The operator's half: the log names the run and the variable to set.
+    assert str(run_id) in caplog.text
+    assert "LLM_MODELS" in caplog.text
+
+    # The stored half, unchanged: the trace still carries the reason, and the
+    # person asking still gets the generic message rather than a provider error.
+    events = await read_events(org_id=context.org_id, run_id=run_id)
+    errors = [event for event in events if event.type == "error"]
+    assert errors, "a failed run recorded no error event"
+    assert "LLM_MODELS" in json.dumps(errors[-1].payload)
+
+    view = await runs.get_run(org_id=context.org_id, run_id=run_id)
+    assert view.status == "failed"
+    assert view.finished_at is not None
+
+
+async def test_an_internal_failure_is_logged_too_and_not_only_the_llm_kind(
+    context: ToolContext,
+    fake_llm: FakeLLM,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other call site. Two `except` blocks record a failure and both had to
+    learn to say so — a fix applied to one of them would leave the silent case
+    that is hardest to diagnose, since an internal error has no provider to
+    blame."""
+    from dataagent.agent import runner as runner_module
+
+    async def explode(**kwargs: object) -> object:
+        raise RuntimeError("something nobody predicted")
+
+    monkeypatch.setattr(runner_module, "research", explode)
+    run_id = await _run_for(context, "How many shops?")
+
+    with caplog.at_level(logging.ERROR, logger="dataagent.agent.runner"):
+        outcome = await _execute(context, run_id)
+
+    assert outcome.status == "failed"
+    assert str(run_id) in caplog.text
+    assert "something nobody predicted" in caplog.text
+
+
+async def test_a_run_that_succeeds_logs_no_error(
+    context: ToolContext, fake_llm: FakeLLM, caplog: pytest.LogCaptureFixture
+) -> None:
+    """**The control.** Without it both tests above are satisfied by a runner that
+    logs an error on every run, which would be its own kind of unreadable log."""
+    fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql")
+    fake_llm.script(_reflect(), role="plan")
+    fake_llm.script(_cites_the_execution, role="compose")
+    fake_llm.script(_passes(), role="critic")
+    run_id = await _run_for(context, "How many shops are there?")
+
+    with caplog.at_level(logging.ERROR, logger="dataagent.agent.runner"):
+        outcome = await _execute(context, run_id)
+
+    assert outcome.status == "completed"
+    assert caplog.text == ""

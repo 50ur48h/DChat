@@ -203,6 +203,13 @@ def settings() -> Settings:
         # omission rather than on purpose.
         oidc_authority="https://tests.ciamlogin.com/tenant/v2.0",
         local_secrets_key=SecretStr(Fernet.generate_key().decode()),
+        # **The third thing that fixture was missing, for the same reason**
+        # (**B-126**). `llm_providers` defaults to `("openai",)` and `llm_models`
+        # to `{}`, which is a deployment that boots and fails every question at
+        # its first model call — so `missing_for_mode` reports `LLM_MODELS` and
+        # the probe reports `degraded`. No key is set and none is needed: what is
+        # declared here is which models exist, not permission to call them.
+        llm_models={"openai": {"small": "test-s", "mid": "test-m", "strong": "test-l"}},
     )
 
 
