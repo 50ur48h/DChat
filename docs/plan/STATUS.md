@@ -62,10 +62,55 @@ Blocked on user: **yes — WP12.2 cannot start.** Two owner tasks, written out a
                  (P1)** and with it the Phase 6 gate; it blocks nothing in
                  Phase 12 either, and WP12.4 turns nightly evals on against dev,
                  so B-029 wants an answer before that gate rather than after.
-Last updated: 2026-08-24 by Claude Code (WP12.2 merged (#98, #99); the first deploy
-              dispatch failed at Azure sign-in and created nothing — GitHub now issues an
-              ID-qualified OIDC subject and #92's instructions are stale; two federated
-              credentials are owed from the owner before a re-dispatch)
+Last updated: 2026-08-24 by Claude Code (WP12.2 merged; OIDC fixed by the owner and
+              sign-in now succeeds. The second dispatch **created ten resources** and failed
+              on the Container Apps environment — `log-analytics` needs a shared key the
+              template deliberately refuses to hold. Moving to `azure-monitor`; **dev is
+              billing (~$18-21/mo) and nothing serves yet**)
+
+---
+
+## The second dispatch, 2026-08-24 — ten resources created, and the apps refused
+
+**Sign-in succeeded.** The owner added federated credentials matching the
+ID-qualified subject GitHub actually sends, for `dev` and `prod`, and left the two
+old-format ones in place as a record. Four credentials, and the door opened.
+
+**Then phase 1 created ten resources and failed on the eleventh.** Present and
+billing in `rg-dataagent-dev`: `psql-dataagent-dev` (Standard_B1ms, 32 GB, PG 16,
+**Ready** — the only always-on cost), `crdataagentdevv4ilto`,
+`kv-dataagent-dev-v4ilto` (**empty**, seeding never ran), `stdataagentdevv4ilto`,
+`log-dataagent-dev`, `appi-dataagent-dev`, `vnet-dataagent-dev`, the private DNS
+zone and its link, and `id-dataagent-dev`. **Not created**: the Container Apps
+environment, both apps, the migration job. **There is no dev URL yet.** Roughly
+**$18-21 a month**, almost all Postgres and ACR.
+
+```
+Microsoft.App/managedEnvironments (2024-03-01) preflight:
+LogAnalyticsConfiguration is invalid. Must provide a valid LogAnalyticsConfiguration
+```
+
+`apps.bicep` asked for `destination: 'log-analytics'` with a `customerId` and no
+`sharedKey`, under a comment saying the environment writes with its own identity.
+It does not — that destination requires both — so the environment could never
+have been created as written.
+
+**The owner chose `azure-monitor` plus a diagnostic setting over a one-line
+`listKeys()`**: the second would have reinstated the single secret WP12.1
+designed out *while looking like it had not*, and a credential-free template is
+the point of this phase rather than a nicety. The environment is now also gated
+on `deployApps || deployJobs` — it was unconditional, so a phase-4 resource
+failed a phase-1 pass, which the owner called "a lie about where the risk is".
+
+**Filed as B-122, and it is the more general finding.** Every `what-if` returned
+`Succeeded` and every one also reported `NestedDeploymentShortCircuited` for
+`apps`, `roles` and `postgres` — the three modules whose parameters come from
+earlier modules' outputs. **Three of ten modules were never validated**, and they
+are the app, its permissions and its database. No pre-flight check in this
+repository could have caught this, which is B-120's shape one level out: parts
+individually correct, never checked against each other, and only a real
+deployment closes the gap. `infra/README.md` now says to read the `diagnostics`
+array rather than `status`.
 
 ---
 
