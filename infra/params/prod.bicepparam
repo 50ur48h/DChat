@@ -61,3 +61,6 @@ param maxReplicas = 10
 param monthlyBudgetUsd = 200
 
 param budgetStartDate = '2026-09-01'
+
+param oidcAuthority = readEnvironmentVariable('OIDC_AUTHORITY')
+param oidcAudience = readEnvironmentVariable('OIDC_AUDIENCE')

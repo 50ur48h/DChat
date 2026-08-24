@@ -32,6 +32,12 @@ param infrastructureSubnetId string
 @description('The Log Analytics workspace resource id. A diagnostic setting routes the environment logs there; the environment itself is told nothing about the workspace, which is what keeps this template free of a shared key.')
 param logAnalyticsWorkspaceId string
 
+@description('Where the identity provider publishes its discovery document. Required whenever AUTH_MODE is entra, which in a deployment it always is.')
+param oidcAuthority string
+
+@description('The audience every accepted token must carry. Comma-separated when one API is known by more than one name.')
+param oidcAudience string
+
 @description('Application Insights connection string, for OTel.')
 param insightsConnectionString string
 
@@ -262,6 +268,25 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
             {
               name: 'AUTH_MODE'
               value: 'entra'
+            }
+            {
+              // **Set here or the mode above is a promise the API cannot keep.**
+              // `AUTH_MODE=entra` with no authority raises at the first
+              // authenticated request: *"there is nothing to discover signing
+              // keys from, and every token would have to be taken on trust"* —
+              // which is `config.py` refusing correctly and a deployment that
+              // never gave it the chance. B-120's shape a third time: a mode
+              // selected without what the mode needs.
+              name: 'OIDC_AUTHORITY'
+              value: oidcAuthority
+            }
+            {
+              // Not a secret and not derivable from the authority: an Entra v2
+              // access token carries the resource's client-ID GUID while a v1
+              // token carries its `api://` URI, and both name this API, so the
+              // deployment passes whichever pair its registration issues.
+              name: 'OIDC_AUDIENCE'
+              value: oidcAudience
             }
             {
               // Never set before, so the API defaulted to `http://localhost:3000`

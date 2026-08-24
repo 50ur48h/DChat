@@ -337,11 +337,20 @@ check_every_infra_key_is_read() {
 # --- 8. A selected backend gets what it needs -------------------------------
 #
 # `KEY | VALUE | COMPANION` -- when a template sets KEY to VALUE, it must also set
-# COMPANION. Two entries, and both are couplings the application cannot default
-# its way out of: the backend is chosen and the address it needs is not.
+# COMPANION. Each is a coupling the application cannot default its way out of:
+# the mode is chosen and the thing that mode requires is not.
+#
+# The third entry was added after it happened. `apps.bicep` set `AUTH_MODE=entra`
+# and no `OIDC_AUTHORITY`, so the deployed API raised at the first authenticated
+# request -- "there is nothing to discover signing keys from, and every token
+# would have to be taken on trust" -- which is `config.py` refusing exactly as it
+# should, about a deployment that never gave it the chance. Three couplings, all
+# three found by a deployment failing rather than by this check, which is why
+# each one is here now.
 readonly BACKEND_REQUIRES='
 SECRETS_BACKEND | keyvault | KEY_VAULT_URL
 ARTIFACTS_BACKEND | blob | ARTIFACTS_ACCOUNT_URL
+AUTH_MODE | entra | OIDC_AUTHORITY
 '
 
 check_selected_backends_have_what_they_need() {
