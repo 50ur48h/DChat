@@ -243,6 +243,11 @@ None of these is forgotten; each is a deliberate deferral with a reason.
   onto 24. A warning today, a broken pipeline when the shim is removed.
 * **B-129**: `storage.bicep` creates a `documents` container nothing uses, outside
   the retention rule and with no tenant-prefix convention behind it.
+* **B-132**: the `docker` job runs **only on `main`**, so its failures are invisible
+  to the PR that causes them — it had been red on every merge for a day before
+  anyone looked. Fixed with a placeholder build arg; running it where a PR can see
+  it is deferred, because that costs an image build per PR and the CI-duration
+  question above should be answered first rather than worked around.
 
 ## State: what runs where, and what data is where
 

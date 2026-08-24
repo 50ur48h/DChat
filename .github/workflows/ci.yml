@@ -645,5 +645,18 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build the API image
         run: docker build --target prod --build-arg GIT_SHA=${{ github.sha }} -t api:ci apps/api
+      # **A placeholder, and it must be one that can never resolve** (B-132).
+      # `apps/web/Dockerfile` refuses to build without `NEXT_PUBLIC_API_URL`,
+      # because that value is inlined into the browser bundle and an image built
+      # without it can never reach an API. That guard is right, and this job was
+      # passing no build args at all — so it failed on every merge to main.
+      #
+      # `.invalid` is RFC 2606's reserved TLD: it is guaranteed never to resolve,
+      # anywhere, so the image this produces cannot be mistaken for a deployable
+      # one or accidentally point at something real. The deployable image is built
+      # by `deploy.yml`, with the real values from the `dev` environment.
+      #
+      # What this job proves is therefore exactly one thing: **the image builds**.
+      # It is not a deployment artifact and nothing should pull it.
       - name: Build the web image
-        run: docker build --target prod -t web:ci apps/web
+        run: docker build --target prod --build-arg NEXT_PUBLIC_API_URL=https://api.ci.invalid -t web:ci apps/web
