@@ -119,6 +119,32 @@ were never checked against each other. There the gap was between the templates
 and `Settings`; here it is between the template and Azure, and the honest summary
 is that only a deployment closes it.
 
+### Three failures, one shape
+
+Standing up `dev` for the first time took three dispatches, and it is worth
+listing them together because the *pattern* is more useful than any of them:
+
+| Failed at | Why | What could have caught it beforehand |
+|---|---|---|
+| Azure sign-in | GitHub now issues an **ID-qualified** OIDC subject; the federated credentials matched the documented format | Nothing. The instructions were right when written and the platform default moved |
+| Container Apps environment | `destination: 'log-analytics'` requires a `sharedKey` the template deliberately refuses to hold | Nothing. `what-if` short-circuits the `apps` module every time |
+| Image build | `az acr build` uses the classic Docker builder; the Dockerfile uses `RUN --mount=`, which is BuildKit-only | Nothing. Local, CI and the compose smoke all use BuildKit, so the file is correct everywhere it had been exercised |
+
+**Every one is a file that was correct everywhere it had been exercised, meeting
+a platform that does it differently.** Not one was a mistake in the sense of
+somebody writing something they should have known was wrong; not one was
+reachable by any check in this repository; and each was found in seconds once the
+real platform saw it. The compiled template, the passing guard and the green
+`what-if` were all true statements about things that turned out not to be the
+question.
+
+The practical consequence for anyone doing this again: **budget for the first
+deployment of anything to fail two or three times, and make each failure cheap
+rather than trying to prevent it.** That is why the pipeline is phased — a
+failure in phase 3 leaves phases 1 and 2 done and idempotent, so the next attempt
+starts where the last one stopped instead of from nothing. All three of these
+were resumable, and the resource group was never left half-written.
+
 ## Two rules that shaped every file
 
 **No secret value appears in this directory.** Key Vault is created empty and its

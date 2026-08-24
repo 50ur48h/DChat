@@ -105,16 +105,38 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
 
-      # `az acr build` rather than docker build + push: the build happens in the
-      # registry's own build service, so this runner never holds a registry
-      # credential and there is nothing to leak in a log. It also means the image
-      # is built on the architecture it will run on.
+      # **Built on the runner with BuildKit, then pushed.** `az acr build` was the
+      # first choice and it cannot run this Dockerfile: ACR Tasks uses the classic
+      # Docker builder, and `apps/api/Dockerfile` uses `RUN --mount=` for uv's
+      # cache and the lockfile bind — BuildKit-only syntax. The first real attempt
+      # died at step 5 of 42 with `the --mount option requires BuildKit`. The
+      # Dockerfile is written for BuildKit and every other build of it — local,
+      # CI, the compose smoke — uses BuildKit, so building it anywhere else is the
+      # anomaly rather than the file being wrong.
+      #
+      # **What this costs, stated accurately.** The previous comment here claimed
+      # the runner never holds a registry credential. That is no longer true and
+      # an overstated comment is worse than an accurate weaker one: `az acr login`
+      # exchanges the OIDC session already established above for a **short-lived**
+      # ACR refresh token, written to this ephemeral runner's Docker config and
+      # gone with it. Nothing is stored, no secret exists in this repository or in
+      # the environment, and the token cannot outlive the job — but the runner does
+      # hold a credential for the length of the build, and that is the honest
+      # description.
       - name: Build and push the images
+        env:
+          DOCKER_BUILDKIT: "1"
         run: |
           registry='${{ steps.infra.outputs.registry }}'
-          acr="${registry%%.*}"
-          az acr build --registry "$acr" --image "dataagent-api:${IMAGE_TAG}"             --build-arg "GIT_SHA=${GITHUB_SHA}" --target prod apps/api
-          az acr build --registry "$acr" --image "dataagent-web:${IMAGE_TAG}"             --build-arg "GIT_SHA=${GITHUB_SHA}" --target prod apps/web
+          az acr login --name "${registry%%.*}"
+          for app in api web; do
+            docker build \
+              --target prod \
+              --build-arg "GIT_SHA=${GITHUB_SHA}" \
+              --tag "${registry}/dataagent-${app}:${IMAGE_TAG}" \
+              "apps/${app}"
+            docker push "${registry}/dataagent-${app}:${IMAGE_TAG}"
+          done
 
       # **Phase 3 — the migration job, still without the apps.** It exists now
       # because the vault has what it reads and the image it runs exists.
