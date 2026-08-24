@@ -21,6 +21,7 @@ from alembic.config import Config
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from pydantic import SecretStr
 from sqlalchemy import URL, make_url, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -193,6 +194,15 @@ def settings() -> Settings:
         build_env="dev",
         git_sha="testsha",
         log_level="WARNING",
+        # **A configuration that could actually serve.** Without these two the
+        # fixture is `AUTH_MODE=entra` with no authority and a local secrets
+        # backend with no key — a deployment that boots and refuses every
+        # authenticated request, which is exactly the shape `/healthz` now
+        # reports as `degraded`. Leaving them unset would have made the probe's
+        # "ok" test assert nothing, and the fixture was only ever incomplete by
+        # omission rather than on purpose.
+        oidc_authority="https://tests.ciamlogin.com/tenant/v2.0",
+        local_secrets_key=SecretStr(Fernet.generate_key().decode()),
     )
 
 

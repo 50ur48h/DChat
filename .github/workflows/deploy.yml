@@ -53,6 +53,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # **Fail before touching Azure if a required variable is empty.**
+      # `check_env.sh` proves the *template* sets a name; nothing proved the
+      # name had a value. `OIDC_AUTHORITY` was believed added and was not, so
+      # the template dutifully set it to an empty string, the deploy went green,
+      # and the API refused every authenticated request — a value-level version
+      # of the same omission the guard exists for. Ten seconds here beats a
+      # fifteen-minute round trip and a 500 in a browser.
+      - name: Check the deployment has what it needs
+        env:
+          OIDC_AUTHORITY: ${{ vars.OIDC_AUTHORITY }}
+          OIDC_AUDIENCE: ${{ vars.OIDC_AUDIENCE }}
+          POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
+          BUDGET_ALERT_EMAIL: ${{ secrets.BUDGET_ALERT_EMAIL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          NEXT_PUBLIC_ENTRA_AUTHORITY: ${{ vars.NEXT_PUBLIC_ENTRA_AUTHORITY }}
+          NEXT_PUBLIC_ENTRA_CLIENT_ID: ${{ vars.NEXT_PUBLIC_ENTRA_CLIENT_ID }}
+          NEXT_PUBLIC_API_SCOPE: ${{ vars.NEXT_PUBLIC_API_SCOPE }}
+        run: |
+          missing=''
+          for name in OIDC_AUTHORITY OIDC_AUDIENCE POSTGRES_ADMIN_PASSWORD \
+            BUDGET_ALERT_EMAIL OPENAI_API_KEY NEXT_PUBLIC_ENTRA_AUTHORITY \
+            NEXT_PUBLIC_ENTRA_CLIENT_ID NEXT_PUBLIC_API_SCOPE; do
+            eval "value=${${$name}}"
+            [ -n "$value" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Empty in the dev environment:$missing" >&2
+            echo "Secrets are secrets/, variables are vars/ — a value set in the wrong" >&2
+            echo "place reads as empty here and deploys an app that refuses requests." >&2
+            exit 1
+          fi
+          echo "Every required secret and variable has a value."
+
       - name: Sign in to Azure with OIDC
         uses: azure/login@v2
         with:

@@ -4,6 +4,42 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-042 — WP12.4's gate, amended for a dev that holds no data
+Date: 2026-08-24 · Phase: 12 · PR: #107 · Migration: none
+Context: the owner ruled on 2026-08-24 that **dev proves the deployment path and
+never hosts a demo** — no customer data, no fixtures, no registered data source,
+because registering one means a credential to a real database in a subscription
+with a public hostname. That rule is right and it makes three lines of WP12.4's
+gate unsatisfiable as written, each of which assumes dev can answer a question
+about somebody's data.
+Options: (a) leave the gate as written and quietly fail it, or quietly seed dev
+to pass it — the second is what the rule exists to prevent and the first makes
+the gate decorative; (b) amend the three lines and say what replaces each; (c)
+drop the three criteria, which loses the property each was protecting.
+Decision: **(b)**, three amendments.
+**1. "Quota hard-stop proven in dev" → proven against the deployed API with a
+seeded ledger.** A quota stops a run; a run needs a data source; dev has none.
+Seeding `usage_ledger` directly and watching the deployed API refuse proves the
+same enforcement — the ledger is what the quota reads — without a query behind
+it. Still proven in dev, still against real infrastructure.
+**2. "Nightly evals enabled against dev" → they stay local and in CI.** The
+evals need the pizza fixture, which is a compose service; running them against
+dev would mean deploying a seed database, which is precisely the forbidden thing.
+This is the one criterion that is genuinely dropped rather than restated, and the
+honest reason is that it was written before the dev rule existed.
+**3. The restore drill records that it restored an empty schema.** Restoring,
+running the migration check and the RLS proof against a fresh server still proves
+the backup and the recovery path. What it cannot prove is that customer data
+survives, because there is none — and the evidence in `docs/hardening-v1.md` says
+so, or a later reader takes it for a guarantee it never made.
+Consequences: the gate is weaker in one place (no live eval run against a
+deployed environment) and unchanged in the rest — ASVS-lite, dependency audit,
+rate limits, managed identity, `v1.0.0` from dev. The lost property is that
+nothing exercises a real model against real infrastructure before v1.0; the
+compensating position is that the local live walks do exercise it, and that
+**B-029** already tracks the provider coverage gap. Architecture Part 14's
+acceptance list is edited in the same PR, as §1.6 requires.
+
 ## D-041 — Phase 12 stands up dev only; prod is a documented next step
 Date: 2026-08-22 · Phase: 12 · PR: #92 (WP12.1) · Migration: none
 Context: Architecture 9.1 says in as many words *"two environments (`dev`,

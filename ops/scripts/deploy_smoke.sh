@@ -73,9 +73,29 @@ echo "2. The API answers /healthz, and names the sha this deploy pushed"
 # smoke against a working system, they stop reading it. `exec` was only ever
 # needed because the API had no public hostname; it has one now, so the smoke can
 # ask the API the same question a user's browser will.
-HEALTH=$(curl -s --max-time 30 "${API_URL}/healthz" || echo '')
+# **Retried, for the reason check 1 is.** This had a single 30-second attempt
+# while the web app got ten tries over a minute, and the asymmetry cost a red
+# deploy on a perfectly good revision: `minReplicas: 0` means the API is cold
+# when the smoke arrives, and a check that fails on a cold start is a check
+# people learn to re-run rather than read.
+HEALTH=''
+attempt=0
+while [ "$attempt" -lt 10 ]; do
+  HEALTH=$(curl -s --max-time 20 "${API_URL}/healthz" || echo '')
+  case "$HEALTH" in
+  *'"status":'*) break ;;
+  esac
+  attempt=$((attempt + 1))
+  sleep 6
+done
+
 case "$HEALTH" in
 *'"status":"ok"'*) echo "   $HEALTH" ;;
+*'"status":"degraded"'*)
+  # The probe naming its own missing configuration. Worth failing on: the app is
+  # running and cannot serve the mode it was deployed with.
+  fail "the API reports degraded — it is missing configuration it needs: $HEALTH"
+  ;;
 *) fail "the API did not report healthy at ${API_URL}/healthz: ${HEALTH:-no response}" ;;
 esac
 

@@ -1053,7 +1053,7 @@ Ordering logic: **skeleton → identity → data path with security → single-s
 
 **M11 — Charts + product polish.** *Objective:* demo-complete UX. *Components:* chart tool + renderer, conversation history, catalog & members UI polish. *Accept:* "show me the trend" → validated spec → rendered chart; spec validator rejects malformed output.
 
-**M12 — Azure deploy + hardening.** *Objective:* live on Azure, safely. *Components:* infra/, CI deploy, quotas, alerts. *Accept:* dev+prod up via Bicep; managed identity to KV (zero secrets in pipeline); org quota hard-stop proven; restore-from-backup drill done; pen-test checklist (OWASP ASVS-lite) passed. *Tests:* smoke suite post-deploy; nightly evals with token cap.
+**M12 — Azure deploy + hardening.** *Objective:* live on Azure, safely. *Components:* infra/, CI deploy, quotas, alerts. *Accept:* dev up via Bicep (**prod deferred — D-041**); managed identity to KV (zero secrets in pipeline); org quota hard-stop proven **against a seeded `usage_ledger`, since dev holds no data source — D-042**; restore-from-backup drill done **and recorded as restoring an empty schema — D-042**; pen-test checklist (OWASP ASVS-lite) passed. *Tests:* smoke suite post-deploy; ~~nightly evals with token cap~~ **against dev — dropped, they need the compose-only pizza fixture and stay local and in CI (D-042)**.
 
 ---
 

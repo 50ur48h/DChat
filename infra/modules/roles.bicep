@@ -27,10 +27,30 @@ param storageAccountName string
 @description('Container registry, from acr.bicep.')
 param registryName string
 
-// Key Vault Secrets User — read a secret's value. Deliberately not Secrets
-// Officer, which can also write and delete: the application reads the OpenAI
-// key and has no business rotating it.
-var keyVaultSecretsUser = '4633458b-17de-408a-b874-0445c86b69e6'
+// **Key Vault Secrets Officer — read, write and delete a secret's value.**
+//
+// This was `Key Vault Secrets User` (read-only), on the reasoning that "the
+// application reads the OpenAI key and has no business rotating it". That is
+// true of the *configuration* secrets and misses what the product does: the
+// central act of registering a data source **writes a customer's database
+// credential to this vault** (`SecretsProvider.put`, architecture 7.3), and
+// deleting a data source deletes it again. Read-only was the narrowest role for
+// the job the author had in mind, not for the job the application performs.
+//
+// It failed exactly where the design says it would — nowhere until a real
+// registration, which is the first thing a customer does and the last thing a
+// deployment exercises:
+//
+//   ForbiddenByRbac — Microsoft.KeyVault/vaults/secrets/setSecret/action
+//   Assignment: (not found)
+//
+// **Officer is still the narrowest built-in that can do it.** The alternative is
+// a custom role definition holding exactly get/set/delete, which is a further
+// object to define, version and grant, and needs a larger permission to create
+// than this pipeline holds. If the extra verbs Officer carries — backup,
+// restore, recover, purge — ever matter, the custom role is the answer and this
+// comment is where to start.
+var keyVaultSecretsOfficer = 'b86a8fe4-44ce-4948-aff7-8adaef4a4c62'
 
 // Storage Blob Data Contributor — read and write blobs within the account.
 // Contributor rather than Reader because the artifact store writes; not
@@ -59,11 +79,11 @@ resource registry 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' ex
 // and distinct per triple so the three cannot collide.
 resource secretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: vault
-  name: guid(vault.id, principalId, keyVaultSecretsUser)
+  name: guid(vault.id, principalId, keyVaultSecretsOfficer)
   properties: {
     roleDefinitionId: subscriptionResourceId(
       'Microsoft.Authorization/roleDefinitions',
-      keyVaultSecretsUser
+      keyVaultSecretsOfficer
     )
     principalId: principalId
     // Stated explicitly. Without it, Azure resolves the principal type by
