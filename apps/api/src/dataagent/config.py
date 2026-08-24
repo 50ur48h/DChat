@@ -23,6 +23,29 @@ SecretsBackend = Literal["local", "keyvault"]
 #: losing an artifact and leaking a credential the same decision.
 ArtifactsBackend = Literal["local", "blob"]
 
+#: **What each mode requires, declared once and read by three things.**
+#:
+#: Keyed by ``(field, value)``: when that field holds that value, every field
+#: named must be set. `Settings.missing_for_mode` reads it, `/healthz` reports
+#: `degraded` from it, and `scripts/check_env.sh` keeps a copy that a test
+#: asserts is equal — the arrangement `TENANT_TABLES` has with revision 0002.
+#:
+#: **The direction is the point.** Before this, the deployment templates were
+#: checked against a list of couplings somebody had already been bitten by:
+#: `SECRETS_BACKEND=keyvault` needing `KEY_VAULT_URL`, then
+#: `ARTIFACTS_BACKEND=blob` needing an account URL, then `AUTH_MODE=entra`
+#: needing an authority. Each was added *after* a deployment failed on it, which
+#: made the guard a record of past failures rather than a detector of the next
+#: one. This table is derived from what the **application** refuses to run
+#: without, so a new requirement added here fails the template check before
+#: anything is deployed.
+MODE_REQUIREMENTS: dict[tuple[str, str], tuple[str, ...]] = {
+    ("auth_mode", "entra"): ("oidc_authority",),
+    ("secrets_backend", "keyvault"): ("key_vault_url",),
+    ("secrets_backend", "local"): ("local_secrets_key",),
+    ("artifacts_backend", "blob"): ("artifacts_account_url",),
+}
+
 #: How much encryption a connection to a *customer's* database must have, spelled
 #: the way libpq spells it so the words mean what an operator already thinks they
 #: mean. ``allow`` is deliberately absent: "try plaintext first, then TLS" is a
@@ -632,6 +655,27 @@ class Settings(BaseSettings):
             return self.local_secrets_path
         root = _REPO_ENV_FILE.parent if _REPO_ENV_FILE else Path()
         return root / LOCAL_SECRETS_RELATIVE_PATH
+
+    def missing_for_mode(self) -> list[str]:
+        """Settings this configuration promises and does not supply.
+
+        Every entry is a deployment that will boot, pass a liveness probe, and
+        then refuse the first request that reaches the part it lied about — which
+        is how `AUTH_MODE=entra` with no `OIDC_AUTHORITY` reached production and
+        answered 500 to every authenticated route while `/healthz` stayed green.
+
+        Returned as environment-variable names because that is what the reader
+        has to go and set.
+        """
+        missing: list[str] = []
+        for (field, expected), required in MODE_REQUIREMENTS.items():
+            if str(getattr(self, field, None)) != expected:
+                continue
+            for name in required:
+                value = getattr(self, name, None)
+                if value is None or (isinstance(value, str) and not value.strip()):
+                    missing.append(name.upper())
+        return sorted(set(missing))
 
     def require_database_url(self) -> str:
         """The owner DSN, or a failure that names the fix.
