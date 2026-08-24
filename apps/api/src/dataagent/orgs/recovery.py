@@ -36,12 +36,11 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
-from dataagent.db.engine import system_session
-from dataagent.db.models import Organization, OrgMembership, OrgRecoveryGrant, User
+from dataagent.db.models import OrgMembership, OrgRecoveryGrant, User
 from dataagent.orgs.service import ConflictError, audit
-from dataagent.tenancy.session import org_session
+from dataagent.tenancy.session import app_session, org_session
 
 __all__ = [
     "ClaimedRecovery",
@@ -249,31 +248,29 @@ async def claim_recovery(*, user: User, token: str) -> ClaimedRecovery:
     """
     invalid = ConflictError("That recovery grant is not valid.")
 
-    async with system_session() as session:
-        grant = (
-            (
-                await session.execute(
-                    select(OrgRecoveryGrant).where(OrgRecoveryGrant.token_hash == hash_token(token))
-                )
+    # Same shape as `accept_invitation`: the token is all that is known, and the
+    # organization is what the lookup answers, so there is nothing to scope by
+    # (B-123). Every write below happens inside `org_session`.
+    async with app_session() as session:
+        found = (
+            await session.execute(
+                text(
+                    "SELECT id, org_id, org_name, expires_at, used_at, revoked_at "
+                    "FROM auth_recovery_grant_by_token(CAST(:token_hash AS varchar))"
+                ),
+                {"token_hash": hash_token(token)},
             )
-            .scalars()
-            .one_or_none()
-        )
-        if grant is None or grant.used_at is not None or grant.revoked_at is not None:
-            raise invalid
-        if grant.expires_at <= datetime.now(UTC):
-            raise invalid
-        org_name = (
-            (
-                await session.execute(
-                    select(Organization.name).where(Organization.id == grant.org_id)
-                )
-            )
-            .scalars()
-            .one()
-        )
+        ).one_or_none()
 
-    org_id = grant.org_id
+    if found is None or found.used_at is not None or found.revoked_at is not None:
+        raise invalid
+    if found.expires_at <= datetime.now(UTC):
+        raise invalid
+
+    grant_id = found.id
+    org_name = found.org_name
+
+    org_id = found.org_id
 
     async with org_session(org_id) as session:
         # Re-read inside the org session, and mark it used *there*. Two requests
@@ -284,7 +281,7 @@ async def claim_recovery(*, user: User, token: str) -> ClaimedRecovery:
             (
                 await session.execute(
                     select(OrgRecoveryGrant).where(
-                        OrgRecoveryGrant.id == grant.id, OrgRecoveryGrant.used_at.is_(None)
+                        OrgRecoveryGrant.id == grant_id, OrgRecoveryGrant.used_at.is_(None)
                     )
                 )
             )
@@ -320,7 +317,7 @@ async def claim_recovery(*, user: User, token: str) -> ClaimedRecovery:
             actor_user_id=user.id,
             action="org.recovery_claimed",
             object_type="recovery_grant",
-            object_id=str(grant.id),
+            object_id=str(grant_id),
             details={"label": held.label, "was_member": was_member, "previous_role": previous},
         )
 

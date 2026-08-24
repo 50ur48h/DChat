@@ -1,9 +1,19 @@
 """The only way feature code reaches the platform database.
 
-Every session opened here runs inside one transaction that begins by setting
-``app.org_id``, which is what the row-level security policies from revision 0002
-read. There is no variant that yields an unscoped connection to feature code: the
-scoping is not a parameter callers may omit, it is the constructor.
+Every session opened here connects as ``dataagent_app`` — no superuser, no
+BYPASSRLS, owner of nothing. ``org_session`` additionally runs inside one
+transaction that begins by setting ``app.org_id``, which is what the row-level
+security policies from revision 0002 read; the scoping is not a parameter callers
+may omit, it is the constructor.
+
+**There is one unscoped variant, and its limits are the reason it is safe.**
+``app_session`` sets no organization, for the two tables that have none:
+``users``, whose rows exist before any membership does, and ``security_events``,
+which by **D-008** deliberately sits outside ``TENANT_TABLES``. It is *not* a way
+to see across tenants — RLS is still in force and no ``app.org_id`` is set, so a
+caller that reached a tenant table through it would see **nothing**. That is the
+whole difference from ``system_session``, where the same mistake sees everything
+(**B-123**).
 
 ``SET LOCAL`` is transaction-scoped, so the setting is applied *inside* the
 transaction it protects and disappears with it. A connection returned to the pool
@@ -59,6 +69,32 @@ async def org_session(org_id: uuid.UUID) -> AsyncGenerator[AsyncSession]:
     factory = _session_factory()
     async with factory() as session, session.begin():
         await session.execute(_SET_ORG, {"name": ORG_SETTING, "value": str(org_id)})
+        yield session
+
+
+@asynccontextmanager
+async def app_session() -> AsyncGenerator[AsyncSession]:
+    """The application role, with no organization set.
+
+    For the tables that are not tenant-scoped and carry no RLS policy — `users`
+    and `security_events` — and for the audited `SECURITY DEFINER` lookups from
+    revision 0028, which answer the questions that must be asked *before* an
+    organization is known.
+
+    Uses the same factory as `org_session`, deliberately: one engine, one
+    connection pool, and the only difference between them is scoping. That also
+    means every test that redirects `_session_factory` at a test database
+    redirects this too.
+
+    **No `session.begin()`, unlike `org_session`, and the asymmetry is not an
+    oversight.** `org_session` opens the transaction because `SET LOCAL
+    app.org_id` only lives inside one, so the scope and the transaction are the
+    same object. Nothing is set here, so there is nothing to hold open — and the
+    callers moved here from `system_session` commit for themselves, which they
+    could not do inside a `begin()` block.
+    """
+    factory = _session_factory()
+    async with factory() as session:
         yield session
 
 

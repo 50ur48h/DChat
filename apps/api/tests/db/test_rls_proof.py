@@ -673,11 +673,84 @@ async def test_the_api_role_has_no_way_to_bypass_rls(app_database: URL) -> None:
     assert attributes["rolreplication"] is False
 
 
-async def test_the_api_connects_as_the_application_role(app_database: URL) -> None:
+async def test_the_app_dsn_connects_as_the_application_role(app_database: URL) -> None:
+    """That the *DSN* connects as the app role. Necessary, and not the question.
+
+    **This test used to be called `test_the_api_connects_as_the_application_role`
+    and it did not test that** (**B-123**). It opens a connection with the app
+    DSN and asserts the app DSN connects as the app role — true by construction,
+    and silent for eleven phases while the API itself used the *owner* connection
+    on every authenticated request. A test whose name states the guarantee and
+    whose body proves something adjacent is worse than no test: it occupies the
+    space where the real one would have gone.
+
+    Renamed to what it checks. The guarantee it was named for is below.
+    """
     rows = await _rows(app_database, "SELECT current_user, session_user")
 
     assert rows[0][0] == APP_ROLE
     assert rows[0][1] == APP_ROLE
+
+
+async def test_the_api_never_needs_the_owner_connection(
+    app_database: URL, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """**The guarantee itself: take the owner DSN away and the API still works.**
+
+    This reproduces the deployment that found the defect. `apps.bicep` set
+    `APP_DATABASE_URL` and not `DATABASE_URL`, and the API failed at startup and
+    on `/v1/me` with `RuntimeError: DATABASE_URL is not set` — because eight
+    request-path call sites reached for the owner connection that every
+    developer's `.env` had always quietly provided.
+
+    Asserting it this way rather than by grepping for `system_session` is
+    deliberate. A static check would pass the moment somebody wrote a wrapper
+    around it; this passes only if the request path genuinely never opens an
+    owner connection, whatever route it takes to try.
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    import dataagent.db.engine as engine_module
+    import dataagent.tenancy.session as session_module
+    from dataagent.auth.context import resolve_user_id
+    from dataagent.auth.principal import Principal
+    from dataagent.orgs import service as orgs
+
+    # Point the application role's factory at the test database, the way every
+    # other suite here does. Nothing redirects the *owner* engine, because the
+    # point is that nothing should reach for it.
+    app_engine = create_async_engine(app_database)
+    factory = async_sessionmaker(app_engine, expire_on_commit=False, autoflush=False)
+    monkeypatch.setattr(session_module, "_session_factory", lambda: factory)
+
+    # The owner engine is not merely unset — it raises if anything reaches for
+    # it, so a caller that tries is a failure with a name rather than a silent
+    # fallback to a connection that happens to exist in this test process.
+    def _refuse() -> object:
+        raise AssertionError(
+            "the request path opened the owner connection; CLAUDE.md's rule is "
+            "that the API connects as dataagent_app and never as the owner (B-123)"
+        )
+
+    monkeypatch.setattr(engine_module, "get_engine", _refuse)
+
+    principal = Principal(
+        subject=f"sub-{uuid.uuid4()}",
+        email="nobody@example.invalid",
+        name="Nobody",
+    )
+
+    # The two paths every authenticated request takes: find the user, then find
+    # what they are a member of. Both used the owner connection until B-123.
+    user = await orgs.ensure_user(principal)
+    assert user.external_subject == principal.subject
+
+    found = await resolve_user_id(principal)
+    assert found == user.id
+
+    assert await orgs.memberships_for(user.id) == []
+
+    await app_engine.dispose()
 
 
 async def test_the_api_role_owns_no_tenant_table(app_database: URL) -> None:

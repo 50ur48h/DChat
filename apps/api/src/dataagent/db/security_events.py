@@ -16,7 +16,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from dataagent.db.base import Base, CreatedAt
-from dataagent.db.engine import system_session
+from dataagent.tenancy.session import app_session
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,10 @@ async def record_security_event(
     logged loudly instead.
     """
     try:
-        async with system_session() as session:
+        # `security_events` is deliberately outside TENANT_TABLES (D-008), so the
+        # application role can write it without an organization — and must, because
+        # a denial often has no tenant to belong to (B-123).
+        async with app_session() as session:
             session.add(
                 SecurityEvent(
                     action=action,
