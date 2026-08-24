@@ -75,7 +75,14 @@ jobs:
           for name in OIDC_AUTHORITY OIDC_AUDIENCE POSTGRES_ADMIN_PASSWORD \
             BUDGET_ALERT_EMAIL OPENAI_API_KEY NEXT_PUBLIC_ENTRA_AUTHORITY \
             NEXT_PUBLIC_ENTRA_CLIENT_ID NEXT_PUBLIC_API_SCOPE; do
-            eval "value=${${$name}}"
+            # **`${!name}`, bash's indirect expansion.** The first spelling of
+            # this line was `eval "value=${${$name}}"`, which is a *parse* error
+            # — the shell rejects `${${...}}` before `eval` is ever reached — so
+            # the step died with `bad substitution` on a deployment where all
+            # eight values were present and correct. See B-128: a check that
+            # fails for a reason unrelated to what it checks, in the step whose
+            # entire job is to tell the difference.
+            value=${!name}
             [ -n "$value" ] || missing="$missing $name"
           done
           if [ -n "$missing" ]; then
