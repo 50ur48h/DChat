@@ -41,6 +41,17 @@ from dataagent.config import get_settings
 #: one statement.
 APP_ROLE = "dataagent_app"
 
+#: The statement builder, as a constant so it can be **compiled and asserted
+#: without a database**. Every failure this module has had was in how SQLAlchemy
+#: and asyncpg read this one string, and none of them needed Postgres to detect:
+#: written `:pw::text`, SQLAlchemy binds *nothing* — the compiled SQL still holds
+#: a literal `:pw` and the server answers `syntax error at or near ":"`. A test
+#: that compiles this and checks both parameters bound catches that on any
+#: machine, including one whose Docker is broken.
+ALTER_ROLE_SQL = (
+    "SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', CAST(:role AS text), CAST(:pw AS text))"
+)
+
 #: `grant()` takes the role as an argument purely so its refusal path can be
 #: tested against a throwaway role. **`ALTER ROLE` is cluster-global in
 #: PostgreSQL, not per-database**, so a test that gave the real `dataagent_app`
@@ -81,17 +92,18 @@ async def grant(role: str = APP_ROLE) -> int:
             # applied by the server to *bound* parameters, so neither the role
             # name nor the password appears in a string this process concatenates.
             #
-            # The `::text` casts are not decoration. Without them asyncpg cannot
-            # infer a type for a parameter whose only use is inside `format()`
-            # and refuses the statement with `IndeterminateDatatypeError: could
-            # not determine data type of parameter $1` — which is what CI said
-            # the first time this ran.
+            # **The casts are not decoration, and they are spelled `CAST(...)`
+            # for a second reason.** Without a cast, asyncpg cannot infer a type
+            # for a parameter whose only use is inside `format()` and refuses the
+            # statement with `IndeterminateDatatypeError: could not determine
+            # data type of parameter $1`. Written the PostgreSQL way, `:pw::text`,
+            # SQLAlchemy's `text()` mis-parses the `::` against its own `:name`
+            # bind syntax and emits SQL the server rejects with `syntax error at
+            # or near ":"`. `CAST(x AS text)` has no colons in it and satisfies
+            # both. CI said each of those in turn.
             statement = (
                 await connection.execute(
-                    text(
-                        "SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', "
-                        ":role::text, :pw::text)"
-                    ),
+                    text(ALTER_ROLE_SQL),
                     {"role": role, "pw": password},
                 )
             ).scalar_one()

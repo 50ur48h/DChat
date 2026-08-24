@@ -19,12 +19,13 @@ import uuid
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.dialects.postgresql.asyncpg import dialect as asyncpg_dialect
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from dataagent.config import Settings
 from dataagent.db import grant_app_login as module
-from dataagent.db.grant_app_login import APP_ROLE, grant
+from dataagent.db.grant_app_login import ALTER_ROLE_SQL, APP_ROLE, grant
 
 pytestmark = pytest.mark.asyncio
 
@@ -199,3 +200,34 @@ async def test_the_real_role_is_never_given_extra_privilege_by_these_tests(
     facts = await _roles_of(owner_env)
     assert facts["bypassrls"] is False
     assert facts["super"] is False
+
+
+# --------------------------------------------------------------------------
+# The part that needs no database, and would have caught every failure so far.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_both_parameters_actually_bind() -> None:
+    """Compile the statement and check SQLAlchemy bound what we think it bound.
+
+    **Three CI runs died on this one string and not one of them needed Postgres
+    to detect.** Written the PostgreSQL way — `:pw::text` — SQLAlchemy's `text()`
+    binds *nothing*: the compiled SQL still carries a literal `:pw`, `params` is
+    empty, and the server answers `syntax error at or near ":"`. Written without
+    a cast at all, asyncpg cannot infer a type and answers
+    `IndeterminateDatatypeError`.
+
+    This test runs on any machine, including one whose Docker is broken, which is
+    the whole reason it exists: the five tests above skip without a database and
+    a green local run then looks identical to a green one that proved something.
+    """
+    compiled = text(ALTER_ROLE_SQL).compile(dialect=asyncpg_dialect())
+
+    assert set(compiled.params) == {"role", "pw"}
+    # Both placeholders reached the driver as positional parameters, and no
+    # `:name` survived into the SQL the server would see.
+    assert "$1" in str(compiled)
+    assert "$2" in str(compiled)
+    assert ":role" not in str(compiled)
+    assert ":pw" not in str(compiled)
