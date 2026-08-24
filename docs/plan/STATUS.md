@@ -57,6 +57,45 @@ Last updated: 2026-08-25 by Claude Code (**session-end handoff.** Phase 12 stops
 
 ---
 
+## Dev answers questions, 2026-08-25 — and B-119 did not reproduce
+
+The deploy landed on `fa7ace3`. `/healthz` reports
+`{"status":"ok", ..., "missing_settings":[]}` — the degraded probe is checking the
+model configuration and finds nothing missing — and the **identity self-check ran
+for the first time and passed**, so Key Vault write/delete and Blob write/read are
+proven by the pipeline rather than by a person. The vault now holds exactly one
+assignment, created by the template under its own name; B-125 is closed and B-131
+with it.
+
+Two questions against the F&B database, both correct:
+
+* *"how many sales are recorded, and over what date range?"* — **112,327 sales,
+  1 January to 31 December 2025.** One query, one step, high confidence.
+* *"which outlet wastes the most, and what does it cost?"* — **Outlet C, 3.398 kg
+  across 2 waste records**, and no cost, correctly, because no record carries an
+  estimate. Three queries over four steps. It volunteered *"1 of the queries
+  returned no rows, so any part of the answer resting on them is unsupported"* —
+  B-093 and D-034 reaching a reader without being asked.
+
+**The second question is B-119's question, and B-119 did not reproduce.** In August
+the same wording produced `answerable=false`, no query at all, and the invented
+sentence *"the available reference also prohibits combining `fact_waste` with
+`dim_outlet`"*. Today it performed exactly that join.
+
+**Nothing changed underneath it**: the only edit to `runner.py` since B-119 was
+filed is #108's logging, and `capability.py`, `context.py` and `planner.py` are
+untouched. So this is intermittency, not a fix, and B-119 stays **open** — with its
+status amended to say that the bar for calling it fixed is now repeated runs. The
+diagnosis is strengthened rather than weakened: a prompt that makes a wrong reading
+*available* produces it some of the time, which is what priming looks like and is
+not what a deterministic rule looks like.
+
+**The consequence for the next work package is concrete.** A single-shot engine
+trial would have recorded B-119 as resolved today. Repetition is now a requirement
+of the trial loop's first version, written into its section above.
+
+---
+
 # SESSION-END HANDOFF — 2026-08-25
 
 Everything a next session needs is in this file, `BACKLOG.md` and `DECISIONS.md`.
@@ -153,6 +192,12 @@ What the loop needs, roughly in build order:
    answers against a known fixture. A trial asks questions whose answers nobody
    knows yet, and its output is a **judgement** about whether the run understood the
    schema: which tables it chose, what it refused, what it silently assumed.
+   **Every probe runs more than once, and this is not optional.** B-119 — a
+   fabricated join prohibition, filed from a single reproducible run — **did not
+   reproduce** on 2026-08-25 against the same database with the prompt path
+   byte-identical. The defect is intermittent, so a single-shot trial would have
+   recorded it as resolved. A trial that asks each question once measures the model's
+   luck on the day.
 3. **A per-trial record** that makes that judgement possible without a database
    client — the question, the tables offered, the tables read, the SQL, the
    limitations, the refusal reason. Most of this is already in `agent_events` and
@@ -209,7 +254,7 @@ container quirks, which have cost a gate between them.
 |----|----------|--------|
 | **B-029** | The LLM abstraction has never run against a second provider. | The **Phase 6 gate**, still open. Needs an Anthropic key — an owner decision, not a code task. |
 | **B-060** | The same question, paraphrased, picks a different source and answers two orders of magnitude apart. Four defensible readings span a factor of **538**. | Trust in any answer over an ambiguous schema. Diagnosed, deliberately unfixed; the engine trial loop is where it gets resolved. |
-| **B-119** | The model invented a platform constraint and refused half a question the data could answer. | Honest refusals. A refusal that is a fabrication is worse than a wrong answer, because it looks like integrity. |
+| **B-119** | The model invented a platform constraint and refused half a question the data could answer. **Did not reproduce on 2026-08-25** with the prompt path unchanged — so it is intermittent, not fixed. | Honest refusals. A refusal that is a fabrication is worse than a wrong answer, because it looks like integrity. And it sets the bar for the trial loop: one clean run proves nothing. |
 
 **Three, not six.** B-090, B-092 and B-093 shipped in #76 and #78 and their status
 cells still read *in progress*; corrected in this handoff. Worth noting as a habit:
