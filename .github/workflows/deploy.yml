@@ -106,6 +106,19 @@ jobs:
       # created" from an assumption into a line in the log. It does not gate the
       # deploy — reading it is a person's job — but an unreadable plan here is a
       # deploy worth stopping by hand.
+      # **A role definition id is the one constant review cannot check** (B-130).
+      # `keyVaultSecretsOfficer` was written with its last two groups invented;
+      # the first three happened to be right, so it read exactly like a correct
+      # id to a reviewer, to `bicep build`, and to `what-if` — which does not
+      # resolve role definitions either. The deployment failed three minutes in
+      # with `RoleDefinitionDoesNotExist`, after the resource group had been
+      # touched.
+      #
+      # Before `what-if` rather than after: this needs only a signed-in session,
+      # and refusing to start is strictly better than stopping partway.
+      - name: Every role id names a role that exists
+        run: sh ops/scripts/check_role_definitions.sh
+
       - name: What the deployment would change
         env:
           POSTGRES_ADMIN_PASSWORD: ${{ secrets.POSTGRES_ADMIN_PASSWORD }}
