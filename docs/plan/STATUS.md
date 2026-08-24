@@ -62,11 +62,58 @@ Blocked on user: **yes — WP12.2 cannot start.** Two owner tasks, written out a
                  (P1)** and with it the Phase 6 gate; it blocks nothing in
                  Phase 12 either, and WP12.4 turns nightly evals on against dev,
                  so B-029 wants an answer before that gate rather than after.
-Last updated: 2026-08-24 by Claude Code (WP12.2 merged; OIDC fixed by the owner and
-              sign-in now succeeds. The second dispatch **created ten resources** and failed
-              on the Container Apps environment — `log-analytics` needs a shared key the
-              template deliberately refuses to hold. Moving to `azure-monitor`; **dev is
-              billing (~$18-21/mo) and nothing serves yet**)
+Last updated: 2026-08-24 by Claude Code (**dev is deployed and serving**; five dispatches,
+              each failing on something no check here could see — OIDC subject, a log
+              destination needing a key, BuildKit, an extension allow-list, a browser bundle
+              built for localhost. The owner has ruled that **dev proves the deployment path
+              and never hosts a demo**; the deployed database stays empty on purpose)
+
+---
+
+## What `dev` is for, and the thing nobody should quietly decide later
+
+**Owner's decision, 2026-08-24, and it is a standing rule rather than a note on
+the current state:**
+
+> Don't seed customer data or fixtures into Azure. Get sign-in and org creation
+> working there and leave it — dev exists to prove the deployment path, not to
+> host a demo. The local stack is where demos happen.
+
+**So the deployed database stays empty on purpose.** No organization beyond
+whatever a real sign-in creates, no data source, no catalog, no runs. That is not
+an unfinished state waiting for someone to fill it; it is the state.
+
+**The thing this exists to prevent.** The deployed API can answer nothing until a
+data source is registered, and registering one means giving it **a credential to
+a real database**. The path of least resistance, at some future moment when
+somebody wants to show the product to somebody else, is to point dev at whatever
+database is handy — a customer's, a copy of a customer's, or a "temporary" one
+that outlives the demo. Once that credential is in Key Vault it is in a
+subscription with a public web hostname, and the question of who may read it is
+no longer a question about a laptop.
+
+**None of the reasons this looks safe are load-bearing.** The credential would be
+encrypted, held by a managed identity, and reachable only through a JWT-protected
+API — all true, all irrelevant to whether it should be there at all. The rule is
+about what is *stored*, not about how well it is guarded, which is the same
+distinction the customer-data section of CLAUDE.md draws for the repository.
+
+**What dev is allowed to prove**, and it is enough for WP12.4's gate: that the
+pipeline deploys, that Entra sign-in works against a deployed redirect URI, that
+an organization can be created, that migrations run inside the vnet, that
+`dataagent_app` cannot bypass RLS on a real server, that quotas hard-stop, and
+that a backup restores. None of those need a customer's data.
+
+**The seed databases are deliberately local-only.** `seed-pizza-pg` and
+`seed-fnb-pg` are compose services; nothing in `infra/` creates them and nothing
+should. `make demo.setup` registers them by their compose hostnames and is
+therefore local by construction — B-115's fix is also, usefully, a fence.
+
+**If someone later needs a demo against a deployed environment**, that is a
+decision with a name and an owner, not a convenience: it needs a database that
+exists for the purpose, a written note of whose data it holds, and the owner's
+explicit permission first — the same standard CLAUDE.md sets for any customer
+sample reaching a tracked file.
 
 ---
 
