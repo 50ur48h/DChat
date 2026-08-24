@@ -206,6 +206,11 @@ services:
       # NEXT_PUBLIC_* is inlined into the bundle; in this dev target `next dev`
       # reads them at runtime, so a change here needs only a restart.
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      # Which environment this bundle thinks it is in. `authConfig` honours
+      # NEXT_PUBLIC_AUTH_MODE=dev only where this says local or ci, so a compose
+      # stack has to say so — and a deployed image, which says neither, gets
+      # Entra whatever else it was built with.
+      NEXT_PUBLIC_ENV: ${NEXT_PUBLIC_ENV:-local}
       NEXT_PUBLIC_AUTH_MODE: ${NEXT_PUBLIC_AUTH_MODE:-dev}
       NEXT_PUBLIC_ENTRA_AUTHORITY: ${NEXT_PUBLIC_ENTRA_AUTHORITY:-}
       NEXT_PUBLIC_ENTRA_CLIENT_ID: ${NEXT_PUBLIC_ENTRA_CLIENT_ID:-}
