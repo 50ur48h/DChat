@@ -187,6 +187,22 @@ without rereading plan §6.
 
 ### (a) An engine trial loop — repeatable, not remembered
 
+**First version landed 2026-08-25**: `dataagent.ops.trial`, `make trial`, and
+`ops/trials/probes.example.json`. It does items 2 and 3 below — probes that are
+not the golden evals, and a per-run record — plus the thing this session made
+non-negotiable: **every probe runs at least three times**, `MINIMUM_REPEATS`
+enforced rather than defaulted, and the output is the **disagreement** between the
+runs rather than three transcripts. `divergences` names three shapes explicitly:
+a question that refuses once and answers twice (**B-119**), runs that read
+different tables (**B-060**), and runs that state different numbers. Items **1**
+and **4** — a documented one-command path for attaching an unfamiliar database,
+and a way to read a whole trial at once — are still owed.
+
+**What it deliberately does not do**: decide whether an answer is *right*. No
+program here can, which is the premise of the exercise. It surfaces the runs and
+their disagreements; a person judges, and files what they find.
+
+
 **Why this first.** The owner's F&B trial found five real defects in the agent's
 schema understanding — B-057's join direction, B-060's source ambiguity, B-085's
 unbound metrics, B-092's unranked codes, B-119's fabricated refusal. Every one came
