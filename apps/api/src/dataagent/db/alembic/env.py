@@ -27,7 +27,18 @@ from dataagent.db.models import Base
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # **`disable_existing_loggers=False`, and it is not a style preference**
+    # (**B-126**). `fileConfig` defaults to True, which switches off every logger
+    # that already exists — which is every `dataagent.*` module logger, since
+    # they are created at import. Any process that runs a migration and then
+    # keeps working loses its logging entirely from that point on.
+    #
+    # The test suite is that process. `conftest` migrates once at session start,
+    # so **no test has ever been able to observe a log line from application
+    # code** — a `caplog` assertion here captured nothing at all, silently, which
+    # is how the runner came to have no logging on its failure path for eleven
+    # phases with a green suite the whole time.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

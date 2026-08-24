@@ -46,6 +46,26 @@ MODE_REQUIREMENTS: dict[tuple[str, str], tuple[str, ...]] = {
     ("artifacts_backend", "blob"): ("artifacts_account_url",),
 }
 
+#: **What a deployment needs in every mode, because a *run* needs it.**
+#:
+#: `MODE_REQUIREMENTS` is keyed on a mode being selected. This is the shorter
+#: list of things no mode makes optional, and it is kept separate rather than
+#: folded in because the condition is different — no field equals a value — and a
+#: table whose key sometimes means "when this is set" and sometimes means
+#: "always" is a table nobody can read correctly.
+#:
+#: **Both entries here are B-126.** `apps.bicep` gave the deployed API
+#: `OPENAI_API_KEY` and none of the four `LLM_*` variables, so `llm_providers`
+#: fell to its default of `("openai",)` and `llm_models` to `{}` — and
+#: `registry.resolve` raised *"LLM_MODELS names no models for provider
+#: 'openai'"* on the first model call of every run. The credential shipped and
+#: the configuration that makes it usable did not, which is the same sentence
+#: `ops/docker-compose.yml` already carries about Phase 7.
+#:
+#: `check_env.sh` keeps a copy, because it is POSIX shell and cannot import
+#: Python; `tests/test_mode_requirements.py` is what makes the copy true.
+RUN_REQUIRED: tuple[str, ...] = ("llm_providers", "llm_models")
+
 #: How much encryption a connection to a *customer's* database must have, spelled
 #: the way libpq spells it so the words mean what an operator already thinks they
 #: mean. ``allow`` is deliberately absent: "try plaintext first, then TLS" is a
@@ -664,6 +684,12 @@ class Settings(BaseSettings):
         is how `AUTH_MODE=entra` with no `OIDC_AUTHORITY` reached production and
         answered 500 to every authenticated route while `/healthz` stayed green.
 
+        **And how the fix for that then missed the next one.** This method's
+        first version read `MODE_REQUIREMENTS` alone, so a deployment with no
+        model configuration reported `ok` here while every question asked in the
+        browser failed (**B-126**). The guard was right and its coverage was the
+        gap — the third time in this project those two have needed separating.
+
         Returned as environment-variable names because that is what the reader
         has to go and set.
         """
@@ -675,6 +701,18 @@ class Settings(BaseSettings):
                 value = getattr(self, name, None)
                 if value is None or (isinstance(value, str) and not value.strip()):
                     missing.append(name.upper())
+
+        # `RUN_REQUIRED`, which is not a mode question and cannot be checked by
+        # the loop above: what makes `LLM_MODELS` missing is not that it is unset
+        # but that it says nothing about a provider `LLM_PROVIDERS` names. The
+        # condition is `registry.resolve`'s own first two refusals, restated here
+        # rather than imported — `registry` imports this module, so the
+        # dependency only runs one way.
+        if not self.llm_providers:
+            missing.append("LLM_PROVIDERS")
+        elif any(not self.llm_models.get(provider) for provider in self.llm_providers):
+            missing.append("LLM_MODELS")
+
         return sorted(set(missing))
 
     def require_database_url(self) -> str:

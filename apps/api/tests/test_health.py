@@ -32,10 +32,18 @@ async def test_healthz_is_degraded_when_the_mode_cannot_be_served() -> None:
     authenticated request. The probe now says so, and names the variable."""
     app = create_app(
         settings=Settings(  # pyright: ignore[reportArgumentType]
+            # **Pinned off the repository's `.env`, and this test is why**
+            # (B-032's family). `llm_models={}` cannot override a populated
+            # value from the env file: pydantic-settings *deep-merges* dicts,
+            # so an empty one adds nothing and the developer's real model map
+            # survives. The test then passes in CI, where there is no `.env`,
+            # and fails on the machine that wrote it.
+            _env_file=None,  # pyright: ignore[reportCallIssue]
             auth_mode="entra",
             oidc_authority=None,
             secrets_backend="local",
             local_secrets_key=SecretStr("x"),
+            llm_models={"openai": {"small": "s", "mid": "m", "strong": "l"}},
         )
     )
 
@@ -78,6 +86,13 @@ async def test_a_degraded_probe_names_variables_and_never_values() -> None:
     """The leak this could have been. Everything reported is a name."""
     app = create_app(
         settings=Settings(  # pyright: ignore[reportArgumentType]
+            # **Pinned off the repository's `.env`, and this test is why**
+            # (B-032's family). `llm_models={}` cannot override a populated
+            # value from the env file: pydantic-settings *deep-merges* dicts,
+            # so an empty one adds nothing and the developer's real model map
+            # survives. The test then passes in CI, where there is no `.env`,
+            # and fails on the machine that wrote it.
+            _env_file=None,  # pyright: ignore[reportCallIssue]
             auth_mode="entra",
             oidc_authority=None,
             secrets_backend="keyvault",
@@ -85,6 +100,7 @@ async def test_a_degraded_probe_names_variables_and_never_values() -> None:
             artifacts_backend="blob",
             artifacts_account_url=None,
             git_sha="testsha",
+            llm_models={"openai": {"small": "s", "mid": "m", "strong": "l"}},
         )
     )
 
@@ -99,3 +115,75 @@ async def test_a_degraded_probe_names_variables_and_never_values() -> None:
     # Nothing in the payload is a URL, a key, or anything but a name and a sha.
     rendered = str(body)
     assert "://" not in rendered
+
+
+async def test_healthz_is_degraded_when_no_model_can_serve_a_run() -> None:
+    """**The case that shipped after the one above** (**B-126**).
+
+    `apps.bicep` gave the deployed API `OPENAI_API_KEY` and no `LLM_MODELS`, so
+    `llm_providers` fell to its default and `llm_models` to `{}`. Every mode was
+    satisfied, this probe reported `ok`, and every question a person asked ended
+    as `failed`. The probe was correct about what it covered and that was the
+    whole problem.
+
+    Note what makes it degraded: not that `LLM_MODELS` is unset — it is `{}`
+    here, which is set — but that it names no models for a provider
+    `LLM_PROVIDERS` does name. A presence check would pass this configuration.
+    """
+    app = create_app(
+        settings=Settings(  # pyright: ignore[reportArgumentType]
+            # **Pinned off the repository's `.env`, and this test is why**
+            # (B-032's family). `llm_models={}` cannot override a populated
+            # value from the env file: pydantic-settings *deep-merges* dicts,
+            # so an empty one adds nothing and the developer's real model map
+            # survives. The test then passes in CI, where there is no `.env`,
+            # and fails on the machine that wrote it.
+            _env_file=None,  # pyright: ignore[reportCallIssue]
+            auth_mode="entra",
+            oidc_authority="https://x.ciamlogin.com/t/v2.0",
+            secrets_backend="local",
+            local_secrets_key=SecretStr("x"),
+            llm_providers=("openai",),
+            llm_models={},
+        )
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
+        response = await ac.get("/healthz")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "degraded"
+    assert body["missing_settings"] == ["LLM_MODELS"]
+
+
+async def test_healthz_is_degraded_when_one_provider_of_several_has_no_models() -> None:
+    """The fallback chain is the half a presence check cannot see at all.
+
+    `LLM_MODELS` is populated, non-empty and satisfies the primary provider. The
+    second is the one WP6.2 walks to during an incident — the worst possible
+    moment to discover it resolves to nothing.
+    """
+    app = create_app(
+        settings=Settings(  # pyright: ignore[reportArgumentType]
+            # **Pinned off the repository's `.env`, and this test is why**
+            # (B-032's family). `llm_models={}` cannot override a populated
+            # value from the env file: pydantic-settings *deep-merges* dicts,
+            # so an empty one adds nothing and the developer's real model map
+            # survives. The test then passes in CI, where there is no `.env`,
+            # and fails on the machine that wrote it.
+            _env_file=None,  # pyright: ignore[reportCallIssue]
+            auth_mode="entra",
+            oidc_authority="https://x.ciamlogin.com/t/v2.0",
+            secrets_backend="local",
+            local_secrets_key=SecretStr("x"),
+            llm_providers=("openai", "anthropic"),
+            llm_models={"openai": {"small": "s", "mid": "m", "strong": "l"}},
+        )
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as ac:
+        body = (await ac.get("/healthz")).json()
+
+    assert body["status"] == "degraded"
+    assert body["missing_settings"] == ["LLM_MODELS"]

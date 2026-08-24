@@ -45,6 +45,7 @@ the same code moves behind a worker in V1.5 without a rewrite.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, replace
@@ -77,6 +78,8 @@ from dataagent.runs.events import EventWriter
 from dataagent.semantic import definitions as semantic
 from dataagent.semantic import verified as verified_queries
 from dataagent.tenancy.session import org_session
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["RunOutcome", "execute_run", "relevant_pairs"]
 
@@ -196,10 +199,10 @@ async def execute_run(
         # The provider, not the question. Sanitized already, and distinct from a
         # refusal: the user should be told the platform failed, not that their
         # data could not answer them.
-        await _record_failure(events, working, str(error), category="llm_error")
+        await _record_failure(events, working, str(error), category="llm_error", run_id=run_id)
         return _failed(run_id, working)
     except Exception as error:
-        await _record_failure(events, working, str(error), category="internal_error")
+        await _record_failure(events, working, str(error), category="internal_error", run_id=run_id)
         return _failed(run_id, working)
     finally:
         # In `finally`, because a run that never ends is the one failure with no
@@ -1040,8 +1043,33 @@ async def _checkpoint(context: ToolContext, working: _Working) -> None:
 
 
 async def _record_failure(
-    events: EventWriter, working: _Working, message: str, *, category: str
+    events: EventWriter,
+    working: _Working,
+    message: str,
+    *,
+    category: str,
+    run_id: uuid.UUID,
 ) -> None:
+    """End the run, and say why somewhere an operator can read it (**B-126**).
+
+    **The log line is the point of this function having a docstring.** Before it,
+    a failed run wrote its reason to `agent_events` and nowhere else, so a
+    deployment whose every run failed produced *no error in the API logs at all*
+    — 300 lines of clean access log. What the person asking saw was `failed` and
+    *"The run could not be completed."*; what the operator saw was a healthy
+    service. Neither could tell a broken platform from a bad question, and the
+    reason was sitting in a database column that needs the platform DSN to read.
+
+    Deliberately not routed to the user: the generic reason on screen stays
+    generic, because a provider's error text is not something a tenant should be
+    shown. This puts it where the person who can act on it already looks.
+
+    `logger.exception` rather than `.error` — both call sites are inside an
+    `except` block, and the traceback is the half that says *where*. Nothing new
+    is exposed: this same string is already persisted as `safe_message`, and the
+    log is the more private of the two destinations.
+    """
+    logger.exception("run %s failed (%s): %s", run_id, category, message)
     working.state.phase = "finished"
     await events.emit("error", {"category": category, "safe_message": message[:500]})
 

@@ -369,6 +369,57 @@ check_selected_backends_have_what_they_need() {
   done <<<"$BACKEND_REQUIRES"
 }
 
+# --- 9. The deployment can actually answer a question -----------------------
+#
+# `KEY | why` -- names the templates must set, because a *run* needs them. Check 8
+# asks what a chosen backend requires; this asks what the product requires to be
+# the product, and the difference is B-126: `apps.bicep` chose no backend wrongly,
+# passed every check above, and shipped an API that failed every question with
+# "The run could not be completed."
+#
+# The mirror of `RUN_REQUIRED` in `config.py`, kept honest by
+# `apps/api/tests/test_mode_requirements.py` -- this is shell and cannot import
+# Python, so the copy is checked rather than avoided.
+readonly RUN_REQUIRED='
+LLM_PROVIDERS | the ordered provider chain a run resolves a model from
+LLM_MODELS | provider -> tier -> model id; without it every run fails at its first model call
+'
+
+# **What makes this a coupling rather than a blanket requirement.** Check 8 fires
+# on `KEY=VALUE`; here there is no value to compare, because the credential
+# arrives as a `secretRef` and the template holds only its name. So the trigger is
+# *presence*: a template that ships a model credential is a template meant to
+# answer questions, and it must ship the configuration that makes the credential
+# usable. One template, one argument -- which is exactly the shape of what went
+# wrong.
+#
+# **The limit, stated rather than left to be discovered**: a template that ships
+# neither a key nor any model configuration is not caught here. That deployment
+# cannot call a provider at all and fails far more loudly, and an infra directory
+# with no provider key -- the selftest's fixtures, for one -- is not a deployment
+# of this product.
+readonly RUN_CREDENTIALS='OPENAI_API_KEY ANTHROPIC_API_KEY'
+
+check_the_deployment_can_answer_a_question() {
+  local infra_keys credential found='' key why
+  infra_keys=$(infra_env_keys)
+  for credential in $RUN_CREDENTIALS; do
+    contains "$credential" "$infra_keys" && found=$credential && break
+  done
+  [[ -n $found ]] || return 0
+
+  while IFS='|' read -r key why; do
+    key=${key// /}
+    [[ -n $key ]] || continue
+    contains "$key" "$infra_keys" && continue
+    fail "$INFRA_DIR sets $found and does not set $key --${why}.
+    The credential is there and the configuration that makes it usable is not, so
+    the deployed API boots, answers /healthz and refuses every question a person
+    asks it -- which reaches them as \"The run could not be completed.\" Set $key
+    in the same template."
+  done <<<"$RUN_REQUIRED"
+}
+
 run_checks() {
   local host_only_block=$1 build_block=$2
   local documented compose settings host_only build
@@ -391,6 +442,7 @@ run_checks() {
   check_every_infra_key_is_read "$settings" "$(declared_keys "$PLATFORM_ENV")" "$build"
   check_every_declaration_has_a_reason "$PLATFORM_ENV" PLATFORM_ENV
   check_selected_backends_have_what_they_need
+  check_the_deployment_can_answer_a_question
 }
 
 # ---------------------------------------------------------------------------
@@ -570,6 +622,75 @@ FIXTURE
             }
 FIXTURE
   expect 0 "a template setting only names Settings reads passes" guard "$dir"
+
+  # **B-126, reproduced.** A template with the model credential and none of the
+  # configuration that makes it usable -- which is what `apps.bicep` actually
+  # shipped, and what every check above was satisfied by.
+  dir="$workspace/infra-credential-without-models"
+  write_fixture "$dir"
+  cat >"$dir/infra/apps.bicep" <<'FIXTURE'
+            {
+              name: 'OPENAI_API_KEY'
+              secretRef: 'openai-api-key'
+            }
+FIXTURE
+  {
+    echo 'OPENAI_API_KEY=sk-x'
+    echo 'LLM_PROVIDERS=openai'
+    echo 'LLM_MODELS={}'
+  } >>"$dir/.env.example"
+  {
+    echo '      OPENAI_API_KEY: ${OPENAI_API_KEY:-}'
+    echo '      LLM_PROVIDERS: ${LLM_PROVIDERS:-}'
+    echo '      LLM_MODELS: ${LLM_MODELS:-}'
+  } >>"$dir/compose.yml"
+  {
+    echo 'class Settings(BaseSettings):'
+    echo '    passed_key: str = "x"'
+    echo '    optional_key: str | None = None'
+    echo '    openai_api_key: str | None = None'
+    echo '    llm_providers: tuple[str, ...] = ()'
+    echo '    llm_models: dict[str, str] = {}'
+  } >"$dir/config.py"
+  expect 1 "a template with a model credential and no model configuration fails" guard "$dir"
+
+  # The control for the case above: the same template, complete. Without it the
+  # case above is satisfied by a check that fails every template it sees.
+  dir="$workspace/infra-credential-with-models"
+  write_fixture "$dir"
+  cat >"$dir/infra/apps.bicep" <<'FIXTURE'
+            {
+              name: 'OPENAI_API_KEY'
+              secretRef: 'openai-api-key'
+            }
+            {
+              name: 'LLM_PROVIDERS'
+              value: 'openai'
+            }
+            {
+              name: 'LLM_MODELS'
+              value: '{"openai":{"small":"s"}}'
+            }
+FIXTURE
+  {
+    echo 'OPENAI_API_KEY=sk-x'
+    echo 'LLM_PROVIDERS=openai'
+    echo 'LLM_MODELS={}'
+  } >>"$dir/.env.example"
+  {
+    echo '      OPENAI_API_KEY: ${OPENAI_API_KEY:-}'
+    echo '      LLM_PROVIDERS: ${LLM_PROVIDERS:-}'
+    echo '      LLM_MODELS: ${LLM_MODELS:-}'
+  } >>"$dir/compose.yml"
+  {
+    echo 'class Settings(BaseSettings):'
+    echo '    passed_key: str = "x"'
+    echo '    optional_key: str | None = None'
+    echo '    openai_api_key: str | None = None'
+    echo '    llm_providers: tuple[str, ...] = ()'
+    echo '    llm_models: dict[str, str] = {}'
+  } >"$dir/config.py"
+  expect 0 "the same template with its model configuration passes" guard "$dir"
 
   printf 'check_env --selftest: %d passed, %d failed\n' "$passed" "$failed"
   ((failed == 0))

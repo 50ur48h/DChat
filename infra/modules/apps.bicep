@@ -239,6 +239,74 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
               secretRef: secretNames.openAiApiKey
             }
             {
+              // **The model configuration, which this template did not have and
+              // the product cannot run without** (**B-126**). `OPENAI_API_KEY`
+              // above is the credential; these four are what tell the product
+              // what to spend it on. Without them `llm_providers` falls to its
+              // default of `('openai',)`, `llm_models` to `{}`, and
+              // `registry.resolve` raises *"LLM_MODELS names no models for
+              // provider 'openai'"* at the first model call — so every question
+              // asked in the browser ends as `failed` with a generic reason.
+              //
+              // `ops/docker-compose.yml` carries that same sentence about
+              // Phase 7. Compose was fixed then; this file was written later and
+              // repeated it, which is what `check_env.sh`'s check 9 now stops.
+              //
+              // **Not secrets, and deliberately literal here.** Model ids and
+              // published list prices are configuration a reviewer should be
+              // able to read in the template — the argument `KEY_VAULT_URL`
+              // makes above. The only secret in this block is the key, and it is
+              // a `secretRef`.
+              name: 'LLM_PROVIDERS'
+              value: 'openai'
+            }
+            {
+              name: 'LLM_MODELS'
+              value: '{"openai":{"small":"gpt-5.6-luna","mid":"gpt-5.6-terra","strong":"gpt-5.6-sol"}}'
+            }
+            {
+              // Composing is the long generation and the cheapest place to save,
+              // per architecture 8.3's cost lever.
+              name: 'LLM_ROLE_MAP'
+              value: '{"compose":"small"}'
+            }
+            {
+              // A model absent from this map is recorded with a NULL cost, which
+              // means unpriced — never free. The embedding model is priced here
+              // too, because it is metered against the same run.
+              name: 'LLM_PRICES'
+              value: '{"gpt-5.6-luna":{"input":0.20,"output":1.20},"gpt-5.6-terra":{"input":2.00,"output":12.00},"gpt-5.6-sol":{"input":5.00,"output":30.00},"text-embedding-3-small":{"input":0.02,"output":0.00}}'
+            }
+            {
+              // **Half of what a developer's `.env` sets, on purpose.** Dev has
+              // a public hostname and nobody watching the bill; a lower ceiling
+              // costs a truncated run — which arrives as an answer with caveats,
+              // not a failure — and buys a bounded spend. Owner's call,
+              // 2026-08-24.
+              name: 'LLM_RUN_COST_LIMIT_USD'
+              value: '1.00'
+            }
+            {
+              // **Not the cause of B-126 and fixed with it.** A deployment with
+              // no embedding model degrades correctly — `get_embedder` returns
+              // None and retrieval falls back to lexical — so this was invisible
+              // rather than broken. It made dev's retrieval quietly worse than
+              // local, which is its own kind of misleading environment.
+              name: 'EMBEDDINGS_PROVIDER'
+              value: 'openai'
+            }
+            {
+              name: 'EMBEDDINGS_MODEL'
+              value: 'text-embedding-3-small'
+            }
+            {
+              // Must equal the width of the `vector(...)` column revision 0016
+              // created. `check_dimensions` compares them before the first
+              // vector is written rather than at the insert that would reject it.
+              name: 'EMBEDDINGS_DIMENSIONS'
+              value: '1536'
+            }
+            {
               // Key Vault is the secrets backend in Azure, and `config.py`
               // asserts exactly this at boot in a production build.
               name: 'SECRETS_BACKEND'
