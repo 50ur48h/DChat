@@ -30,6 +30,65 @@ set -eu
 
 JOB_NAME="${MIGRATE_JOB_NAME:-cj-dataagent-migrate-dev}"
 
+# **Print why the job failed, and get this right: it is the only thing standing
+# between a failed deploy and an afternoon.**
+#
+# The first version called `az containerapp job logs show` without `--container`,
+# which that command requires. So the step whose entire purpose is explaining a
+# failure printed a CLI usage message instead — and it did it in the case that
+# matters, a real migration failure, where the actual cause (`extension
+# "pgcrypto" is not allow-listed`) was sitting in the container stdout and never
+# surfaced.
+#
+# Two sources, because the first stops working at exactly the wrong moment:
+# `job logs show` reads the live replica, and Container Apps deletes it within a
+# few minutes of the execution ending. After that it answers `No replicas found
+# for execution`, which is neither an error nor the logs. The fallback queries
+# Log Analytics, where the diagnostic setting sends the same output.
+#
+# **Console logs take up to ~15 minutes to reach Log Analytics.** Measured: when
+# this was first needed, `ContainerAppConsoleLogs` did not exist as a table at
+# all, and the rows appeared later. An empty fallback means "not yet", never
+# "the container said nothing" — which is the difference between waiting two
+# minutes and rebuilding an image to add print statements.
+dump_logs() {
+  execution=$1
+  echo "--- container output for $execution ---" >&2
+  if az containerapp job logs show \
+    --name "$JOB_NAME" \
+    --resource-group "$RESOURCE_GROUP" \
+    --container migrate \
+    --execution "$execution" \
+    --tail 200 >&2 2>/dev/null; then
+    return 0
+  fi
+
+  echo "The replica is gone, so live logs are unavailable. Querying Log Analytics." >&2
+  # Installed explicitly rather than left to az's dynamic install, which prompts
+  # when stdin is not a terminal and then dies with `EOFError: EOF when reading a
+  # line` — a failure mode that replaces the diagnosis with a Python traceback.
+  az extension add --name log-analytics --allow-preview true --only-show-errors >/dev/null 2>&1 || true
+  workspace=$(az monitor log-analytics workspace show \
+    --resource-group "$RESOURCE_GROUP" \
+    --name "${LOG_WORKSPACE:-log-dataagent-dev}" \
+    --query customerId -o tsv 2>/dev/null || true)
+  if [ -z "$workspace" ]; then
+    echo "No Log Analytics workspace found; the reason is not recoverable here." >&2
+    return 0
+  fi
+
+  az monitor log-analytics query \
+    --workspace "$workspace" \
+    --analytics-query "ContainerAppConsoleLogs | where ContainerName == 'migrate' | order by TimeGenerated asc | project TimeGenerated, Log | take 200" \
+    -o tsv >&2 2>/dev/null ||
+    echo "The query failed; the az extension 'log-analytics' may not be installed." >&2
+
+  echo >&2
+  echo "If the output above is empty the logs have not arrived yet rather than" >&2
+  echo "not existing: console logs can take ~15 minutes to reach Log Analytics." >&2
+  echo "Re-run that query then, before changing anything." >&2
+}
+
 echo "Starting $JOB_NAME on ${REGISTRY}/dataagent-api:${IMAGE_TAG}"
 
 # Point the job at the image this deploy built, then start it. Updating first
@@ -67,11 +126,7 @@ while [ "$i" -lt 60 ]; do
   Failed | Cancelled)
     echo "Migration $STATUS. The deploy stops here — the app is still on the" >&2
     echo "previous revision, which matches the previous schema." >&2
-    az containerapp job logs show \
-      --name "$JOB_NAME" \
-      --resource-group "$RESOURCE_GROUP" \
-      --execution "$EXECUTION" \
-      --tail 100 >&2 || true
+    dump_logs "$EXECUTION"
     exit 1
     ;;
   *)

@@ -112,16 +112,33 @@ resource server 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
   }
 }
 
-// **pgvector is not installed by creating the extension.** Flexible Server
-// refuses `CREATE EXTENSION` for anything not on this server-level allow-list,
-// so a migration that tries it fails with a permissions error that looks like a
-// role problem and is not. Revision 0016 and the whole knowledge layer depend on
-// this line.
+// **An extension is not installed by creating it.** Flexible Server refuses
+// `CREATE EXTENSION` for anything not on this server-level allow-list, and the
+// refusal reads like a permissions problem rather than a configuration one:
+// `FeatureNotSupportedError: extension "pgcrypto" is not allow-listed for users
+// in Azure Database for PostgreSQL`.
+//
+// **This list was wrong in both directions and nothing could see it.** It read
+// `VECTOR,UUID-OSSP,PG_TRGM`. The migrations create exactly two extensions —
+// `pgcrypto` (revision 0001, behind every `gen_random_uuid()` default) and
+// `vector` (0001, 0016, 0018) — so two entries named extensions nobody creates,
+// and the one that revision 0001 needs on its *first statement* was missing. The
+// first real migration against Azure died there.
+//
+// The value is now exactly what `grep -r 'CREATE EXTENSION' apps/api/src/dataagent/db`
+// reports, and adding an extension to a migration means adding it here in the
+// same PR. This is a schema-correspondence gap of the kind **B-110** is about:
+// two lists that must agree, in different languages, in different directories,
+// with nothing comparing them.
+//
+// Changing `azure.extensions` is a **static** server parameter, so Azure restarts
+// the server when this value changes. Seconds on an idle B1ms; worth knowing
+// before a deploy that looks like it has stalled.
 resource extensions 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2024-08-01' = {
   parent: server
   name: 'azure.extensions'
   properties: {
-    value: 'VECTOR,UUID-OSSP,PG_TRGM'
+    value: 'PGCRYPTO,VECTOR'
     source: 'user-override'
   }
 }
