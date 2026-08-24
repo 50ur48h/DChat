@@ -62,9 +62,45 @@ Blocked on user: **yes — WP12.2 cannot start.** Two owner tasks, written out a
                  (P1)** and with it the Phase 6 gate; it blocks nothing in
                  Phase 12 either, and WP12.4 turns nightly evals on against dev,
                  so B-029 wants an answer before that gate rather than after.
-Last updated: 2026-08-23 by Claude Code (new dev machine brought up and proved; B-115
-              **fixed** (#95), B-116/117/118 filed, **B-119 (P1)** filed from the owner's
-              browser walk; WP12.2 still next and still blocked on the owner's OIDC setup)
+Last updated: 2026-08-24 by Claude Code (WP12.2 merged (#98, #99); the first deploy
+              dispatch failed at Azure sign-in and created nothing — GitHub now issues an
+              ID-qualified OIDC subject and #92's instructions are stale; two federated
+              credentials are owed from the owner before a re-dispatch)
+
+---
+
+## The first deploy dispatch, 2026-08-24 — refused at the door, and nothing created
+
+**`deploy.yml` ran and stopped at step 3 of 12.** Sign-in to Azure failed, every
+later step is `skipped`, and no resource was created: no spend, no partial
+deployment, nothing to unwind.
+
+```
+AADSTS700213: No matching federated identity record found for presented
+assertion subject 'repo:50ur48h@130345252/DChat@1329894088:environment:dev'
+```
+
+**Nobody misconfigured anything.** The two federated credentials on
+`dataagent-github-oidc` carry `repo:50ur48h/DChat:environment:dev|prod`, which is
+exactly what #92's instructions specify and what GitHub documented. GitHub now
+sends the **ID-qualified** form, so that renaming an owner or a repository cannot
+silently point somebody else's workflow at this app registration. The repository
+agrees it is on defaults:
+`{"use_default":true,"use_immutable_subject":false,"sub_claim_prefix":"repo:50ur48h@130345252/DChat@1329894088"}`
+— `use_immutable_subject` false, and the prefix applied is the immutable one
+anyway. **The platform default moved after #92 was written**, which is the kind
+of staleness no CI check in this repository could have caught: the instructions
+were correct and the world changed.
+
+**The owner's decision, 2026-08-24:** add credentials matching what GitHub
+actually sends, for `dev` **and** `prod` at once so this is not rediscovered
+later, and leave the two originals in place — they cost nothing and they document
+what the old format was. Recorded in `infra/README.md` beside the commands, with
+the instruction to *ask the repository what it will send* rather than copy a
+subject out of a PR description.
+
+**Blocked on the owner** for exactly two `az ad app federated-credential create`
+calls; the re-dispatch is one `gh workflow run` afterwards.
 
 ---
 
