@@ -51,11 +51,20 @@ def build_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSessio
 
 @asynccontextmanager
 async def system_session() -> AsyncGenerator[AsyncSession]:
-    """A session with **no** org scoping.
+    """A session as the **owner**, with no org scoping.
 
-    For migrations, bootstrap and admin jobs only. Every use is a deliberate step
-    outside tenant isolation, so callers must be able to justify it in review —
-    feature code uses the tenancy session from WP1.2 instead.
+    For migrations and offline admin jobs only. Every use is a deliberate step
+    outside tenant isolation *and* outside the application role, so callers must
+    be able to justify it in review.
+
+    **The request path must never reach this** (**B-123**). It did, from eight
+    call sites, for eleven phases — invisibly, because every developer `.env`
+    sets `DATABASE_URL` alongside `APP_DATABASE_URL`, so the owner connection was
+    always there to be taken. CLAUDE.md's rule is *"Never collapse the two"*, and
+    the first deployment that supplied only the unprivileged DSN is what finally
+    said so. `tests/db/test_rls_proof.py` now boots the application with no owner
+    DSN at all and drives a real request through it, so the rule is checked
+    rather than asserted.
     """
     factory = build_session_factory(get_engine())
     async with factory() as session:

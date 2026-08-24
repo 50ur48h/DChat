@@ -39,14 +39,13 @@ import logging
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import text
 
 from dataagent.agent.runner import execute_run
 from dataagent.config import Settings
 from dataagent.datasources import service as datasources
-from dataagent.db.engine import system_session
-from dataagent.db.models import AgentRun
 from dataagent.runs import service as runs
+from dataagent.tenancy.session import app_session
 
 __all__ = [
     "AmbiguousDataSourceError",
@@ -241,12 +240,13 @@ async def sweep_orphaned_runs() -> int:
     ``interrupted``, never ``failed``: nothing was wrong with the question, and a
     trace that said otherwise would send somebody looking for a bug in their SQL.
     """
-    async with system_session() as session:
-        rows = (
-            await session.execute(
-                select(AgentRun.id, AgentRun.org_id).where(AgentRun.status.in_(ORPHANABLE))
-            )
-        ).all()
+    # **Spans every organization by definition** — "every run left hanging" is
+    # not a question any single `app.org_id` can answer. One audited function
+    # instead of the owner connection this used to take (B-123). The statuses are
+    # fixed inside the function; `tests/db/test_security_definer.py` asserts its
+    # list and `ORPHANABLE` still agree.
+    async with app_session() as session:
+        rows = (await session.execute(text("SELECT run_id, org_id FROM ops_orphaned_runs()"))).all()
 
     swept = 0
     for run_id, org_id in rows:

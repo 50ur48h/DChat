@@ -16,11 +16,11 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from dataagent.auth.principal import Principal
-from dataagent.db.engine import system_session
-from dataagent.db.models import OrgMembership, User
+from dataagent.db.models import User
+from dataagent.tenancy.session import app_session
 
 
 class AuthorizationError(Exception):
@@ -47,7 +47,10 @@ class RequestContext:
 
 async def resolve_user_id(principal: Principal) -> uuid.UUID | None:
     """The local user row for this token's subject, if we have ever seen them."""
-    async with system_session() as session:
+    # `users` is not tenant-scoped and carries no RLS policy, so the application
+    # role reads it directly (B-123). This used to take the owner connection,
+    # which is how every authenticated request came to need one.
+    async with app_session() as session:
         result = await session.execute(
             select(User.id).where(User.external_subject == principal.subject)
         )
@@ -69,13 +72,18 @@ async def resolve_context(principal: Principal, org_id: uuid.UUID) -> RequestCon
             "unknown_user", "No account exists for this identity in this deployment"
         )
 
-    async with system_session() as session:
+    # **`org_memberships` is a tenant table and this read happens before the
+    # tenant is known** — which is the authorization bootstrap: `app.org_id`
+    # cannot be set until the caller's membership has been established, and under
+    # RLS with no organization set this query correctly returns nothing. The
+    # bypass is real and narrow, and it lives in one audited function rather than
+    # in an owner connection the whole request path could reach (B-123).
+    async with app_session() as session:
         result = await session.execute(
-            select(OrgMembership.role).where(
-                OrgMembership.user_id == user_id, OrgMembership.org_id == org_id
-            )
+            text("SELECT auth_membership_role(CAST(:user_id AS uuid), CAST(:org_id AS uuid))"),
+            {"user_id": user_id, "org_id": org_id},
         )
-        role = result.scalars().one_or_none()
+        role = result.scalar_one_or_none()
 
     if role is None:
         raise AuthorizationError(

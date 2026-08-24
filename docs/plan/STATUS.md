@@ -62,11 +62,71 @@ Blocked on user: **yes — WP12.2 cannot start.** Two owner tasks, written out a
                  (P1)** and with it the Phase 6 gate; it blocks nothing in
                  Phase 12 either, and WP12.4 turns nightly evals on against dev,
                  so B-029 wants an answer before that gate rather than after.
-Last updated: 2026-08-24 by Claude Code (**dev is deployed and serving**; five dispatches,
+Last updated: 2026-08-24 by Claude Code (**dev deploys end to end and cannot serve an
+              authenticated request**: `/v1/me` 500s because the API has always used the
+              *owner* connection for eight request-path lookups, which CLAUDE.md forbids.
+              **B-123 (P1)** — dev stays broken until the separation is real, the owner's
+              call. Analysis done, fix not written)
               each failing on something no check here could see — OIDC subject, a log
               destination needing a key, BuildKit, an extension allow-list, a browser bundle
               built for localhost. The owner has ruled that **dev proves the deployment path
               and never hosts a demo**; the deployed database stays empty on purpose)
+
+---
+
+## The first authenticated request, 2026-08-24 — and the rule that was never true
+
+**The seventh dispatch went green on all twelve steps.** The web app serves the
+Entra card, `/healthz` names the deployed sha, an unauthenticated `/v1/me` is
+refused with 401, and the vault lists its three secrets. The owner signed in
+successfully.
+
+**Then the first authenticated request failed**, and the reason is not a
+deployment defect.
+
+`/v1/me` returns **500**, and FastAPI adds no CORS headers to an unhandled 500,
+so the browser blocks the response and the client reports *"Could not reach the
+API"* — which is misleading: the API is reachable and answered. The preflight is
+correct (200, right origin, `authorization` allowed); CORS was never the problem.
+
+From the API's own logs: `RuntimeError: DATABASE_URL is not set`, raised inside
+`sweep_orphaned_runs` at startup and again inside `/v1/me`.
+
+**`apps.bicep` sets `APP_DATABASE_URL` and never `DATABASE_URL`.** That omission
+is real — and fixing it is refused, because of what it exposed.
+
+### What it exposed
+
+`system_session()` is the **owner** connection. Its docstring says *"for
+migrations, bootstrap and admin jobs only"*. Eight call sites in six request-path
+modules use it, including `auth/context.py`, which is every authenticated
+request. CLAUDE.md's hard rule is *"Never collapse the two"*, and the API has
+collapsed them on every developer machine since Phase 1 — invisibly, because
+every `.env` sets both DSNs.
+
+**Azure is the first environment that handed the API only the unprivileged DSN.**
+A configuration omission surfaced a design violation; had the Bicep been
+"correct", the rule would still be false and nothing would have said so.
+`rls_proof` proves `dataagent_app` cannot cross tenants and says nothing about
+which role the API connects as.
+
+### The owner's decision, and the price
+
+Offered the one-line fix — give the deployed API `DATABASE_URL` too — the owner
+refused it: *"A makes the hard rule false in the environment where it matters
+most, and a temporary owner credential is exactly what my dev rule exists to
+prevent."* **Dev stays broken until the separation is real.**
+
+### Why the fix is not simple
+
+Three of the eight sites touch only non-tenant tables (`users`,
+`security_events`) and move to the app engine unchanged. **The other five read
+genuine tenant tables**, either across every organization or *before* the
+organization is known — which is the authorization bootstrap, since `app.org_id`
+cannot be set until the caller's membership has been discovered. Under the app
+role those five correctly return nothing.
+
+Filed as **B-123 (P1)** with the three candidate designs and what each costs.
 
 ---
 

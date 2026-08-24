@@ -15,13 +15,12 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dataagent.auth.principal import Principal
-from dataagent.db.engine import system_session
 from dataagent.db.models import AuditLog, Organization, OrgMembership, User
-from dataagent.tenancy.session import org_session
+from dataagent.tenancy.session import app_session, org_session
 
 ROLE_ADMIN = "admin"
 
@@ -81,7 +80,9 @@ async def ensure_user(principal: Principal) -> User:
     features will trust. A claim that shows up later is recorded then — which is
     what happens when an administrator finally adds the optional claim.
     """
-    async with system_session() as session:
+    # `users` is not tenant-scoped and has no RLS policy; the application role
+    # holds SELECT/INSERT/UPDATE on it from revision 0002 (B-123).
+    async with app_session() as session:
         existing = (
             (await session.execute(select(User).where(User.external_subject == principal.subject)))
             .scalars()
@@ -119,12 +120,17 @@ async def memberships_for(user_id: uuid.UUID) -> list[Membership]:
     there is no single ``app.org_id`` that could scope it. It returns only rows
     joined to this user's own id, so it cannot become a way to enumerate tenants.
     """
-    async with system_session() as session:
+    # **Spans every organization by definition** — "which tenants is this person
+    # in" is the one question no single `app.org_id` can answer, so it cannot be
+    # an org-scoped query. One audited function instead of an owner connection
+    # (B-123).
+    async with app_session() as session:
         rows = await session.execute(
-            select(OrgMembership.org_id, Organization.name, OrgMembership.role)
-            .join(Organization, Organization.id == OrgMembership.org_id)
-            .where(OrgMembership.user_id == user_id)
-            .order_by(Organization.name)
+            text(
+                "SELECT org_id, org_name, member_role "
+                "FROM auth_memberships_for_user(CAST(:user_id AS uuid))"
+            ),
+            {"user_id": user_id},
         )
         return [Membership(org_id=o, org_name=n, role=r) for o, n, r in rows.all()]
 

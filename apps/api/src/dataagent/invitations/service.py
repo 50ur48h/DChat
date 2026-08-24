@@ -18,12 +18,11 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
-from dataagent.db.engine import system_session
-from dataagent.db.models import Invitation, Organization, OrgMembership, User
+from dataagent.db.models import Invitation, OrgMembership, User
 from dataagent.orgs.service import ConflictError, audit
-from dataagent.tenancy.session import org_session
+from dataagent.tenancy.session import app_session, org_session
 
 TOKEN_BYTES = 32
 EXPIRY = timedelta(days=7)
@@ -98,34 +97,32 @@ async def accept_invitation(*, user: User, token: str) -> AcceptedInvitation:
     """
     invalid = ConflictError("That invitation is not valid. Ask an admin for a new one.")
 
-    async with system_session() as session:
-        invitation = (
-            (
-                await session.execute(
-                    select(Invitation).where(Invitation.token_hash == hash_token(token))
-                )
+    # **The token is the only thing known here.** Which organization it belongs
+    # to is the *answer*, so there is no `app.org_id` to scope by and RLS would
+    # return nothing. One audited lookup rather than an owner connection
+    # (B-123); every write below is already org-scoped, which is why only the
+    # read needed anything.
+    async with app_session() as session:
+        found = (
+            await session.execute(
+                text(
+                    "SELECT id, org_id, org_name, member_role, expires_at, accepted_at "
+                    "FROM auth_invitation_by_token(CAST(:token_hash AS varchar))"
+                ),
+                {"token_hash": hash_token(token)},
             )
-            .scalars()
-            .one_or_none()
-        )
+        ).one_or_none()
 
-        if invitation is None or invitation.accepted_at is not None:
-            raise invalid
-        if invitation.expires_at <= datetime.now(UTC):
-            raise invalid
+    if found is None or found.accepted_at is not None:
+        raise invalid
+    if found.expires_at <= datetime.now(UTC):
+        raise invalid
 
-        org_name = (
-            (
-                await session.execute(
-                    select(Organization.name).where(Organization.id == invitation.org_id)
-                )
-            )
-            .scalars()
-            .one()
-        )
+    invitation_id = found.id
+    org_name = found.org_name
+    role = found.member_role
 
-    org_id = invitation.org_id
-    role = invitation.role
+    org_id = found.org_id
 
     async with org_session(org_id) as session:
         already = (
@@ -149,7 +146,7 @@ async def accept_invitation(*, user: User, token: str) -> AcceptedInvitation:
             (
                 await session.execute(
                     select(Invitation).where(
-                        Invitation.id == invitation.id, Invitation.accepted_at.is_(None)
+                        Invitation.id == invitation_id, Invitation.accepted_at.is_(None)
                     )
                 )
             )
@@ -167,7 +164,7 @@ async def accept_invitation(*, user: User, token: str) -> AcceptedInvitation:
             actor_user_id=user.id,
             action="invitation.accepted",
             object_type="invitation",
-            object_id=str(invitation.id),
+            object_id=str(invitation_id),
             details={"role": role},
         )
 
