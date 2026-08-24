@@ -87,6 +87,53 @@ Last updated: 2026-08-24 by Claude Code (**dev serves authenticated requests and
 
 ---
 
+## The pipeline asks the app what it can do, 2026-08-25 (B-125, B-129)
+
+**Key Vault taught this the expensive way and Blob was about to.** Registering a
+data source writes a customer's credential to Key Vault; the app identity held a
+**read-only** role, so the product's central action failed on a deployment that
+was otherwise healthy, and the way we found out was a person clicking a button
+(**B-125**). Every query execution writes a result artifact to **Blob**, and no
+run has ever completed in Azure — so that path was in exactly the same position,
+waiting for the first successful question.
+
+**The obvious check would have been worthless, and that is the interesting part.**
+`deploy_smoke.sh` runs on the GitHub runner, authenticated as the **OIDC deploy
+identity**, which has broad permissions on the resource group. A vault write from
+there would have succeeded happily throughout the entire period B-125 was live —
+a check that passes for a reason unrelated to the thing it checks, which is the
+class that has now cost this project five separate incidents.
+
+So the check runs **as the app**: a Container Apps job on the same user-assigned
+identity as the API, executing `python -m dataagent.ops.selfcheck`, which goes
+through the product's own `get_secrets_provider()` and `artifact_store()` rather
+than calling the Azure SDK directly. A bespoke SDK call can succeed against a
+resource the product cannot use.
+
+* **Key Vault**: write, read, delete, and confirm gone. All four, because the
+  product needs all four — `delete` is the verb *Secrets User* lacked alongside
+  `set`, and rotating or removing a data source both delete.
+* **Blob**: write and read. Two verbs, not four, because `ArtifactStore` has no
+  delete — that is **B-021**, and asserting on a permission nothing needs would
+  fail a deployment for the wrong reason. The probe is cleaned up best-effort and
+  the `expire-artifacts` lifecycle rule catches what is left.
+
+**Backend-agnostic on purpose**, so the local backends are the control: the suite
+proves the check *can* pass against a real `LocalSecretsProvider` and a real
+`LocalArtifactStore`, and fourteen tests prove it fails on each separate way a
+permission can be missing. The sharpest is `silent` — a backend whose `delete`
+reports success and keeps the value passes the write, the read *and* the delete,
+and only the read afterwards catches it.
+
+**B-129, found while listing what dev cannot do**: `storage.bicep` creates a
+`documents` container that nothing writes to, reads from or names — knowledge
+text lives in Postgres (revision 0016). An empty container costs nothing; a name
+asserting a purpose the system does not have costs whatever the next person
+builds on it, and that container is outside the retention policy and has no
+tenant-prefix rule behind it.
+
+---
+
 ## Every question failed, 2026-08-24 — a credential with no configuration (B-126)
 
 The owner registered the F&B customer database through the UI, asked it two

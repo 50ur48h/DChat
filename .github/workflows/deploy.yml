@@ -247,6 +247,24 @@ jobs:
           KEY_VAULT: ${{ steps.infra.outputs.key_vault }}
           RESOURCE_GROUP: ${{ env.RESOURCE_GROUP }}
 
+      # **What the smoke above cannot ask.** `deploy_smoke.sh` runs on this
+      # runner, authenticated as the OIDC deploy identity — so every question it
+      # asks about a resource is answered with *that* identity's permissions. A
+      # vault write from here would have succeeded throughout the entire period
+      # the app identity held a read-only role (B-125), and reported a working
+      # deployment while registering a data source was impossible.
+      #
+      # This step starts a job that runs **as the app**, and it is the only thing
+      # in the pipeline that exercises Key Vault write/delete and Blob
+      # write/read at all. Last, deliberately: nothing depends on it, so a
+      # failure names a permission on a deployment that is otherwise complete.
+      - name: Ask the app's own identity whether it can store what the product stores
+        run: bash ops/scripts/deploy_selfcheck.sh
+        env:
+          RESOURCE_GROUP: ${{ env.RESOURCE_GROUP }}
+          REGISTRY: ${{ steps.infra.outputs.registry }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
+
       - name: Say where it is
         run: |
           echo "### Deployed \`${IMAGE_TAG:0:12}\` to dev" >> "$GITHUB_STEP_SUMMARY"

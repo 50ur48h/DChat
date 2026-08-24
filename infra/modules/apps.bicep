@@ -424,6 +424,92 @@ resource environmentDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-0
 // between pushing the image and swapping the app revision. Nothing runs it on a
 // timer, because a migration that happens when nobody asked is a schema change
 // nobody reviewed.
+// **The identity self-check** (**B-125**, and Blob before it happens again).
+//
+// Registering a data source writes a customer's credential to Key Vault; every
+// query execution writes a result artifact to Blob. Both are things only the
+// *application's* identity does, and both were first exercised by a person
+// clicking a button — the vault one failed, because the identity had been granted
+// a read-only role with a comment that argued for it convincingly.
+//
+// **Why this cannot be a step in the pipeline.** The deploy job authenticates as
+// the OIDC identity, which holds broad permissions on the resource group. A vault
+// write from the runner would have passed for the entire period B-125 was live:
+// a check that passes for a reason unrelated to the thing it checks, which is the
+// failure this repository keeps re-finding. The only way to test what the app can
+// do is to run as the app, which is what this job is.
+//
+// It touches **no database**, so it is independent of the migration job and its
+// failure means one thing only: this identity cannot store what the product
+// stores.
+resource selfcheck 'Microsoft.App/jobs@2024-03-01' = if (deployJobs) {
+  name: 'cj-dataagent-selfcheck-${env}'
+  location: location
+  tags: tags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${identityId}': {}
+    }
+  }
+  properties: {
+    environmentId: environment.id
+    configuration: {
+      triggerType: 'Manual'
+      // Two minutes. Four round trips to two Azure services; anything longer is
+      // a hang rather than slowness, and a smoke check that waits ten minutes to
+      // report a permission problem is one people stop waiting for.
+      replicaTimeout: 120
+      // **One retry, unlike the migration job's zero.** These operations are
+      // idempotent — each writes under a fresh uuid and deletes it — so a retry
+      // cannot corrupt anything, and a transient 503 from Key Vault failing a
+      // deploy would be its own kind of check that fails for the wrong reason.
+      replicaRetryLimit: 1
+      manualTriggerConfig: {
+        parallelism: 1
+        replicaCompletionCount: 1
+      }
+      registries: registryConfig
+    }
+    template: {
+      containers: [
+        {
+          name: 'selfcheck'
+          image: '${registryLoginServer}/dataagent-api:${imageTag}'
+          command: ['sh', '-c']
+          args: ['python -m dataagent.ops.selfcheck']
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+          // **The app's storage configuration and nothing else.** No DSN, no
+          // model configuration, no OIDC: this job answers one question, and
+          // giving it more environment would let it fail for reasons that are
+          // not that question.
+          env: concat(commonEnv, [
+            {
+              name: 'SECRETS_BACKEND'
+              value: 'keyvault'
+            }
+            {
+              name: 'KEY_VAULT_URL'
+              value: keyVaultUri
+            }
+            {
+              name: 'ARTIFACTS_BACKEND'
+              value: 'blob'
+            }
+            {
+              name: 'ARTIFACTS_ACCOUNT_URL'
+              value: blobEndpoint
+            }
+          ])
+        }
+      ]
+    }
+  }
+}
+
 resource migrate 'Microsoft.App/jobs@2024-03-01' = if (deployJobs) {
   name: 'cj-dataagent-migrate-${env}'
   location: location
