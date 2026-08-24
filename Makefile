@@ -244,7 +244,7 @@ web.dev: ## next dev on :3000
 	$(PNPM_WEB) dev
 
 build.web: ## Build the production web image
-	docker build --target prod -t dataagent-web:local $(WEB_DIR)
+	docker build --target prod --build-arg NEXT_PUBLIC_API_URL=http://localhost:8000 --build-arg NEXT_PUBLIC_ENV=local -t dataagent-web:local $(WEB_DIR)
 
 .PHONY: evals
 evals: .env ## Run the 20 golden evals (FakeLLM by default; EVALS_LIVE=1 for real models)

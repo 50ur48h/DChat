@@ -38,8 +38,42 @@ CMD ["pnpm", "dev"]
 # Production build.
 # --------------------------------------------------------------------------
 FROM base AS build
-ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+
+# **No default, and the previous one was `http://localhost:8000`.** A build that
+# forgot this argument produced an image whose browser bundle pointed at the
+# machine of whoever happened to open it: the first deployed page load showed
+# "Could not reach the API at http://localhost:8000" while a perfectly healthy
+# API ran a few metres away. A default that is *somebody's laptop* is worse than
+# no default, because it fails somewhere the build cannot see.
+ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+
+# **`entra` unless told otherwise**, matching `config.py`'s reasoning: the weaker
+# mode must always be something someone chose. Shipped as `dev` by omission once,
+# and a public page offered to mint a token for any name typed into it.
+ARG NEXT_PUBLIC_AUTH_MODE=entra
+ENV NEXT_PUBLIC_AUTH_MODE=${NEXT_PUBLIC_AUTH_MODE}
+
+# The second half of that guard. `config.ts` refuses dev sign-in unless the build
+# says local or ci, so this defaulting to `prod` means an image has to be built
+# deliberately for a laptop before it can render a name box.
+ARG NEXT_PUBLIC_ENV=prod
+ENV NEXT_PUBLIC_ENV=${NEXT_PUBLIC_ENV}
+
+# Public identifiers, not secrets: a tenant id and a client id are published in
+# every SPA that uses them, and the PKCE flow has no client secret at all.
+ARG NEXT_PUBLIC_ENTRA_AUTHORITY=
+ARG NEXT_PUBLIC_ENTRA_CLIENT_ID=
+ARG NEXT_PUBLIC_API_SCOPE=
+ENV NEXT_PUBLIC_ENTRA_AUTHORITY=${NEXT_PUBLIC_ENTRA_AUTHORITY}     NEXT_PUBLIC_ENTRA_CLIENT_ID=${NEXT_PUBLIC_ENTRA_CLIENT_ID}     NEXT_PUBLIC_API_SCOPE=${NEXT_PUBLIC_API_SCOPE}
+
+# **Refuse rather than bake a bundle nobody can use.** `NEXT_PUBLIC_*` is inlined
+# at build time, so a wrong value here is not a configuration mistake that can be
+# corrected by restarting the container — it is a property of the image, and the
+# only fix is another build. Failing here costs a minute; failing in a browser
+# cost a deploy.
+RUN test -n "${NEXT_PUBLIC_API_URL}" || (     echo "NEXT_PUBLIC_API_URL is empty. It is inlined into the browser bundle, so" >&2;     echo "an image built without it can never reach an API. Pass it:" >&2;     echo "  docker build --target prod --build-arg NEXT_PUBLIC_API_URL=https://... apps/web" >&2;     exit 1)
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN pnpm build

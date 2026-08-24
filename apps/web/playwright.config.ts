@@ -55,6 +55,14 @@ export default defineConfig({
     env: {
       // Development sign-in, so a real browser holds a real session without an
       // identity provider (`lib/auth/dev-tokens.ts`).
+      //
+      // **`NEXT_PUBLIC_ENV` is not optional here.** `authConfig` refuses dev
+      // sign-in unless the build says local or ci, because a deploy once shipped
+      // a public page offering to mint a token for any name typed into it.
+      // Without this line that refusal fires here too: the suite gets the Entra
+      // card, no test can sign in, and all nine conversation tests fail at the
+      // first `getByLabel("Who are you")` — which is what happened.
+      NEXT_PUBLIC_ENV: "ci",
       NEXT_PUBLIC_AUTH_MODE: "dev",
       NEXT_PUBLIC_API_URL: `http://127.0.0.1:${STUB_PORT}`,
     },

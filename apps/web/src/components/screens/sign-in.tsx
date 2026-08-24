@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { useSession } from "@/lib/auth/session";
 
 import styles from "./sign-in.module.css";
+import { devSignInWasRefused } from "@/lib/auth/config";
 
 export function SignIn() {
   const session = useSession();
@@ -31,6 +32,12 @@ export function SignIn() {
           {session.busy ? "Starting…" : "Sign in"}
         </Button>
         {session.error && <p className={styles.error}>{session.error}</p>}
+        {devSignInWasRefused() && (
+          <p className={styles.error}>
+            This build asked for development sign-in and was refused: it was not built
+            for a local environment. Entra is being used instead.
+          </p>
+        )}
       </Card>
     );
   }

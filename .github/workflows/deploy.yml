@@ -95,6 +95,7 @@ jobs:
           {
             echo "registry=$(jq -r .registryLoginServer.value outputs.json)"
             echo "key_vault=$(jq -r .keyVaultName.value outputs.json)"
+            echo "api_url=$(jq -r .apiUrl.value outputs.json)"
           } >> "$GITHUB_OUTPUT"
 
       # **Phase 2 — the vault, before anything reads it.**
@@ -129,14 +130,32 @@ jobs:
         run: |
           registry='${{ steps.infra.outputs.registry }}'
           az acr login --name "${registry%%.*}"
-          for app in api web; do
-            docker build \
-              --target prod \
-              --build-arg "GIT_SHA=${GITHUB_SHA}" \
-              --tag "${registry}/dataagent-${app}:${IMAGE_TAG}" \
-              "apps/${app}"
-            docker push "${registry}/dataagent-${app}:${IMAGE_TAG}"
-          done
+
+          docker build \
+            --target prod \
+            --build-arg "GIT_SHA=${GITHUB_SHA}" \
+            --tag "${registry}/dataagent-api:${IMAGE_TAG}" \
+            apps/api
+          docker push "${registry}/dataagent-api:${IMAGE_TAG}"
+
+          # **Every NEXT_PUBLIC_* the browser needs, at build time.** They are
+          # inlined into the bundle, so they are properties of the image and
+          # cannot be corrected by restarting a container. The first deploy
+          # passed none: the bundle pointed at http://localhost:8000 — the
+          # Dockerfile's old default, which is somebody's laptop — and rendered
+          # the dev sign-in card on a public URL, because the auth mode defaulted
+          # to dev whenever it was unset.
+          docker build \
+            --target prod \
+            --build-arg "GIT_SHA=${GITHUB_SHA}" \
+            --build-arg "NEXT_PUBLIC_API_URL=${{ steps.infra.outputs.api_url }}" \
+            --build-arg "NEXT_PUBLIC_ENV=dev" \
+            --build-arg "NEXT_PUBLIC_AUTH_MODE=entra" \
+            --build-arg "NEXT_PUBLIC_ENTRA_AUTHORITY=${{ vars.NEXT_PUBLIC_ENTRA_AUTHORITY }}" \
+            --build-arg "NEXT_PUBLIC_ENTRA_CLIENT_ID=${{ vars.NEXT_PUBLIC_ENTRA_CLIENT_ID }}" \
+            --build-arg "NEXT_PUBLIC_API_SCOPE=${{ vars.NEXT_PUBLIC_API_SCOPE }}" \
+            apps/web
+          docker push "${registry}/dataagent-web:${IMAGE_TAG}"
 
       # **Phase 3 — the migration job, still without the apps.** It exists now
       # because the vault has what it reads and the image it runs exists.

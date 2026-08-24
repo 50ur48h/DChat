@@ -90,12 +90,14 @@ var secretNames = {
   databasePassword: 'database-password'
 }
 
-// **Deployed only when something will run in it** (`deployApps || deployJobs`).
-// It was unconditional, and that made a phase-4 resource fail in phase 1 — the
-// first real deploy stopped here with `deployApps=false`, which is a lie about
-// where the risk is. The migration job needs the environment as much as the apps
-// do, so the condition is the disjunction and not `deployApps` alone.
-resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = if (deployApps || deployJobs) {
+// **Unconditional, and it belongs in phase 1 after all.** It was briefly gated on
+// `deployApps || deployJobs`, because a broken log configuration made a phase-4
+// resource fail a phase-1 pass. That configuration is fixed, and the environment
+// turns out to be genuinely phase-1: its `defaultDomain` is the only place the
+// API's public hostname comes from, and `NEXT_PUBLIC_API_URL` is **inlined into
+// the browser bundle at build time**, so the web image cannot be built until this
+// exists. Gating it would deadlock the pipeline rather than protect it.
+resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = {
   name: 'cae-dataagent-${env}'
   location: location
   tags: tags
@@ -171,9 +173,21 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
   properties: {
     managedEnvironmentId: environment.id
     configuration: {
-      // **Internal.** Reachable from inside the environment and nowhere else.
+      // **External, and the previous `false` made the product unusable.** The
+      // browser talks to this API directly: it holds the Entra token and
+      // presents it per request (architecture 157), and run progress arrives
+      // over SSE from this origin. An internal ingress has an `.internal.`
+      // hostname that resolves only inside the environment, so the deployed web
+      // app could not reach it from anyone's browser — which is exactly what the
+      // first real page load showed.
+      //
+      // This is not a weaker posture than the comment it replaces implied.
+      // Architecture 0.2.3 and 7 are explicit that Container Apps ingress *is*
+      // the gateway for V1 — it terminates TLS, the API validates every JWT, and
+      // rate limits live in the app because quotas are business logic. What
+      // protects this surface is the token check, not the absence of a hostname.
       ingress: {
-        external: false
+        external: true
         targetPort: 8000
         transport: 'auto'
         allowInsecure: false
@@ -249,6 +263,15 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
               name: 'AUTH_MODE'
               value: 'entra'
             }
+            {
+              // Never set before, so the API defaulted to `http://localhost:3000`
+              // and would have refused the deployed web app's own browser even
+              // once it could reach it. Built from the environment domain rather
+              // than passed in, so it cannot drift from the hostname the web app
+              // is actually served on.
+              name: 'CORS_ORIGINS'
+              value: 'https://ca-dataagent-web-${env}.${environment.properties.defaultDomain}'
+            }
           ])
           probes: [
             {
@@ -275,7 +298,7 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
 // azure-monitor` says *emit*; this says *to here*. Split in two because the
 // routing is a property of the subscription's monitoring, not of the
 // application — and because it is the half that needs no credential.
-resource environmentDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = if (deployApps || deployJobs) {
+resource environmentDiagnostics 'Microsoft.Insights/diagnosticSettings@2021-05-01-preview' = {
   name: 'send-to-log-analytics'
   scope: environment
   properties: {
@@ -440,7 +463,10 @@ resource web 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
   }
 }
 
-output environmentId string = environment.?id ?? ''
+output environmentId string = environment.id
+
+@description('The environment domain every app hostname is built from. The web build needs the API hostname before either app exists, and this is where it comes from.')
+output defaultDomain string = environment.properties.defaultDomain
 output apiFqdn string = api.?properties.?configuration.?ingress.?fqdn ?? ''
 output webFqdn string = web.?properties.?configuration.?ingress.?fqdn ?? ''
 output secretNames object = secretNames
