@@ -22,12 +22,23 @@ description = "Public Azure constants, and the fixtures a guard needs to test it
 
 regexes = [
   # **Azure built-in role definition ids.** These are documented, public, and
-  # identical in every tenant on earth — `4633458b-…` is Key Vault Secrets User
+  # identical in every tenant on earth — `b86a8fe4-…` is Key Vault Secrets Officer
   # for everyone. `infra/modules/roles.bicep` must carry them as literals because
   # role names are display strings and are not unique; the GUID is what Azure
   # matches on. Listed individually rather than as "any GUID", so a real secret
   # that happens to be GUID-shaped is still caught.
-  '''4633458b-17de-408a-b874-0445c86b69e6''',  # Key Vault Secrets User
+  #
+  # **This list drifted from the template and CI found out the hard way** (B-130).
+  # #107 swapped the vault role from Secrets User to Secrets Officer and did not
+  # touch this file, which kept allowlisting a value nothing used. Nothing failed
+  # then, because the id #107 introduced was **invented** and happened not to trip
+  # the entropy heuristic; the moment it was corrected to the real one, gitleaks
+  # flagged it as `generic-api-key` and the PR fixing a broken deploy went red on
+  # its own fix. `ops/scripts/check_role_definitions.sh --allowlist-only` runs in
+  # `hygiene` now and fails when this list and `roles.bicep` disagree in either
+  # direction — a stale entry allowlists a value nothing uses, which is how a real
+  # secret could inherit an exemption written for a role.
+  '''b86a8fe4-44ce-4948-aee5-eccb2c155cd7''',  # Key Vault Secrets Officer
   '''ba92f5b4-2d11-453d-a403-e96b0029c9fe''',  # Storage Blob Data Contributor
   '''7f951dda-4ed3-4680-a7ca-43fe172d538d''',  # AcrPull
 ]

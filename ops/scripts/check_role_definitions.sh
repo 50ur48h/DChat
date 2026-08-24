@@ -30,11 +30,27 @@
 # be covered — if that ever happens, widen this deliberately rather than by
 # globbing.
 #
+# **A second check, added when this PR's own fix went red.** `.gitleaks.toml`
+# allowlists these ids by value, because a public role id looks exactly like a
+# leaked key to an entropy heuristic. That list drifted: #107 swapped the vault
+# role and left the allowlist naming the old one, and nothing noticed — the
+# invented id happened not to trip the heuristic, so the scanner stayed quiet
+# until the id was corrected. Then `hygiene` failed on the *fix*.
+#
+# So `--allowlist-only` compares the two lists in both directions and needs no
+# Azure at all, which is why `hygiene` can run it on every PR: an id in the
+# template that is not allowlisted will fail the scanner, and an id allowlisted
+# that the template no longer uses is an exemption a real secret could inherit.
+#
 # POSIX sh, for the reason the other ops scripts are: see db_setup.sh.
 
 set -eu
 
 ROLES_FILE="${ROLES_FILE:-infra/modules/roles.bicep}"
+GITLEAKS_FILE="${GITLEAKS_FILE:-.gitleaks.toml}"
+
+ALLOWLIST_ONLY=0
+[ "${1:-}" = "--allowlist-only" ] && ALLOWLIST_ONLY=1
 
 [ -f "$ROLES_FILE" ] || {
   echo "check_role_definitions: $ROLES_FILE does not exist — is the path right?" >&2
@@ -57,6 +73,51 @@ if [ -z "$ids" ]; then
 fi
 
 failures=0
+
+# --- The allowlist, in both directions. No Azure needed. --------------------
+#
+# The same GUID pattern, read out of the toml. Both directions matter and for
+# different reasons: an id the template uses and the allowlist omits fails the
+# secret scanner on a value that is public, and an id the allowlist keeps after
+# the template drops it is a standing exemption that a future secret could
+# inherit.
+if [ -f "$GITLEAKS_FILE" ]; then
+  allowed=$(grep -oE "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}" "$GITLEAKS_FILE" |
+    sort -u)
+
+  for id in $ids; do
+    if ! printf '%s\n' "$allowed" | grep -qx "$id"; then
+      printf '  FAIL  %s is used by %s and not allowlisted in %s\n' \
+        "$id" "$ROLES_FILE" "$GITLEAKS_FILE" >&2
+      echo "        gitleaks reads a public role id as a generic-api-key, so the" >&2
+      echo "        scanner fails on it. Add it beside the others, with the role" >&2
+      echo "        name in the comment." >&2
+      failures=$((failures + 1))
+    fi
+  done
+
+  for id in $allowed; do
+    if ! printf '%s\n' "$ids" | grep -qx "$id"; then
+      printf '  FAIL  %s is allowlisted in %s and no longer used by %s\n' \
+        "$id" "$GITLEAKS_FILE" "$ROLES_FILE" >&2
+      echo "        A stale exemption is one a real secret could inherit. Remove it." >&2
+      failures=$((failures + 1))
+    fi
+  done
+
+  [ "$failures" -gt 0 ] || echo "  ok    every role id is allowlisted, and nothing stale is"
+fi
+
+if [ "$ALLOWLIST_ONLY" -eq 1 ]; then
+  if [ "$failures" -gt 0 ]; then
+    echo "check_role_definitions: $failures allowlist problem(s)." >&2
+    exit 1
+  fi
+  echo "check_role_definitions: $ROLES_FILE and $GITLEAKS_FILE agree."
+  exit 0
+fi
+
+# --- Does each id name a role that exists? Only Azure knows. ----------------
 for id in $ids; do
   name=$(az role definition list --query "[?name=='$id'].roleName" -o tsv --only-show-errors 2>/dev/null | head -1)
   if [ -n "$name" ]; then
