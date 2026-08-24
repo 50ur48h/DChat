@@ -154,6 +154,7 @@ jobs:
             --build-arg "NEXT_PUBLIC_ENTRA_AUTHORITY=${{ vars.NEXT_PUBLIC_ENTRA_AUTHORITY }}" \
             --build-arg "NEXT_PUBLIC_ENTRA_CLIENT_ID=${{ vars.NEXT_PUBLIC_ENTRA_CLIENT_ID }}" \
             --build-arg "NEXT_PUBLIC_API_SCOPE=${{ vars.NEXT_PUBLIC_API_SCOPE }}" \
+            --tag "${registry}/dataagent-web:${IMAGE_TAG}" \
             apps/web
           docker push "${registry}/dataagent-web:${IMAGE_TAG}"
 
