@@ -70,9 +70,9 @@ def _reflect(
     ).model_dump_json()
 
 
-def _final(answer: str, *, answered: bool = True, cite: list[str] | None = None) -> str:
+def _final(answer: str, *, unanswered: str = "", cite: list[str] | None = None) -> str:
     return FinalizeIn(
-        answer=answer, answered=answered, supported_by=cite or [], confidence="high"
+        answer=answer, unanswered=unanswered, supported_by=cite or [], confidence="high"
     ).model_dump_json()
 
 
@@ -163,7 +163,7 @@ async def test_a_question_becomes_sql_rows_and_a_cited_answer(
     outcome = await _execute(context, run_id)
 
     assert outcome.status == "completed"
-    assert outcome.answered is True
+    assert outcome.state == "answered"
     assert outcome.iterations == 1, "one step was enough, so one step is what it took"
     assert outcome.stopped_by is None, "nothing cut this short"
     assert len(outcome.execution_ids) == 1
@@ -182,7 +182,7 @@ async def test_a_question_becomes_sql_rows_and_a_cited_answer(
     assert view.method.startswith("1 query over one step"), view.method
     # **The control for B-133.** Without it `answered is False` on the refusal
     # test passes against a column nothing ever sets to True.
-    assert view.answered is True
+    assert view.state == "answered"
 
 
 async def test_a_rephrased_answer_is_not_a_second_finding(
@@ -334,7 +334,7 @@ async def test_a_hallucinated_column_is_corrected_on_the_next_iteration(
 
     outcome = await _execute(context, run_id)
 
-    assert outcome.answered is True
+    assert outcome.state == "answered"
     assert outcome.iterations == 2, "one iteration to be refused, one to succeed"
     assert outcome.stopped_by is None
     assert await _types(context, run_id) == [
@@ -423,24 +423,24 @@ async def test_a_refusal_that_is_never_corrected_ends_honestly(
     fabrication."""
     fake_llm.script(_plan("SELECT revenue_total FROM shops"), role="sql")
     fake_llm.script(_reflect(done=False), role="plan")
-    fake_llm.script(_final("I could not answer that.", answered=False), role="compose")
+    fake_llm.script(_final("I could not answer that.", unanswered="all of it"), role="compose")
     fake_llm.script(_passes(), role="critic")
     run_id = await _run_for(context, "How much revenue?")
 
     outcome = await _execute(context, run_id)
 
     assert outcome.status == "completed", "an honest refusal is an ending, not a failure"
-    assert outcome.answered is False
+    assert outcome.state in {"refused", "partly"}
     assert outcome.execution_ids == ()
     view = await runs.get_run(org_id=context.org_id, run_id=run_id)
     # Nothing was concluded about the data, so there is nothing to stand behind.
     assert view.findings == []
     # **And the run says so where a screen can read it** (**B-133**). This was the
-    # gap: `outcome.answered` was already False above, and stopped there — it went
+    # gap: the outcome already knew this above, and stopped there — it went
     # into the `run_finished` event's totals and onto no column, so `RunView` could
     # not carry it and the card rendered `completed` as the word "answered". The
     # assertion is on the *view* rather than the outcome for exactly that reason.
-    assert view.answered is False, (
+    assert view.state in {"refused", "partly"}, (
         "a refusal that the API reports as indistinguishable from an answer is a "
         "refusal the screen will label 'answered'"
     )
@@ -474,7 +474,7 @@ async def test_a_failure_rewriting_cannot_fix_stops_the_loop(
     outcome = await _execute(context, run_id)
 
     assert real_call is not None
-    assert outcome.answered is False
+    assert outcome.state in {"refused", "partly"}
     assert outcome.iterations == 1, "it stopped rather than trying again"
     # One plan call and nothing else: no reflection, no compose. There is nothing
     # to reflect on and nothing to compose from.
@@ -519,7 +519,9 @@ async def test_a_run_whose_every_query_failed_refuses_instead_of_describing_the_
     outcome = await _execute(context, run_id)
 
     assert outcome.status == "completed", "an honest refusal is an ending, not a failure"
-    assert outcome.answered is False, "nothing reached the database, so nothing was answered"
+    assert outcome.state in {"refused", "partly"}, (
+        "nothing reached the database, so nothing was answered"
+    )
     assert outcome.llm_calls == 1, "no composing call: there was nothing to compose from"
 
     view = await runs.get_run(org_id=context.org_id, run_id=run_id)
@@ -551,7 +553,7 @@ async def test_a_question_the_catalog_cannot_answer_refuses_without_querying(
 
     outcome = await _execute(context, run_id)
 
-    assert outcome.answered is False
+    assert outcome.state in {"refused", "partly"}
     assert outcome.status == "completed"
     assert outcome.llm_calls == 1, "a refusal should not pay for a composing call"
     assert outcome.iterations == 1
@@ -941,7 +943,7 @@ async def test_a_run_that_passes_is_criticised_once_and_left_alone(
     assert verdicts[0].payload["verdict"] == "pass"
     assert verdicts[0].payload["consulted_model"] is True
     assert len(fake_llm.calls_for("compose")) == 1
-    assert outcome.answered is True
+    assert outcome.state == "answered"
 
 
 async def test_the_verdict_schema_is_enforced(context: ToolContext, fake_llm: FakeLLM) -> None:

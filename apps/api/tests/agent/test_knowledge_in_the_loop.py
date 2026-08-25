@@ -74,7 +74,7 @@ def _reflect(*, done: bool, statement: str = "") -> str:
 
 def _final() -> str:
     return FinalizeIn(
-        answer="Here is what I found.", answered=True, supported_by=[], confidence="medium"
+        answer="Here is what I found.", supported_by=[], confidence="medium"
     ).model_dump_json()
 
 
@@ -250,7 +250,7 @@ async def test_a_plan_that_cannot_answer_yet_looks_the_term_up_instead_of_refusi
 
     assert len(await _events(context, run_id, "knowledge_consulted")) == 1
     assert FROM_THE_DOCUMENT in fake_llm.prompts(role="sql")[1]
-    assert outcome.answered, "the run refused instead of asking what the term meant"
+    assert outcome.state == "answered", "the run refused instead of asking what the term meant"
 
 
 async def test_an_unanswerable_plan_with_nothing_to_look_up_still_refuses(
@@ -270,7 +270,7 @@ async def test_an_unanswerable_plan_with_nothing_to_look_up_still_refuses(
 
     outcome = await _execute(context, run_id)
 
-    assert not outcome.answered
+    assert outcome.state != "answered"
     assert await _events(context, run_id, "knowledge_consulted") == []
 
 

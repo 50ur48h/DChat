@@ -394,19 +394,29 @@ export interface Run {
   question: string;
   answer: string | null;
   /**
-   * Whether the run produced an answer or an honest refusal (B-133).
+   * How the run ended: `answered` | `partly` | `refused` (B-134, D-044).
    *
-   * **Not derivable from `status`, and that is the whole point.** WP7.2b's rule
-   * is that a run which could not answer *completes* — `failed` is reserved for
-   * the platform breaking — so `completed` covers an answer and a refusal alike,
-   * and this card called both of them "answered". Seen on the deployed app:
-   * a run badged **answered**, carrying **no supporting query**, whose words were
-   * "The data does not establish which outlet wastes the most."
+   * **Not derivable from `status`, and not a boolean.** WP7.2b's rule is that a
+   * run which could not answer *completes* — `failed` is reserved for the
+   * platform breaking — so `completed` covers all three. And a question can be
+   * half-answered: the first engine trial found runs that recorded "no answer"
+   * while returning "Outlet C, 3.398 kg" with a verified citation behind it.
    *
-   * `null` for runs that ended before the API recorded it, and for runs still
-   * going. Null falls back to the status word, which is what every run did before.
+   * Derived by the platform from whether the run produced a verified citation and
+   * whether it named something it could not answer. A model never picks it.
+   *
+   * `null` for runs that ended before the API recorded it and for runs still
+   * going; null falls back to the status word, which is what those runs showed.
    */
-  answered?: boolean | null;
+  state?: string | null;
+  /**
+   * The part of the question the run could not answer, in the composer's words.
+   *
+   * Non-empty exactly when `state` is `partly` — enforced by a CHECK in the
+   * database, not by convention — so the card always has the missing half to
+   * name. "Could not answer the cost" is useful; "partly answered" alone is not.
+   */
+  unanswered?: string;
   findings: Finding[];
   /**
    * What this answer does not establish, in plain words — a ceiling that stopped

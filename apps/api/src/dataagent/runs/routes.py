@@ -168,14 +168,25 @@ class RunOut(BaseModel):
     failure_reason: str | None = Field(
         default=None, description="Sanitized: names what failed, never an address or a credential."
     )
-    answered: bool | None = Field(
+    state: str | None = Field(
         default=None,
         description=(
-            "Whether the run produced an answer or an honest refusal. **Not "
-            "derivable from `status`**: a run that could not answer *completes* — "
-            "`failed` is reserved for the platform breaking — so `completed` "
-            "covers both. Null for runs that ended before this was recorded, and "
-            "for runs that have not ended."
+            "answered | partly | refused. **Not derivable from `status`**: a run "
+            "that could not answer *completes* — `failed` is reserved for the "
+            "platform breaking — so `completed` covers all three. And not a "
+            "boolean: a question can be half-answered. Derived by the platform "
+            "from whether the run produced a verified citation and whether it "
+            "named something it could not answer; never chosen by a model. Null "
+            "for runs that ended before this was recorded, and for runs that have "
+            "not ended."
+        ),
+    )
+    unanswered: str = Field(
+        default="",
+        description=(
+            "The part of the question the run could not answer, in the composer's "
+            "words. Non-empty exactly when `state` is 'partly', so a client always "
+            "has the missing half to name."
         ),
     )
     cost_estimate: Decimal | None = Field(
@@ -526,10 +537,10 @@ async def get_run(
         view = await service.get_run(org_id=context.org_id, run_id=run_id, user_id=context.user_id)
     except NotFoundError as error:
         raise _not_found("run") from error
-    return _run_out(view)
+    return run_out(view)
 
 
-def _run_out(view: service.RunView) -> RunOut:
+def run_out(view: service.RunView) -> RunOut:
     """One run, as the API states it.
 
     Shared by the single-run route and the thread's list (**B-106**) so the two
@@ -553,7 +564,8 @@ def _run_out(view: service.RunView) -> RunOut:
             )
             for finding in view.findings
         ],
-        answered=view.answered,
+        state=view.state,
+        unanswered=view.unanswered,
         started_at=view.started_at,
         finished_at=view.finished_at,
         failure_reason=view.failure_reason,
@@ -590,7 +602,7 @@ async def list_conversation_runs(
         )
     except NotFoundError as error:
         raise _not_found("conversation") from error
-    return [_run_out(view) for view in views]
+    return [run_out(view) for view in views]
 
 
 @router.get(

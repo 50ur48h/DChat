@@ -346,7 +346,12 @@ async def run_case(
         as_of=AS_OF,
     )
 
-    result.answered = outcome.answered
+    # **`state != "refused"`, not `state == "answered"`** (**D-044**). This flag
+    # means "did the run produce an answer at all", which is what `may_refuse`
+    # below is checked against — and a *partial* answer produced one. Mapping it
+    # to `answered` alone would score a run that answered half the question as a
+    # refusal, which is the boolean's old mistake wearing new names.
+    result.answered = outcome.state != "refused"
     result.answer = outcome.answer
     result.status = outcome.status
     result.citations = len(outcome.execution_ids)

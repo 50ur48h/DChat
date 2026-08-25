@@ -92,7 +92,6 @@ def _cite_what_actually_ran(request: LLMRequest) -> str:
     assert found is not None, f"the composing prompt carried no execution id:\n{prompt}"
     return FinalizeIn(
         answer=f"{SHOPS_OPENED_IN_2021} shop opened in 2021.",
-        answered=True,
         supported_by=[found.group(1)],
         confidence="high",
     ).model_dump_json()
@@ -109,7 +108,6 @@ def _cite_and_colour(request: LLMRequest) -> str:
     assert found is not None
     return FinalizeIn(
         answer=f"{SHOPS_OPENED_IN_2021} shop opened in 2021.",
-        answered=True,
         supported_by=[found.group(1)],
         confidence="high",
         chart=ChartAsk(
@@ -135,7 +133,6 @@ def _cite_and_chart(request: LLMRequest) -> str:
     assert found is not None
     return FinalizeIn(
         answer=f"{SHOPS_OPENED_IN_2021} shop opened in 2021.",
-        answered=True,
         supported_by=[found.group(1)],
         confidence="high",
         chart=ChartAsk(of=found.group(1), mark="bar", x="opened_year", y="shops"),

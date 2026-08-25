@@ -4,6 +4,64 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-044 — a run has three endings, and the platform derives which
+Date: 2026-08-25 · Phase: 13 · PR: this one · Migration: 0030
+Context: WP7.2b's rule is *"a run that could not answer completes with
+`answered=false` and a reason"*, which assumes a run either answers or does not.
+The first engine trial found three runs of *"which outlet wastes the most, and
+what does it cost?"* that recorded `answered=false` while answering the volume
+half — *"Outlet C, 3.398 kg across 2 waste events"* — two of them with a **cited,
+verified** finding. The platform's own record asserted the run produced nothing,
+in the same transaction as a claim it stood behind (**B-134**). Revision 0029 had
+put that boolean on a column and the API one day earlier, so anything built next
+would inherit a distinction that does not hold.
+Options: (a) keep the boolean and word the badge better — refused because the
+record is wrong, not the label; (b) add a third state the **model** chooses; (c)
+add a third state the **platform derives** from what the run produced.
+Decision: **(c)**, three states — `answered` | `partly` | `refused` — and
+`FinalizeIn.answered` is **deleted** rather than supplemented.
+**A model free to pick "partly" would be as arbitrary as the boolean was wrong**,
+which is the owner's objection to (b) and the reason the judgement is removed
+instead of reworded. The model reports two *facts*: what backs its answer
+(`supported_by`, already there) and what it could not answer (`unanswered`, new,
+a few words). `composer.run_state` derives the rest:
+* `unanswered` empty → **answered**;
+* `unanswered` named and something cited → **partly**;
+* `unanswered` named and nothing cited → **refused**.
+**`unanswered` is the primary signal and citations only split the remainder, and
+that is a correction.** The first rule made *no citations* mean `refused`
+outright; three existing tests went red and were right to — whether an answer is
+*backed* is a different question from whether it was *given*, and widening a
+refusal to cover it would have smuggled a behaviour change into a change about
+vocabulary. The critic and **B-138** are where the first question lives.
+**The card names the missing half, never just the state.** A CHECK constraint
+makes `partly` impossible without `unanswered`, so *"could not answer the cost"*
+is always renderable and a bare *"partly answered"* badge is unreachable **by
+construction** rather than by convention — which is what survives somebody
+editing the UI later.
+Consequences:
+**WP7.2b's rule is amended**, and `runner.py`'s header says `refused` where it
+said `answered=false`. Four critic rules used `draft.answered` to mean *"is this
+a draft making a claim I should check"*; they now read `claims_an_answer`, which
+is observable — and a **partial** answer with citations is now checked, where the
+boolean skipped it precisely when its cited half deserved review.
+**Revision 0030 replaces 0029's column** rather than joining it: two fields that
+must agree are two fields that will not, and the boolean has no true value for a
+partial run. Back-fill asserts what each row already said — `true → answered`,
+`false → refused`, `null → null` — which is a record of what was stated when
+partial was not representable, not a claim those runs were total refusals. The
+alternative lost the badge for every historical refusal to avoid a claim no
+reader would misread. Owner's call, 2026-08-25.
+**The residual risk is a model that leaves `unanswered` empty when something is
+missing**, which silently downgrades a partial answer to an answer. Nothing here
+guards it. **The critic is where that guard belongs** — it already blocks a
+dropped required filter and could check that an answer addresses each quantity
+the question asked for. Deliberately not built here: it is a rule about question
+decomposition and deserves its own review.
+**Not built here either**: the eval harness maps `state != "refused"` onto its own
+`answered` flag, because that flag means *"did the run produce an answer at all"*
+and a partial one did.
+
 ## D-043 — Phase 12 stops after WP12.2; WP12.3 and WP12.4 are deferred, not cancelled
 Date: 2026-08-25 · Phase: 12 · PR: this one · Migration: none
 Context: WP12.2 has taken far longer than planned and produced eleven merged PRs,

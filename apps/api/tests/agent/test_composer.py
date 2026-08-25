@@ -49,10 +49,10 @@ def _failed(*, error: str = UNREACHABLE) -> ExecutionRef:
     )
 
 
-def _draft(*, answered: bool = True, confidence: str = "high") -> FinalizeIn:
+def _draft(*, unanswered: str = "", confidence: str = "high") -> FinalizeIn:
     return FinalizeIn(
         answer="Revenue was 1,234.00.",
-        answered=answered,
+        unanswered=unanswered,
         supported_by=["e1"],
         confidence=confidence,
     )
@@ -372,7 +372,7 @@ def test_the_assembled_answer_carries_all_four_parts() -> None:
     composed = assemble(_draft(), _state(_ref()), verdict, citations=("e1",))
 
     assert composed.text == "Revenue was 1,234.00."
-    assert composed.answered is True
+    assert composed.state == "answered"
     assert composed.citations == ("e1",)
     assert composed.method.startswith("1 query")
     assert composed.limitations == ("a caveat",)

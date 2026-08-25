@@ -1028,13 +1028,23 @@ class AgentRun(Base):
     #: runs composed before the column existed, because a sentence invented for
     #: them now would be a claim nobody made.
     method: Mapped[str | None] = mapped_column(Text)
-    #: Whether the run produced an answer or a refusal (**B-133**, revision 0029).
+    #: How the run ended: `answered` | `partly` | `refused` (**B-134**, **D-044**,
+    #: revision 0030).
+    #:
     #: **Not derivable from `status`**: WP7.2b's rule is that a run which could not
-    #: answer *completes*, so `completed` covers both an answer and an honest
-    #: refusal, and the screen was rendering the word "answered" for each. NULL for
-    #: runs that ended before the column existed — deriving one for them now, from
-    #: whether they have findings, would be a claim nobody made.
-    answered: Mapped[bool | None]
+    #: answer *completes*, so `completed` covers all three. And **not a boolean**,
+    #: which is what revision 0029 got wrong one day earlier: a question can be
+    #: half-answered, and `false` denies the part that was answered while `true`
+    #: denies the part that was not.
+    #:
+    #: **Derived by the platform, never chosen by a model** — `composer.run_state`
+    #: reads whether the run produced a verified citation and whether it named
+    #: something it could not do. NULL for runs that ended before 0030.
+    outcome_state: Mapped[str | None] = mapped_column(Text)
+    #: The part of the question the run could not answer, in the composer's words.
+    #: A CHECK makes `partly` impossible without it, so the card always has the
+    #: missing half to name and *"partly answered"* on its own is unreachable.
+    unanswered: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None]
     finished_at: Mapped[datetime | None]
     #: Sanitized before it arrives, like every other error column here.

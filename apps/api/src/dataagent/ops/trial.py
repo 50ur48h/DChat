@@ -74,7 +74,10 @@ class ProbeRun:
 
     run_id: uuid.UUID
     status: str
-    answered: bool | None
+    #: `answered` | `partly` | `refused`, or None for a run that predates D-044.
+    state: str | None
+    #: What the run could not answer, when it named something.
+    unanswered: str
     answer: str
     #: What context offered that had figures to aggregate. The other half of
     #: B-093: naming both is what lets a reader see that a choice existed.
@@ -86,9 +89,15 @@ class ProbeRun:
     findings: int
 
     @property
-    def refused(self) -> bool:
-        """A completed run that did not answer (**B-133**, WP7.2b's rule)."""
-        return self.status == "completed" and self.answered is False
+    def ending(self) -> str:
+        """What to call this run in a report.
+
+        The run's own derived state when it has one, and the status otherwise —
+        a run that failed or is still going has no outcome state, and inventing
+        one for the report would be the trial asserting something the platform
+        did not record.
+        """
+        return self.state if self.status == "completed" and self.state else self.status
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,7 +130,7 @@ def divergences(runs: tuple[ProbeRun, ...]) -> tuple[str, ...]:
     """
     found: list[str] = []
 
-    endings = Counter("refused" if r.refused else r.status for r in runs)
+    endings = Counter(r.ending for r in runs)
     if len(endings) > 1:
         found.append(
             "the runs ended differently: "
@@ -191,7 +200,8 @@ async def _record(org_id: uuid.UUID, run_id: uuid.UUID) -> ProbeRun:
     return ProbeRun(
         run_id=run_id,
         status=view.status,
-        answered=view.answered,
+        state=view.state,
+        unanswered=view.unanswered,
         answer=view.answer or "",
         sources_offered=tuple(offered_sources(state)),
         tables_read=tuple(sorted(tables)),
@@ -290,7 +300,7 @@ def render(results: list[ProbeResult]) -> str:
     for result in results:
         lines.append(f"  {result.question}")
         for index, run in enumerate(result.runs, start=1):
-            ending = "refused" if run.refused else run.status
+            ending = run.ending
             lines.append(
                 f"    {index}. {ending}  tables={','.join(run.tables_read) or '-'}  "
                 f"queries={len(run.statements)}  findings={run.findings}"
