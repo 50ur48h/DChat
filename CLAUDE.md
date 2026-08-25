@@ -96,6 +96,19 @@ red rather than staying green over dead code.
 Every one of the four was found by reading or walking. Until **B-110** ships a
 schema-correspondence check, walking is still the only thing that has caught it.
 
+**And when a field is *removed* from a schema, sweep the whole repo — not the
+test tree.** D-044 deleted `FinalizeIn.answered`; `FinalizeIn` is
+`extra="forbid"`, so a stale key is a hard validation failure rather than an
+ignored field. **Three producers still sent it, and each was found separately:**
+the unit fakes (the suite, same commit), `ops/evals/runner.py` (the `evals` job,
+failing **20/20**), and `llm/scripted.py` (the **browser e2e**, two hours later —
+and that one ships in the product image, so its failure read as a broken product
+rather than a stale fixture). The sweep script reported `leftover: none` and was
+telling the truth about `apps/api/tests`, which is the only directory it was
+given. Producers of a model-filled schema live in `src/`, `ops/` and the tests
+alike; grep all three, and prefer a check that validates each fake's output
+against the model the product parses it into.
+
 ## Environment quirks
 - Python via uv (apps/api); Node via pnpm (apps/web).
 - pip inside containers only; local host uses `uv sync`.
