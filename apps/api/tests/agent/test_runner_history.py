@@ -47,9 +47,7 @@ def _reflect() -> str:
 
 
 def _final(answer: str) -> str:
-    return FinalizeIn(
-        answer=answer, answered=True, supported_by=[], confidence="high"
-    ).model_dump_json()
+    return FinalizeIn(answer=answer, supported_by=[], confidence="high").model_dump_json()
 
 
 def _passes() -> str:

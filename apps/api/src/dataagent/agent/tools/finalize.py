@@ -101,11 +101,14 @@ class FinalizeIn(BaseModel):
             "product being broken."
         ),
     )
-    answered: bool = Field(
+    unanswered: str = Field(
+        default="",
+        max_length=200,
         description=(
-            "True only if the data answered the question. False when you are "
-            "explaining why it could not be answered."
-        )
+            "The part of the question you could not answer, in a few words — "
+            "'the cost', 'the date range'. Empty if you answered all of it. Name "
+            "the part, not the reason; the reason belongs in your answer."
+        ),
     )
     supported_by: list[str] = Field(
         default_factory=list[str],
@@ -126,6 +129,24 @@ class FinalizeIn(BaseModel):
             "categories. Leave `of` empty when it would not."
         ),
     )
+
+    @property
+    def claims_an_answer(self) -> bool:
+        """Whether this draft asserts something a reviewer should check.
+
+        **Replaces the removed `answered` boolean at the one place it was still
+        doing work** (**D-044**). Four critic rules used `draft.answered` to mean
+        *"is this a draft making a positive claim"* — not *"how much of the
+        question did it cover"* — and that question has an observable answer, so
+        it no longer needs to be asked of a model.
+
+        A draft is not a claim when it cites nothing **and** names what it could
+        not answer: that is a refusal, and the rules skip it exactly as they did
+        before. Everything else is checked, which now includes a **partial**
+        answer with citations — the case B-134 is about, and one the old boolean
+        skipped precisely when its cited half deserved review.
+        """
+        return bool(self.supported_by) or not self.unanswered
 
 
 class FinalizeOut(BaseModel):

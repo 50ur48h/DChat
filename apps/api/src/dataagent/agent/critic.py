@@ -376,7 +376,7 @@ def _range_matches(draft: FinalizeIn, evidence: Evidence) -> list[CriticFinding]
     """
     from dataagent.dal.validator import date_literals
 
-    if not draft.answered:
+    if not draft.claims_an_answer:
         return []
     wanted = stated_range(evidence.question, evidence.as_of)
     if wanted is None:
@@ -411,10 +411,10 @@ def _not_built_on_nothing(draft: FinalizeIn, evidence: Evidence) -> list[CriticF
     """An answer is not built on zero rows without saying so.
 
     A block when every cited execution came back empty and the draft still claims
-    an answer: "there were no orders" is a fine answer and `answered=false` with a
+    an answer: "there were no orders" is a fine answer, and a draft that cites
     reason is how it is said, but a positive claim resting on nothing is not.
     """
-    if not draft.answered or not draft.supported_by:
+    if not draft.claims_an_answer or not draft.supported_by:
         return []
     counts = {
         reference.execution_id: reference.row_count
@@ -446,7 +446,7 @@ def _numbers_appear_in_results(draft: FinalizeIn, evidence: Evidence) -> list[Cr
     Blocking on that would refuse correct arithmetic. What it is good for is the
     number invented outright, which shows up here as a figure matching nothing.
     """
-    if not draft.answered or not evidence.previews:
+    if not draft.claims_an_answer or not evidence.previews:
         return []
     haystack = " ".join(rendered for _, rendered in evidence.previews)
     seen = {_clean(value) for value in _NUMBER.findall(haystack)}
@@ -493,7 +493,7 @@ def _refusal_is_not_an_answer(draft: FinalizeIn, evidence: Evidence) -> list[Cri
     itself avoiding. Caught by `test_a_four_step_investigation_runs_every_step`,
     which is a fixture whose catalog has an unrelated table in it.
     """
-    if draft.answered and evidence.state.capability.get("answerable") is False:
+    if draft.claims_an_answer and evidence.state.capability.get("answerable") is False:
         return [
             CriticFinding(
                 rule="capability_respected",

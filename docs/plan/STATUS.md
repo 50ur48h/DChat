@@ -108,6 +108,44 @@ four is now stale.
 
 ---
 
+## A run has three endings now, 2026-08-25 (B-134, D-044)
+
+The boolean is gone. `FinalizeIn.answered` is **deleted**, not supplemented: a
+model free to pick *"partly"* would be as arbitrary as the boolean was wrong, so
+it reports two facts — what backs its answer, and what it could not answer — and
+`composer.run_state` derives the rest. `unanswered` empty is **answered**; named
+with something cited is **partly**; named with nothing cited is **refused**.
+
+**One correction on the way, and it is in D-044.** The first rule made *no
+citations* mean `refused` outright. Three existing tests went red and were right
+to: whether an answer is *backed* is a different question from whether it was
+*given*, and widening a refusal to cover it would have smuggled a behaviour
+change into a change about vocabulary. `unanswered` is the primary signal now and
+citations only split the remainder.
+
+**The card names the missing half.** A CHECK makes `partly` impossible without
+`unanswered`, so *"could not answer the cost"* is always renderable and a bare
+*"partly answered"* badge is unreachable **by construction**.
+
+Revision **0030** replaces 0029's column a day after it shipped — two fields that
+must agree are two that will not, and the boolean has no true value for a partial
+run. Back-fill asserts what each row already said.
+
+**The reachability proof is the point of the PR, not the migration.**
+`test_a_partial_answer_survives_every_hop` drives a real run and serialises it
+with the route's own function, so it passes only if the model's string crosses
+`FinalizeIn → assemble → _write_ending → transition → column → RunView → RunOut`.
+That is B-109's shape guarded, and B-133 is why: `answered` *had* a test, on the
+outcome object, which is the one thing the product cannot look at.
+
+**Left open on purpose.** A model that leaves `unanswered` empty when something is
+missing downgrades a partial to an answer; nothing guards it, and D-044 names the
+**critic** as where that guard belongs. And **B-138** — a run that asserted
+*"Outlet C, 3.398 kg"* with zero findings behind it — is filed separately, because
+an uncited assertion in prose is its own defect and older than this change.
+
+---
+
 ## The first engine trial, 2026-08-25 — four findings, one of them about the trial
 
 Fifteen runs, 112 model calls, **$2.03**, against the local `seed-fnb-pg` sample.

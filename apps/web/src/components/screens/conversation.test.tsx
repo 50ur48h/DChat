@@ -178,7 +178,7 @@ describe("<ConversationThread />", () => {
 
   it("renders an honest refusal as a refusal, and not as a failure", async () => {
     routeFetch({
-      run: { ...ANSWERED, findings: [], answered: false },
+      run: { ...ANSWERED, findings: [], state: "refused" },
       messages: [
         MESSAGES[0],
         {
@@ -210,7 +210,7 @@ describe("<ConversationThread />", () => {
     // **The control.** Without it the assertion above is satisfied by a card that
     // says "could not answer" on every run, which would be a worse defect than the
     // one being fixed — it would make the product look incapable.
-    routeFetch({ run: { ...ANSWERED, answered: true } });
+    routeFetch({ run: { ...ANSWERED, state: "answered" } });
 
     render(<ConversationThread orgId="o1" conversationId="c1" />);
 
@@ -218,11 +218,26 @@ describe("<ConversationThread />", () => {
     expect(screen.queryByText("could not answer")).not.toBeInTheDocument();
   });
 
+  it("names the missing half when a run answered only part of the question", async () => {
+    // **The last hop of B-134's chain.** `unanswered` is written by the model
+    // into `FinalizeIn` and crosses the composer, the ending, a column, RunView
+    // and RunOut before it gets here. The API side of that is asserted in
+    // `tests/agent/test_outcome_state.py`; this is the end a person actually
+    // reads, and the reason the badge is not just a different word: "could not
+    // answer the cost" is useful, "partly answered" alone is not.
+    routeFetch({ run: { ...ANSWERED, state: "partly", unanswered: "the cost" } });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    expect(await screen.findByText("could not answer the cost")).toBeInTheDocument();
+    expect(screen.queryByText("answered")).not.toBeInTheDocument();
+  });
+
   it("keeps the status word for a run that never recorded whether it answered", async () => {
     // Every run that ended before revision 0029 is this one. Guessing from the
     // absence of findings would put a word in the mouth of a run that never said
     // it, so `null` falls back to exactly what these runs showed before.
-    routeFetch({ run: { ...ANSWERED, findings: [], answered: null } });
+    routeFetch({ run: { ...ANSWERED, findings: [], state: null } });
 
     render(<ConversationThread orgId="o1" conversationId="c1" />);
 

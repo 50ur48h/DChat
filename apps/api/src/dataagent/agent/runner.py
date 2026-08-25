@@ -16,7 +16,7 @@ by a ceiling is `budget_exhausted` — an answer with caveats — while one that
 simply had nothing more worth doing is `completed`.
 
 **A refusal is an ending, not a failure.** A run that could not answer completes
-with `answered=false` and a reason. `failed` is reserved for the platform
+with a state of `refused` and a reason. `failed` is reserved for the platform
 breaking. Getting this wrong would either hide real breakage among honest
 refusals or dress a refusal up as an outage. The same applies to exhaustion,
 which is why it has a status of its own rather than borrowing either.
@@ -105,7 +105,11 @@ class RunOutcome:
 
     run_id: uuid.UUID
     status: str
-    answered: bool
+    #: `answered` | `partly` | `refused` (**D-044**). Derived by
+    #: `composer.run_state`, never chosen by a model.
+    state: str
+    #: What the run could not answer. Non-empty exactly when `state` is `partly`.
+    unanswered: str
     answer: str
     execution_ids: tuple[str, ...] = ()
     llm_calls: int = 0
@@ -790,7 +794,15 @@ async def _finalize_refusal(
     ceiling, and a refusal that fails to say the search was cut short would be
     the partial-answer failure wearing a refusal's clothes.
     """
-    final = FinalizeIn(answer=reason, answered=False, supported_by=[], confidence="high")
+    # **The whole question is what is unanswered here**, and saying so is what
+    # makes `run_state` derive `refused` rather than `answered`. This path is the
+    # platform refusing before the agent ran — no citations, nothing established —
+    # so the gap is not a part of the question but all of it. Leaving it empty
+    # would classify every early refusal as an answer, which is how the first
+    # draft of this change broke four tests that were right to break.
+    final = FinalizeIn(
+        answer=reason, unanswered="this question", supported_by=[], confidence="high"
+    )
     return await _write_ending(context, events, working, final, (), caveat=caveat)
 
 
@@ -875,7 +887,7 @@ async def _write_ending(
     already = {finding.statement.strip() for finding in state.findings}
     evidence = {tuple(sorted(finding.support)) for finding in state.findings}
     restated = final.answer.strip() in already or tuple(sorted(cited)) in evidence
-    if final.answered and cited and not restated:
+    if cited and not restated:
         # A finding only when there is something to stand behind, and only when
         # the loop did not already record this claim — otherwise the answer
         # card shows the same claim twice, which the Phase 7 gate caught once
@@ -900,7 +912,8 @@ async def _write_ending(
     return RunOutcome(
         run_id=context.run_id,
         status="completed",
-        answered=final.answered,
+        state=composed.state,
+        unanswered=composed.unanswered,
         answer=final.answer,
         execution_ids=cited,
         llm_calls=working.budget.llm_calls,
@@ -1078,7 +1091,8 @@ def _failed(run_id: uuid.UUID, working: _Working) -> RunOutcome:
     return RunOutcome(
         run_id=run_id,
         status="failed",
-        answered=False,
+        state="refused",
+        unanswered="",
         answer="",
         execution_ids=working.state.execution_ids(),
         llm_calls=working.budget.llm_calls,
@@ -1109,14 +1123,15 @@ async def _finish(
         # below and `totals` goes only to the trace, so no screen could ask
         # whether a `completed` run answered or refused — and the card called both
         # "answered", which is the one claim a refusal exists to deny.
-        answered=outcome.answered if outcome is not None else False,
+        state=outcome.state if outcome is not None else "refused",
+        unanswered=outcome.unanswered if outcome is not None else "",
         totals={
             "llm_calls": working.budget.llm_calls,
             "queries": working.budget.queries,
             "iterations": working.state.iteration,
             "tokens": working.budget.tokens,
             "stopped_by": working.state.stopped_by,
-            "answered": outcome.answered if outcome is not None else False,
+            "state": outcome.state if outcome is not None else "refused",
         },
     )
 

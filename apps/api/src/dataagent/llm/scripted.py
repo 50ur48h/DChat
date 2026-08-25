@@ -67,7 +67,7 @@ def _cited(prompt: str) -> list[str]:
     return [found.group(0)] if found else []
 
 
-def _body(request: LLMRequest) -> str:
+def scripted_body(request: LLMRequest) -> str:
     """The scripted reply for this role, as the JSON the front door will parse.
 
     Keyed on `tags.role` rather than on the schema, because the role is what the
@@ -94,7 +94,11 @@ def _body(request: LLMRequest) -> str:
         return json.dumps(
             {
                 "answer": "The scripted model answered from a fixed script.",
-                "answered": True,
+                # No `answered`, and no `unanswered`: D-044 deleted the boolean and
+                # `FinalizeIn` is `extra="forbid"`, so a stale key here is not an
+                # ignored field — it fails validation twice and kills the run. That
+                # is how this was found: the browser e2e went red because every
+                # question in the compose stack failed.
                 "supported_by": _cited(request.prompt_text),
                 "confidence": "high",
             }
@@ -105,7 +109,7 @@ def _body(request: LLMRequest) -> str:
 
 
 class ScriptedProvider:
-    """`LLMProvider`, answering from `_body` and costing nothing.
+    """`LLMProvider`, answering from `scripted_body` and costing nothing.
 
     Usage is reported as zero rather than estimated from the text. The meter
     writes every call to `usage_ledger` either way, so the ledger still shows
@@ -126,7 +130,7 @@ class ScriptedProvider:
 
     async def complete(self, request: LLMRequest) -> Completion:
         return Completion(
-            text=_body(request),
+            text=scripted_body(request),
             model=request.model,
             provider=PROVIDER_NAME,
             usage=Usage(input_tokens=0, output_tokens=0),

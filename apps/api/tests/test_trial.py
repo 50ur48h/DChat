@@ -23,7 +23,8 @@ from dataagent.ops import trial
 def _run(
     *,
     status: str = "completed",
-    answered: bool | None = True,
+    state: str = "answered",
+    unanswered: str = "",
     answer: str = "There are 3 shops.",
     tables: tuple[str, ...] = ("public.shops",),
     statements: tuple[str, ...] = ("SELECT count(*) FROM shops",),
@@ -31,7 +32,8 @@ def _run(
     return trial.ProbeRun(
         run_id=uuid.uuid4(),
         status=status,
-        answered=answered,
+        state=state,
+        unanswered=unanswered,
         answer=answer,
         sources_offered=(),
         tables_read=tables,
@@ -65,7 +67,7 @@ def test_a_question_that_refuses_once_and_answers_twice_is_flagged() -> None:
     which of the three you happened to get.
     """
     found = trial.divergences(
-        (_run(), _run(), _run(answered=False, answer="I could not answer that."))
+        (_run(), _run(), _run(state="refused", answer="I could not answer that."))
     )
 
     assert any("ended differently" in note for note in found)

@@ -58,9 +58,7 @@ def _reflect(*, done: bool, statement: str = "") -> str:
 
 
 def _final(answer: str = "Here is what I found.") -> str:
-    return FinalizeIn(
-        answer=answer, answered=True, supported_by=[], confidence="medium"
-    ).model_dump_json()
+    return FinalizeIn(answer=answer, supported_by=[], confidence="medium").model_dump_json()
 
 
 async def _run_for(context: ToolContext, question: str) -> uuid.UUID:

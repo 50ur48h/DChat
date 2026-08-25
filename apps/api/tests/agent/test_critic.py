@@ -53,10 +53,10 @@ def _ref(execution_id: str, *, rows: int = 3, ok: bool = True) -> ExecutionRef:
 def _draft(
     answer: str = "Revenue was 1,234.00.",
     *,
-    answered: bool = True,
+    unanswered: str = "",
     cites: tuple[str, ...] = ("e1",),
 ) -> FinalizeIn:
-    return FinalizeIn(answer=answer, answered=answered, supported_by=list(cites))
+    return FinalizeIn(answer=answer, unanswered=unanswered, supported_by=list(cites))
 
 
 def _evidence(
@@ -171,7 +171,7 @@ def test_a_refusal_is_not_checked_for_a_range() -> None:
     state = _state(_ref("e1"), question="How many orders were placed in July 2026?")
     evidence = _evidence(state, statements={"e1": "SELECT 1 WHERE '2020-01-01' = '2020-01-01'"})
 
-    assert check(_draft(answered=False), evidence) == ()
+    assert check(_draft(unanswered="the period", cites=()), evidence) == ()
 
 
 # ---------------------------------------------------------------------------

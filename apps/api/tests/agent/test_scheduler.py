@@ -355,7 +355,7 @@ async def test_asking_over_http_answers_202_and_the_run_completes_behind_it(
     )
     fake_llm.script(
         FinalizeIn(
-            answer="There are 3 shops.", answered=True, supported_by=[], confidence="high"
+            answer="There are 3 shops.", supported_by=[], confidence="high"
         ).model_dump_json(),
         role="compose",
     )

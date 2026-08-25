@@ -104,16 +104,34 @@ const STATUS_WORDS: Record<string, string> = {
  * error, so it is neither green nor red — the colour says "this is a different
  * kind of ending", and the word says which.
  */
-function refused(run: Run): boolean {
-  return run.status === "completed" && run.answered === false;
+function outcome(run: Run): string | null {
+  return run.status === "completed" && run.state ? run.state : null;
 }
 
+/**
+ * **The badge names the missing half, never just the state** (D-044).
+ *
+ * "Partly answered" on its own tells a reader less than the wrong badge did: they
+ * now know something is missing and not what. `unanswered` is non-empty exactly
+ * when the state is `partly` — a database CHECK, not a convention — so there is
+ * always something to name, and the fallback below is unreachable rather than
+ * merely unlikely.
+ */
 function endingWord(run: Run): string {
-  return refused(run) ? "could not answer" : (STATUS_WORDS[run.status] ?? run.status);
+  const state = outcome(run);
+  if (state === "refused") return "could not answer";
+  if (state === "partly") {
+    return run.unanswered ? `could not answer ${run.unanswered}` : "partly answered";
+  }
+  return STATUS_WORDS[run.status] ?? run.status;
 }
 
 function endingTone(run: Run): Tone {
-  return refused(run) ? "neutral" : (STATUS_TONES[run.status] ?? "neutral");
+  const state = outcome(run);
+  // Neither green nor red for the two endings that are neither: a refusal and a
+  // partial answer are correct outcomes, not errors, and the word says which.
+  if (state === "refused" || state === "partly") return "neutral";
+  return STATUS_TONES[run.status] ?? "neutral";
 }
 
 const CONFIDENCE_TONES: Record<string, Tone> = {
@@ -519,10 +537,9 @@ function AnswerCard({
     <Card tone="sunken">
       <Row>
         <Badge tone={endingTone(run)}>{endingWord(run)}</Badge>
-        {/* Left as it was. Beside "could not answer" it is redundant rather than
-            wrong, and a refusal that ran three queries and cited none is arguably
-            still worth saying out loud. Changing it is a second judgement and not
-            the one this change is about. */}
+        {/* Left as it was, for the reason B-133 gave. Beside "could not answer"
+            it is redundant rather than wrong, and a refusal that ran three
+            queries and cited none is arguably still worth saying out loud. */}
         {run.findings.length === 0 && !failed && (
           <span className={styles.step}>no supporting query</span>
         )}

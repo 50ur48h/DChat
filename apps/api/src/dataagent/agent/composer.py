@@ -28,6 +28,7 @@ evidence.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Final
 
 from dataagent.agent.critic import CriticVerdict
 from dataagent.agent.state import ExecutionRef, ResearchState
@@ -51,7 +52,11 @@ class ComposedAnswer:
     """
 
     text: str
-    answered: bool
+    #: `answered` | `partly` | `refused`, derived by `run_state` (**D-044**).
+    state: str
+    #: The part of the question the run could not answer, in the composer's
+    #: own words. Non-empty exactly when `state` is `partly`.
+    unanswered: str
     confidence: str
     #: `query_executions.id` values, already verified to belong to this run.
     citations: tuple[str, ...] = ()
@@ -353,12 +358,49 @@ def assemble(
     """
     return ComposedAnswer(
         text=draft.answer,
-        answered=draft.answered,
+        state=run_state(draft, citations),
+        unanswered=draft.unanswered.strip(),
         confidence=_confidence(draft, verdict),
         citations=citations,
         method=method_note(state),
         limitations=limitations_for(state, verdict, caveat=caveat),
     )
+
+
+#: The three endings a finished run can have. Mirrors revision 0030's
+#: `OUTCOME_STATES`, and `tests/agent/test_outcome_state.py` asserts the two agree.
+RUN_STATES: Final = ("answered", "partly", "refused")
+
+
+def run_state(draft: FinalizeIn, citations: tuple[str, ...]) -> str:
+    """How this run ended — **derived, never chosen** (**B-134**, **D-044**).
+
+    **The model is not asked how much of the question it answered.** It was, as a
+    boolean, and the first engine trial found three runs that set it to `false`
+    while answering half the question with a cited finding behind them. A model
+    free to pick "partly" would be as arbitrary as the boolean was wrong, so the
+    judgement is removed rather than reworded: the model reports two facts — what
+    backs its answer, and what it could not answer — and the state falls out.
+
+    **`unanswered` is the primary signal and citations only split the remainder**,
+    which is not where this started. The first rule made *no citations* mean
+    `refused` outright, and that quietly reclassified every answering run whose
+    draft happened to cite nothing — three existing tests went red saying so, and
+    they were right: whether an answer is *backed* is a different question from
+    whether it was *given*, and the product already has the critic and B-138 for
+    the first one. Widening a refusal to cover it would have smuggled a behaviour
+    change into a change about vocabulary.
+
+    So: a draft that names nothing missing answered the question it was asked. A
+    draft that names something missing either backed the rest of it — `partly` —
+    or backed nothing at all, which is a refusal however the prose reads.
+
+    ``citations`` has already been verified against this run's executions, so an
+    invented id cannot promote a refusal to a partial answer.
+    """
+    if not draft.unanswered.strip():
+        return "answered"
+    return "partly" if citations else "refused"
 
 
 def _confidence(draft: FinalizeIn, verdict: CriticVerdict | None) -> str:

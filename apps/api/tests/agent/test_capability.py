@@ -389,7 +389,7 @@ async def test_a_question_needing_an_absent_join_refuses_and_runs_nothing(
     outcome = await _execute(context, run_id)
 
     assert await _queries_run(context, run_id, wired) == 0, "nothing may be sent"
-    assert outcome.answered is False
+    assert outcome.state in {"refused", "partly"}
     assert outcome.status == "completed", "an honest refusal is an ending, not a failure"
 
     view = await runs.get_run(org_id=context.org_id, run_id=run_id)
@@ -447,7 +447,7 @@ async def test_a_question_over_joinable_tables_is_not_refused(
     )
     fake_llm.script(
         FinalizeIn(
-            answer="Two regions have shops.", answered=True, supported_by=[], confidence="high"
+            answer="Two regions have shops.", supported_by=[], confidence="high"
         ).model_dump_json(),
         role="compose",
     )
@@ -459,7 +459,7 @@ async def test_a_question_over_joinable_tables_is_not_refused(
     outcome = await _execute(context, run_id)
 
     assert await _queries_run(context, run_id, wired) == 1, "the joinable question ran"
-    assert outcome.answered is True
+    assert outcome.state == "answered"
 
 
 async def test_the_planner_is_told_which_pairs_cannot_be_joined(

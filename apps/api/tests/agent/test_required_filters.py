@@ -105,9 +105,7 @@ def _evidence(
 
 
 def _draft() -> FinalizeIn:
-    return FinalizeIn(
-        answer="Net revenue was 1,234.", answered=True, supported_by=[EXECUTION], confidence="high"
-    )
+    return FinalizeIn(answer="Net revenue was 1,234.", supported_by=[EXECUTION], confidence="high")
 
 
 def _rules(findings: tuple[critic.CriticFinding, ...]) -> set[str]:
@@ -235,7 +233,10 @@ def test_an_answer_citing_nothing_is_not_judged_on_its_filters() -> None:
     reports them. Adding a second complaint in a different vocabulary would read
     as two faults where there is one."""
     draft = FinalizeIn(
-        answer="I could not establish that.", answered=False, supported_by=[], confidence="low"
+        answer="I could not establish that.",
+        unanswered="the figure",
+        supported_by=[],
+        confidence="low",
     )
 
     findings = critic.check(draft, _evidence("SELECT sum(total_amount) FROM orders"))
@@ -380,9 +381,7 @@ def test_a_disputed_draft_cannot_call_itself_highly_confident() -> None:
     from dataagent.agent.composer import assemble
 
     state = ResearchState(run_id=uuid.uuid4(), org_id=uuid.uuid4())
-    draft = FinalizeIn(
-        answer="Net revenue was 1,234.", answered=True, supported_by=[], confidence="high"
-    )
+    draft = FinalizeIn(answer="Net revenue was 1,234.", supported_by=[], confidence="high")
 
     disputed = assemble(draft, state, _blocked_verdict(), citations=())
     accepted = assemble(draft, state, critic.CriticVerdict(verdict="pass"), citations=())
