@@ -85,6 +85,37 @@ const STATUS_WORDS: Record<string, string> = {
   budget_exhausted: "stopped at its budget",
 };
 
+/**
+ * The badge for an ending, which is **not** the status word alone (B-133).
+ *
+ * WP7.2b's rule: *"A refusal is an ending, not a failure. A run that could not
+ * answer completes with `answered=false` and a reason."* So `completed` covers an
+ * answer and an honest refusal alike, and rendering `STATUS_WORDS.completed` for
+ * both labelled every refusal **answered** — the one claim a refusal exists to
+ * deny. Seen on the deployed app on 2026-08-25: a card badged *answered*, marked
+ * *no supporting query*, saying *"The data does not establish which outlet wastes
+ * the most."*
+ *
+ * `answered == null` keeps the status word: runs that ended before revision 0029
+ * never recorded it, and guessing from the absence of findings would put a word in
+ * the mouth of a run that never said it.
+ *
+ * Mint is deliberately not kept. A refusal is a correct, useful outcome and not an
+ * error, so it is neither green nor red — the colour says "this is a different
+ * kind of ending", and the word says which.
+ */
+function refused(run: Run): boolean {
+  return run.status === "completed" && run.answered === false;
+}
+
+function endingWord(run: Run): string {
+  return refused(run) ? "could not answer" : (STATUS_WORDS[run.status] ?? run.status);
+}
+
+function endingTone(run: Run): Tone {
+  return refused(run) ? "neutral" : (STATUS_TONES[run.status] ?? "neutral");
+}
+
 const CONFIDENCE_TONES: Record<string, Tone> = {
   high: "mint",
   medium: "sky",
@@ -487,9 +518,11 @@ function AnswerCard({
   return (
     <Card tone="sunken">
       <Row>
-        <Badge tone={STATUS_TONES[run.status] ?? "neutral"}>
-          {STATUS_WORDS[run.status] ?? run.status}
-        </Badge>
+        <Badge tone={endingTone(run)}>{endingWord(run)}</Badge>
+        {/* Left as it was. Beside "could not answer" it is redundant rather than
+            wrong, and a refusal that ran three queries and cited none is arguably
+            still worth saying out loud. Changing it is a second judgement and not
+            the one this change is about. */}
         {run.findings.length === 0 && !failed && (
           <span className={styles.step}>no supporting query</span>
         )}

@@ -393,6 +393,20 @@ export interface Run {
   status: string;
   question: string;
   answer: string | null;
+  /**
+   * Whether the run produced an answer or an honest refusal (B-133).
+   *
+   * **Not derivable from `status`, and that is the whole point.** WP7.2b's rule
+   * is that a run which could not answer *completes* — `failed` is reserved for
+   * the platform breaking — so `completed` covers an answer and a refusal alike,
+   * and this card called both of them "answered". Seen on the deployed app:
+   * a run badged **answered**, carrying **no supporting query**, whose words were
+   * "The data does not establish which outlet wastes the most."
+   *
+   * `null` for runs that ended before the API recorded it, and for runs still
+   * going. Null falls back to the status word, which is what every run did before.
+   */
+  answered?: boolean | null;
   findings: Finding[];
   /**
    * What this answer does not establish, in plain words — a ceiling that stopped

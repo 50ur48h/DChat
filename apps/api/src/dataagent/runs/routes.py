@@ -168,6 +168,16 @@ class RunOut(BaseModel):
     failure_reason: str | None = Field(
         default=None, description="Sanitized: names what failed, never an address or a credential."
     )
+    answered: bool | None = Field(
+        default=None,
+        description=(
+            "Whether the run produced an answer or an honest refusal. **Not "
+            "derivable from `status`**: a run that could not answer *completes* — "
+            "`failed` is reserved for the platform breaking — so `completed` "
+            "covers both. Null for runs that ended before this was recorded, and "
+            "for runs that have not ended."
+        ),
+    )
     cost_estimate: Decimal | None = Field(
         default=None, description="Null means unpriced, never free."
     )
@@ -543,6 +553,7 @@ def _run_out(view: service.RunView) -> RunOut:
             )
             for finding in view.findings
         ],
+        answered=view.answered,
         started_at=view.started_at,
         finished_at=view.finished_at,
         failure_reason=view.failure_reason,

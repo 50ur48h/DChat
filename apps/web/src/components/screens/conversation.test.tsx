@@ -176,9 +176,9 @@ describe("<ConversationThread />", () => {
     expect(screen.getByText("6214")).toBeInTheDocument();
   });
 
-  it("renders an honest refusal as an answer, not as a failure", async () => {
+  it("renders an honest refusal as a refusal, and not as a failure", async () => {
     routeFetch({
-      run: { ...ANSWERED, findings: [] },
+      run: { ...ANSWERED, findings: [], answered: false },
       messages: [
         MESSAGES[0],
         {
@@ -194,11 +194,39 @@ describe("<ConversationThread />", () => {
 
     render(<ConversationThread orgId="o1" conversationId="c1" />);
 
-    // A run that could not answer *completes* (WP7.2b). Dressing that up as an
-    // error would send people hunting for a bug in their question.
+    // A run that could not answer *completes* (WP7.2b), so dressing it up as an
+    // error would send people hunting for a bug in their question — and calling it
+    // **answered** was the opposite mistake (**B-133**). This assertion used to
+    // read `getByText("answered")`, which is the defect written down as an
+    // expectation: the card labelled every honest refusal with the one claim a
+    // refusal exists to deny.
     expect(await screen.findByText(/more than one data source/)).toBeInTheDocument();
-    expect(screen.getByText("answered")).toBeInTheDocument();
+    expect(screen.getByText("could not answer")).toBeInTheDocument();
+    expect(screen.queryByText("answered")).not.toBeInTheDocument();
     expect(screen.getByText("no supporting query")).toBeInTheDocument();
+  });
+
+  it("still says answered when the run answered", async () => {
+    // **The control.** Without it the assertion above is satisfied by a card that
+    // says "could not answer" on every run, which would be a worse defect than the
+    // one being fixed — it would make the product look incapable.
+    routeFetch({ run: { ...ANSWERED, answered: true } });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    expect(await screen.findByText("answered")).toBeInTheDocument();
+    expect(screen.queryByText("could not answer")).not.toBeInTheDocument();
+  });
+
+  it("keeps the status word for a run that never recorded whether it answered", async () => {
+    // Every run that ended before revision 0029 is this one. Guessing from the
+    // absence of findings would put a word in the mouth of a run that never said
+    // it, so `null` falls back to exactly what these runs showed before.
+    routeFetch({ run: { ...ANSWERED, findings: [], answered: null } });
+
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    expect(await screen.findByText("answered")).toBeInTheDocument();
   });
 
   it("says the platform failed when the platform failed", async () => {

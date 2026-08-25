@@ -1028,6 +1028,13 @@ class AgentRun(Base):
     #: runs composed before the column existed, because a sentence invented for
     #: them now would be a claim nobody made.
     method: Mapped[str | None] = mapped_column(Text)
+    #: Whether the run produced an answer or a refusal (**B-133**, revision 0029).
+    #: **Not derivable from `status`**: WP7.2b's rule is that a run which could not
+    #: answer *completes*, so `completed` covers both an answer and an honest
+    #: refusal, and the screen was rendering the word "answered" for each. NULL for
+    #: runs that ended before the column existed — deriving one for them now, from
+    #: whether they have findings, would be a claim nobody made.
+    answered: Mapped[bool | None]
     started_at: Mapped[datetime | None]
     finished_at: Mapped[datetime | None]
     #: Sanitized before it arrives, like every other error column here.

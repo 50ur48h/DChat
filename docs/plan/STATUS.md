@@ -94,6 +94,18 @@ not what a deterministic rule looks like.
 trial would have recorded B-119 as resolved today. Repetition is now a requirement
 of the trial loop's first version, written into its section above.
 
+**And the observation from that run is settled, not left open** (**B-133**). The
+card was badged **answered**, marked **no supporting query**, and said *"The data
+does not establish which outlet wastes the most"* — three statements, one
+contradicting the other two. WP7.2b's rule is that a run which could not answer
+*completes*, so `completed` covers an answer and a refusal alike, and the card
+rendered the status word for both. `RunOutcome.answered` had been computed on
+every run since WP7.2b and stored only in a trace event, so the screen had no way
+to ask: **B-100's defect, one field over**, fixed the way B-100 was — a column
+(revision 0029), carried on `RunView` and `RunOut`, rendered as *"could not
+answer"*. It is a fifth instance of the class CLAUDE.md enumerates, whose count of
+four is now stale.
+
 ---
 
 # SESSION-END HANDOFF — 2026-08-25
@@ -174,6 +186,22 @@ without rereading plan §6.
 ## The next work, in order
 
 ### (a) An engine trial loop — repeatable, not remembered
+
+**First version landed 2026-08-25**: `dataagent.ops.trial`, `make trial`, and
+`ops/trials/probes.example.json`. It does items 2 and 3 below — probes that are
+not the golden evals, and a per-run record — plus the thing this session made
+non-negotiable: **every probe runs at least three times**, `MINIMUM_REPEATS`
+enforced rather than defaulted, and the output is the **disagreement** between the
+runs rather than three transcripts. `divergences` names three shapes explicitly:
+a question that refuses once and answers twice (**B-119**), runs that read
+different tables (**B-060**), and runs that state different numbers. Items **1**
+and **4** — a documented one-command path for attaching an unfamiliar database,
+and a way to read a whole trial at once — are still owed.
+
+**What it deliberately does not do**: decide whether an answer is *right*. No
+program here can, which is the premise of the exercise. It surfaces the runs and
+their disagreements; a person judges, and files what they find.
+
 
 **Why this first.** The owner's F&B trial found five real defects in the agent's
 schema understanding — B-057's join direction, B-060's source ambiguity, B-085's

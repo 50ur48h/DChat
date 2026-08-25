@@ -246,6 +246,10 @@ web.dev: ## next dev on :3000
 build.web: ## Build the production web image
 	docker build --target prod --build-arg NEXT_PUBLIC_API_URL=http://localhost:8000 --build-arg NEXT_PUBLIC_ENV=local -t dataagent-web:local $(WEB_DIR)
 
+.PHONY: trial
+trial: .env ## Engine trial: ask each probe 3+ times against a source and compare the runs
+	$(UV_API) python -m dataagent.ops.trial $(ARGS)
+
 .PHONY: evals
 evals: .env ## Run the 20 golden evals (FakeLLM by default; EVALS_LIVE=1 for real models)
 	$(UV_API) --with pyyaml python ../../ops/evals/runner.py $(ARGS)

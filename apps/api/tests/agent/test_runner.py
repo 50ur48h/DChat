@@ -180,6 +180,9 @@ async def test_a_question_becomes_sql_rows_and_a_cited_answer(
     # sentence correctly since Phase 9 and the run threw it away — the defect was
     # never in the words, it was that nothing carried them this far.
     assert view.method.startswith("1 query over one step"), view.method
+    # **The control for B-133.** Without it `answered is False` on the refusal
+    # test passes against a column nothing ever sets to True.
+    assert view.answered is True
 
 
 async def test_a_rephrased_answer_is_not_a_second_finding(
@@ -432,6 +435,15 @@ async def test_a_refusal_that_is_never_corrected_ends_honestly(
     view = await runs.get_run(org_id=context.org_id, run_id=run_id)
     # Nothing was concluded about the data, so there is nothing to stand behind.
     assert view.findings == []
+    # **And the run says so where a screen can read it** (**B-133**). This was the
+    # gap: `outcome.answered` was already False above, and stopped there — it went
+    # into the `run_finished` event's totals and onto no column, so `RunView` could
+    # not carry it and the card rendered `completed` as the word "answered". The
+    # assertion is on the *view* rather than the outcome for exactly that reason.
+    assert view.answered is False, (
+        "a refusal that the API reports as indistinguishable from an answer is a "
+        "refusal the screen will label 'answered'"
+    )
 
 
 async def test_a_failure_rewriting_cannot_fix_stops_the_loop(
