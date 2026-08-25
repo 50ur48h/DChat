@@ -174,6 +174,17 @@ including its refusal to guess between several sources.
   `make typecheck.web` green.
 * Migration up **and** down exercised by `tests/db/test_migrations.py`; applied
   to the local platform database, which is now at **0031**.
+* **The role matrix caught what a directory-by-directory local run missed.**
+  `test_every_org_route_is_covered` failed in CI on both new routes: every
+  org-scoped route must carry a probe, and mine had none. It is the
+  schema-correspondence check B-110 is still owed elsewhere, working — a new
+  route cannot quietly enter the surface without someone stating who may reach
+  it. Both are probed now, the snapshot is regenerated, and its diff is **two
+  added entries and no change to any existing route's permissions**. The
+  observed matrix is `GET` allow/allow/allow and `PUT` admin-only with 403 for
+  the other two — the API refusing a Reader, watched rather than asserted.
+  **The process lesson is mine**: I ran the suites split by directory to dodge
+  the known `conftest` collision and never ran `tests/auth` at all.
 * **Served, not merely written.** After `rm -rf /app/.next` and a restart of both
   `api` and `web`: the running API's OpenAPI carries `GET` and `PUT
   /v1/orgs/{org_id}/active-data-source`; the container compiled the change into
