@@ -217,7 +217,13 @@ async def _refuse(*, org_id: uuid.UUID, run_id: uuid.UUID, reason: str) -> None:
         org_id=org_id,
         run_id=run_id,
         status="completed",
-        totals={"llm_calls": 0, "queries": 0, "answered": False},
+        # **The run never reached the agent**, so it stands behind nothing and the
+        # whole question is what went unanswered — `refused`, in D-044's
+        # vocabulary. Written on the column as well as in the trace, because a
+        # screen cannot read the trace per run (B-133).
+        state="refused",
+        unanswered="this question",
+        totals={"llm_calls": 0, "queries": 0, "state": "refused"},
     )
 
 
