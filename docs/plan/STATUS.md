@@ -108,6 +108,45 @@ four is now stale.
 
 ---
 
+## The first engine trial, 2026-08-25 — four findings, one of them about the trial
+
+Fifteen runs, 112 model calls, **$2.03**, against the local `seed-fnb-pg` sample.
+Five probes; **four disagreed**. Filed as **B-134** to **B-137**.
+
+**The control worked.** *"How many sales are recorded, and over what date range?"*
+answered **112,327, 1 January to 31 December 2025** three times identically, and
+the comparison correctly ignored *covering* versus *spanning* — a tool that flags
+wording would be dropped the first day somebody read its output.
+
+**B-134 (P1) is the one that matters, and it is not a labelling problem.** All
+three runs of *"which outlet wastes the most, and what does it cost?"* recorded
+`answered=false`, and all three **answered the volume half** — *"Outlet C, 3.398 kg
+across 2 waste events"* — two of them with a cited finding. WP7.2b assumes a run
+either answers or does not; this one did both. **B-133 made the label wrong in the
+other direction**: it used to say *answered* and be wrong about the cost, and now
+says *could not answer* and is wrong about the 3.398 kg it cited. A three-valued
+outcome needs a third state, not a better boolean — decision first.
+
+**B-135 (P2) is the trial correcting its own operator.** *"Ayam Penyet Set … units
+sold are 0.00"* is B-059's sentence, and the first reading was that B-059 had
+returned. It had not: the Demo org holds **zero** semantic definitions, every run
+recorded `definitions_available = 0`, and with no `prep_quantity` blessed, 0.00 is
+what the data says. So the whole trial measured **ungrounded** behaviour and
+nothing in its output said so. Two findings follow — the report must state the
+organization's semantic state, and an answer computed with no definition governing
+it should say that (B-085's open half, from the reader's end).
+
+**B-136 (P2)**: `round(double precision, integer) does not exist` — Postgres
+defines two-argument `round` for `numeric` only. Not B-024: `round` is typed and
+allowed, and it is the *overload* that is missing, which only the engine can
+reject. The run degraded honestly; the other two answered, so it cost a reader an
+answer one time in three.
+
+**B-137 (P3)**: the same derived figure rendered `RM 8.03`, `RM 8.0264368599926935`
+and `RM 8.02…`. A float printed raw into a sentence written for a person.
+
+---
+
 # SESSION-END HANDOFF — 2026-08-25
 
 Everything a next session needs is in this file, `BACKLOG.md` and `DECISIONS.md`.
