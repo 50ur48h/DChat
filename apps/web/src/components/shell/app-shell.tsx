@@ -21,6 +21,7 @@ import { Page } from "@/components/ui/page";
 import { createApi, type Me } from "@/lib/api-client";
 import { useSession } from "@/lib/auth/session";
 
+import { useSidebarCollapsed } from "./collapsed";
 import { Sidebar } from "./sidebar";
 import styles from "./app-shell.module.css";
 
@@ -28,6 +29,9 @@ export function AppShell({ orgId, children }: { orgId: string; children: ReactNo
   const session = useSession();
   const api = useMemo(() => createApi(session.getToken), [session.getToken]);
   const [me, setMe] = useState<Me | null>(null);
+  // The rail is fixed, so the page reserves its width rather than sitting
+  // beside it. Same store the rail reads, so the two cannot disagree.
+  const [collapsed] = useSidebarCollapsed();
 
   useEffect(() => {
     if (!session.who) return;
@@ -64,7 +68,7 @@ export function AppShell({ orgId, children }: { orgId: string; children: ReactNo
         orgName={membership?.org_name ?? null}
         person={me ? { email: me.email, name: me.name } : null}
       />
-      <main className={styles.main}>{children}</main>
+      <main className={collapsed ? styles.mainCollapsed : styles.main}>{children}</main>
     </div>
   );
 }

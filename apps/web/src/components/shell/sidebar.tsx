@@ -25,31 +25,36 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { ApiError, createApi, type Conversation } from "@/lib/api-client";
 import { useSession } from "@/lib/auth/session";
 import { personLabel, type Named } from "@/lib/identity";
-import { createPersisted } from "@/lib/persisted";
 
+import { useSidebarCollapsed } from "./collapsed";
 import styles from "./sidebar.module.css";
 
-const COLLAPSED_KEY = "dataagent.sidebar-collapsed";
+/**
+ * Up to two letters for the avatar, from whatever the identity provider sent.
+ *
+ * An address is split on its local part so `ada.lovelace@…` reads `AL`; a name
+ * splits on spaces. Falls back to the first character of the subject, which is
+ * always present, and to a dot when even that is missing — a blank circle looks
+ * like a failed image.
+ */
+function initials(person: Named | null, subject: string | null): string {
+  const source = person?.name?.trim() || person?.email?.split("@")[0] || subject || "";
+  const parts = source.split(/[\s._-]+/).filter(Boolean);
+  const letters = parts.slice(0, 2).map((part) => part[0] ?? "");
+  return letters.join("").toUpperCase() || "·";
+}
 
 /** A thread with no title yet is shown by what it is, not by a blank. */
 function threadLabel(conversation: Conversation): string {
   const title = conversation.title?.trim();
   return title && title.length > 0 ? title : "New chat";
 }
-
-// Stored as a string because `createPersisted` deals in string enumerations —
-// see `persisted.ts` for why a parsed value would break `getSnapshot`.
-function isFlag(value: string): value is "0" | "1" {
-  return value === "0" || value === "1";
-}
-
-const collapsedStore = createPersisted<"0" | "1">(COLLAPSED_KEY, "0", isFlag);
 
 export function Sidebar({
   orgId,
@@ -66,11 +71,8 @@ export function Sidebar({
 
   // `null` is "not loaded yet", which is a different claim from "you have none".
   const [conversations, setConversations] = useState<Conversation[] | null>(null);
-  // Read through the store rather than an effect, so the server render and the
-  // first client render agree and there is no hydration mismatch to suppress.
-  const collapsed =
-    useSyncExternalStore(collapsedStore.subscribe, collapsedStore.get, collapsedStore.getServer) ===
-    "1";
+  // Shared with `AppShell`, which reserves the width beside a fixed rail.
+  const [collapsed, toggleCollapsed] = useSidebarCollapsed();
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -100,12 +102,6 @@ export function Sidebar({
     // `pathname` is a dependency on purpose: starting a new chat navigates, and
     // the sidebar has to show the thread that was just created without a reload.
   }, [api, orgId, pathname]);
-
-  // Per-viewer convenience only: a browser that refuses to remember simply
-  // starts expanded every time, and nothing else depends on it.
-  const toggleCollapsed = useCallback(() => {
-    collapsedStore.set(collapsed ? "0" : "1");
-  }, [collapsed]);
 
   const rename = useCallback(
     async (conversationId: string) => {
@@ -280,11 +276,18 @@ export function Sidebar({
       </div>
 
       <div className={styles.foot}>
-        <Link href={`/orgs/${orgId}/settings`} className={styles.footLink}>
-          <span className={styles.person}>
-            {person ? personLabel(person, session.who ?? "Signed in") : (session.who ?? "Signed in")}
+        <Link href={`/orgs/${orgId}/settings`} className={styles.identity}>
+          {/* A grid, not a row with a margin: the avatar and the address must
+              not be able to overlap at any width or any address length. */}
+          <span className={styles.avatar} aria-hidden="true">
+            {initials(person, session.who)}
           </span>
-          <span className={styles.footHint}>Settings</span>
+          <span className={styles.identityText}>
+            <span className={styles.person}>
+              {person ? personLabel(person, session.who ?? "Signed in") : (session.who ?? "Signed in")}
+            </span>
+            <span className={styles.footHint}>Settings</span>
+          </span>
         </Link>
       </div>
     </nav>

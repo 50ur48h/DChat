@@ -7,36 +7,39 @@
  * page, and it earns its place because the two surfaces are close in value.
  */
 
+/*
+ * **Fixed and full height, not sticky.**
+ *
+ * Sticky kept the rail in the flow, so a long thread could still scroll it —
+ * the page and the rail shared one scrollbar and the rail lost. Fixed takes it
+ * out of the flow entirely: it cannot move, and only its chat list scrolls.
+ * The width it no longer occupies is reserved by a margin in `app-shell`, and
+ * `collapsed.ts` is what keeps the two numbers the same.
+ */
 .rail {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 10;
   display: flex;
   flex-direction: column;
-  width: 260px;
-  flex: 0 0 260px;
-  height: 100vh;
-  position: sticky;
-  top: 0;
-  background: var(--surface-sunken);
-  border-right: 1px solid var(--border);
-  padding: var(--space-4);
-  gap: var(--space-3);
+  width: var(--rail-w);
+  height: 100dvh;
+  background: var(--rail);
+  border-right: 1px solid var(--line);
+  padding: var(--s4);
+  gap: var(--s3);
 }
 
 .railCollapsed {
-  display: flex;
-  flex-direction: column;
+  composes: rail;
   align-items: center;
-  width: 60px;
-  flex: 0 0 60px;
-  height: 100vh;
-  position: sticky;
-  top: 0;
-  background: var(--surface-sunken);
-  border-right: 1px solid var(--border);
-  padding: var(--space-4) var(--space-2);
-  gap: var(--space-2);
+  width: var(--rail-w-collapsed);
+  padding: var(--s4) var(--s2);
+  gap: var(--s2);
 }
 
 .head {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -80,6 +83,7 @@
 }
 
 .newChat {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -100,9 +104,12 @@
 .list {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--s1);
+  /* The only scrolling region in the rail. `min-height: 0` is what lets a flex
+     child actually shrink below its content and scroll. */
   overflow-y: auto;
   flex: 1 1 auto;
+  min-height: 0;
   margin: 0 calc(-1 * var(--space-2));
   padding: 0 var(--space-2);
 }
@@ -209,27 +216,49 @@
 }
 
 .foot {
-  border-top: 1px solid var(--border);
-  padding-top: var(--space-3);
+  flex: 0 0 auto;
+  border-top: 1px solid var(--line);
+  padding-top: var(--s3);
 }
 
-.footLink {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
+.identity {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--s3);
   min-height: 40px;
-  justify-content: center;
-  padding: var(--space-2);
+  padding: var(--s2);
   border-radius: var(--radius-md);
   text-decoration: none;
 }
 
-.footLink:hover {
+.identity:hover {
   background: var(--surface);
 }
 
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  background: var(--clay);
+  color: var(--on-clay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* `min-width: 0` so the address below can actually truncate rather than
+   forcing the grid column wider than the rail. */
+.identityText {
+  min-width: 0;
+}
+
 .person {
-  color: var(--fg);
+  display: block;
+  color: var(--ink);
   font-size: 14px;
   font-weight: 600;
   overflow: hidden;
@@ -238,7 +267,8 @@
 }
 
 .footHint {
-  color: var(--fg-muted);
+  display: block;
+  color: var(--ink-muted);
   font-size: 12px;
   line-height: 16px;
 }
@@ -249,13 +279,12 @@
 @media (max-width: 768px) {
   .rail,
   .railCollapsed {
+    position: static;
     width: 100%;
-    flex: 0 0 auto;
     height: auto;
     max-height: 50vh;
-    position: static;
     border-right: 0;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--line);
   }
 
   .railCollapsed {

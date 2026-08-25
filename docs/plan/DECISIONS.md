@@ -4,6 +4,83 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-047 — warm paper, a serif answer, and chrome that outranks nothing
+Date: 2026-08-25 · Phase: 13 · PR: this one
+Context: WP13.1b shipped the chat product against the design system as written —
+cool greys, borderless cards floating on `#f7f8fa`, an indigo primary. The owner
+looked at it and said it "looks weird", and, importantly, that they were not sure
+`design.md`'s direction was what they wanted. That is a different problem from a
+screen being wrong: the binding document was the thing in question, so restyling
+against it would have been building more of what was being doubted.
+Options: (a) tune the existing direction — refused, because the doubt was about
+the direction rather than its execution; (b) two static HTML mockups, same screen
+and same content, one applying `design.md` properly and one taking a different
+aesthetic, and let the owner choose; (c) a redesign chosen by whoever was
+writing it.
+Decision: **(b)**, and the owner chose the alternative over four rounds of
+revision. `docs/design.md` is rewritten to match, **before any code**, because it
+is binding and a document that trails the screens is a document nobody trusts.
+
+**What changed.** Warm paper (`--paper #faf9f5`) instead of cool grey; surfaces
+in tints of the same warmth; **depth that is layered rather than dropped** — a
+hairline *and* a wide faint shadow, because a shadow alone is what made the old
+cards look like they were hovering. One terracotta accent replaces indigo. A
+**serif for the words the agent produced** and a sans for every piece of chrome,
+which is the change that does the most: it separates *what the machine said* from
+the interface around it. A longer spacing scale, actually used.
+
+**Three structural fixes the owner named, which are not aesthetic and would have
+been owed under either direction.** The sidebar is `position: fixed` and full
+height, with only its chat list scrolling — sticky left it in the flow, so a long
+thread could still scroll it away. The identity block is a
+`grid-template-columns: 32px minmax(0, 1fr)`, so the avatar and the address
+cannot overlap at any width or any address length. And the thread lost its page
+title and Back button: in a chat product the thread *is* the panel and the rail
+is the way back.
+
+**One column, and the reason it was two.** The answer sat in a `28px | 1fr` grid
+so the agent's mark could stand in a left gutter, which inset the prose while the
+composer stayed full width. The mark now heads the answer instead of flanking it.
+The consequence is that **the column width is the reading measure**, since the
+answer fills it: at the answer size that tops out near 936px before a line passes
+~95 characters, which is long by convention and acceptable for a product whose
+answers are a sentence or two. A screen that rendered paragraphs would need to
+cap its prose and accept the ragged edge.
+
+**Rule 4 is new and is the one that will be cited most**: the content outranks
+the chrome. It was added because both of the owner's last two rounds were the
+same complaint — the attribution row and the evidence bars were heavier than the
+answer. Attribution is now a 12px caption with no fill and nothing at badge
+weight, and the run's ending is a coloured **word** with a dot beside it rather
+than a pill.
+
+**The working is folded away and revealed on hover**, the way message actions
+behave in Claude and ChatGPT, in native `<details>`. Hover is a de-emphasis and
+never the only route: `opacity` rather than `display: none` keeps the control in
+the tab order and in the accessibility tree; `:focus-within` reveals it for a
+keyboard; `@media (hover: none)` shows it always on touch; and `[open]` is set on
+the element itself rather than on an ancestor via `:has()`, so an opened panel
+can never sit beneath an invisible summary. Because touch has no hover, the
+summaries are full 40px targets — quiet is the fill, not the size.
+**A caveat is never folded**, and that exception is the point: a limitation
+changes what the answer means, and hiding the qualification while showing the
+claim is the defect B-133 and D-044 exist about.
+Consequences: `docs/design.md` is rewritten; `globals.css` redefines the legacy
+token names in place rather than renaming them, because a dozen CSS Modules
+consume `--bg`, `--fg`, `--primary` and `--space-N` and repainting by value is a
+smaller change than editing every file. **The chart ramp is untouched and that is
+deliberate** — it was validated against the card surface, `--surface` is still
+`#ffffff`, so the validation still holds; rule 3's "one series uses the primary"
+now yields clay, which resembles slot 2's orange, and that resemblance is
+recorded as accepted because the two cannot appear in the same chart. `--clay` is
+`#b55231` rather than the `#c15f3c` in the approved mockup: white on the brighter
+tone is 4.23:1 and fails AA on the Send button, and the correction was made
+rather than shipped. A finding with a single citation now shows its query as soon
+as *Evidence* is opened, so the common case is one click rather than two.
+**The accepted cost, recorded rather than discovered later**: a first-time reader
+may not notice that evidence exists at all. That is the price of a focused
+answer; the cheap retreat is a resting opacity near 40% instead of 0.
+
 ## D-046 — light is the default, and the operating system does not get a vote
 Date: 2026-08-25 · Phase: 13 · PR: this one
 Context: `globals.css` defined dark under `@media (prefers-color-scheme: dark)`,

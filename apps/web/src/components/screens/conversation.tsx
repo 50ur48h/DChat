@@ -39,7 +39,7 @@ import { Trace } from "@/components/screens/trace";
 import { Badge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Row, Stack } from "@/components/ui/page";
+import { Row } from "@/components/ui/page";
 import {
   ApiError,
   createApi,
@@ -126,12 +126,19 @@ function endingWord(run: Run): string {
   return STATUS_WORDS[run.status] ?? run.status;
 }
 
-function endingTone(run: Run): Tone {
+/**
+ * Which colour the ending word is set in — not which badge it wears.
+ *
+ * **Neither green nor red for the two endings that are neither.** A refusal and
+ * a partial answer are correct outcomes rather than errors, so they are simply
+ * muted and the word carries the whole meaning (D-044). Only a `failed` run is
+ * red, because only that one is something going wrong.
+ */
+function endingClass(run: Run): string | undefined {
   const state = outcome(run);
-  // Neither green nor red for the two endings that are neither: a refusal and a
-  // partial answer are correct outcomes, not errors, and the word says which.
-  if (state === "refused" || state === "partly") return "neutral";
-  return STATUS_TONES[run.status] ?? "neutral";
+  if (run.status === "failed") return styles.stateFailed;
+  if (state === "refused" || state === "partly") return styles.stateNeutral;
+  return styles.stateOk;
 }
 
 const CONFIDENCE_TONES: Record<string, Tone> = {
@@ -150,13 +157,24 @@ function Citation({
   runId,
   executionId,
   label,
+  startOpen = false,
 }: {
   orgId: string;
   runId: string;
   executionId: string;
   label: string;
+  /**
+   * Whether the query is already on show when the evidence is opened.
+   *
+   * True for a finding with a single citation, which is the common case: having
+   * opened *Evidence*, being asked to open the evidence again is a click that
+   * buys nothing. With several citations the buttons stay closed, because a
+   * finding that rests on four queries should not unfold into four SQL blocks
+   * at once.
+   */
+  startOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(startOpen);
   return (
     <div className={styles.citation}>
       <Button
@@ -437,6 +455,7 @@ function Findings({
                 orgId={orgId}
                 runId={runId}
                 executionId={executionId}
+                startOpen={finding.support.length === 1}
                 // Numbered only when there is more than one, so the common case
                 // reads as a sentence rather than as a list of one.
                 label={
@@ -533,18 +552,32 @@ function AnswerCard({
 }) {
   const words = answer ?? run.answer;
   const failed = run.status === "failed";
+  const queries = run.findings.reduce((total, finding) => total + finding.support.length, 0);
   return (
-    <Card tone="sunken">
-      <Row>
-        <Badge tone={endingTone(run)}>{endingWord(run)}</Badge>
-        {/* Left as it was, for the reason B-133 gave. Beside "could not answer"
-            it is redundant rather than wrong, and a refusal that ran three
-            queries and cited none is arguably still worth saying out loud. */}
+    <div className={styles.turnAgent} data-testid="answer">
+      {/* **A caption, not a header** (docs/design.md, rule 4). No pill, no fill,
+          nothing at badge weight: an `answered` badge above a 19px sentence
+          draws the eye to the label rather than to the answer. The state is a
+          word in colour with a dot beside it, so it still reads with colour
+          ignored. */}
+      <div className={styles.attribution}>
+        <span className={styles.agentMark} aria-hidden="true">
+          da
+        </span>
+        <span className={endingClass(run)}>
+          <span className={styles.stateDot} aria-hidden="true" />
+          {endingWord(run)}
+        </span>
         {run.findings.length === 0 && !failed && (
-          <span className={styles.step}>no supporting query</span>
+          <>
+            <span className={styles.sep} aria-hidden="true">
+              ·
+            </span>
+            <span className={styles.meta}>no supporting query</span>
+          </>
         )}
         {!failed && <Grounding run={run} />}
-      </Row>
+      </div>
       {failed ? (
         <p className={styles.failure}>
           {run.failure_reason ??
@@ -559,18 +592,45 @@ function AnswerCard({
               gate caught from the other direction when the card rendered a
               citation and no words at all. The card is the assistant turn now, so
               there is one rendering of an answer and nothing to keep in step. */}
-          {words && <p className={styles.findingStatement}>{words}</p>}
+          {words && <p className={styles.answerText}>{words}</p>}
           <AnswerChart chart={run.chart} />
-          <Method method={run.method} />
+          {/* **A caveat is never folded away.** It changes what the answer
+              means, so a reader who opens nothing must still see it; hiding the
+              qualification while showing the claim is the defect this product
+              exists to avoid (B-133, D-044). */}
           <Limitations notes={run.limitations ?? []} />
-          <Findings orgId={orgId} runId={run.id} findings={run.findings} answer={words} />
-          {/* Collapsed once the run is over — the answer is the point then — but
-              still there, because "how did you get that" is the question this
-              product exists to be able to answer. */}
-          <Trace orgId={orgId} runId={run.id} live={false} />
+
+          {/* The working: quiet until the response is hovered, and reachable
+              four other ways — see conversation.module.css. */}
+          <div className={styles.working}>
+            {run.findings.length > 0 && (
+              <details className={styles.disclosure}>
+                <summary className={styles.summary}>
+                  <span className={styles.chev} aria-hidden="true">
+                    ▶
+                  </span>
+                  {/* Its own element rather than a bare text node: the summary's
+                      full text is the chevron, the label and the count together,
+                      so nothing can address the label without one. */}
+                  <span className={styles.summaryLabel}>Evidence</span>
+                  <span className={styles.summaryMeta}>
+                    {queries} quer{queries === 1 ? "y" : "ies"}
+                  </span>
+                </summary>
+                <div className={styles.disclosureBody}>
+                  <Method method={run.method} />
+                  <Findings orgId={orgId} runId={run.id} findings={run.findings} answer={words} />
+                </div>
+              </details>
+            )}
+            {/* Its own toggle rather than a `<details>`, because it has to open
+                itself while a run is live. Styled to match the summary beside
+                it in `trace.module.css`. */}
+            <Trace orgId={orgId} runId={run.id} live={false} />
+          </div>
         </>
       )}
-    </Card>
+    </div>
   );
 }
 
@@ -771,27 +831,31 @@ export function ConversationThread({
     run !== null && messages.some((message) => message.run_id === run.id && message.role === "assistant");
 
   return (
-    <Stack>
+    /* **One column.** Every child below is a direct child of this element, so
+       the context strip, the question, the answer, the evidence and the
+       composer are all exactly the same width. A left gutter for the agent's
+       mark is what broke that before: it inset the prose while the composer
+       stayed full width, and the mismatch was visible. */
+    <div className={styles.page}>
       {conversation && (
-        <Card>
-          <Row>
-            {conversation.data_source_name ? (
-              <Badge tone="lilac">{conversation.data_source_name}</Badge>
-            ) : (
-              <Badge tone="peach">no database chosen</Badge>
-            )}
-            <span className={styles.step}>
-              started {when(conversation.created_at)}
+        <div className={styles.contextStrip}>
+          {conversation.data_source_name ? (
+            <span className={styles.chip}>
+              <span className={styles.chipDot} aria-hidden="true" />
+              {conversation.data_source_name}
             </span>
-          </Row>
-          {!conversation.data_source_id && (
-            <p className={styles.note}>
-              This conversation is not tied to a database. If this organization has exactly one,
-              questions here are answered against it; if it has several, they will be refused
-              until you start a conversation that names one.
-            </p>
+          ) : (
+            <span className={styles.chipWarn}>no database chosen</span>
           )}
-        </Card>
+          <span>started {when(conversation.created_at)}</span>
+        </div>
+      )}
+      {conversation && !conversation.data_source_id && (
+        <p className={styles.note}>
+          This conversation is not tied to a database. If this organization has exactly one,
+          questions here are answered against it; if it has several, they will be refused
+          until you start a conversation that names one.
+        </p>
       )}
 
       <ol className={styles.thread}>
@@ -800,7 +864,7 @@ export function ConversationThread({
           return (
             <li
               key={message.id}
-              className={message.role === "user" ? styles.fromUser : styles.fromAgent}
+              className={message.role === "user" ? styles.turnYou : styles.turnAgentRow}
             >
               {/* **An answer is its card, not a bubble beside one** (B-106).
                   Where the run is in hand the whole answer renders here — words,
@@ -812,9 +876,10 @@ export function ConversationThread({
               {answering ? (
                 <AnswerCard orgId={orgId} run={answering} answer={message.content} />
               ) : (
-                <p className={styles.messageText}>{message.content}</p>
+                <p className={message.role === "user" ? styles.bubble : styles.messageText}>
+                  {message.content}
+                </p>
               )}
-              <span className={styles.timestamp}>{when(message.created_at)}</span>
             </li>
           );
         })}
@@ -827,7 +892,8 @@ export function ConversationThread({
           own defect (**B-044**). */}
       {answered && run && !liveRunIsInThread && <AnswerCard orgId={orgId} run={run} />}
 
-      <Card>
+      <div className={styles.composerWrap}>
+        <div className={styles.composerBox}>
         <label className={styles.composerLabel} htmlFor="question">
           Ask a question
         </label>
@@ -855,7 +921,8 @@ export function ConversationThread({
           {live && <span className={styles.step}>a question is already running</span>}
         </Row>
         {error && <p className={styles.failure}>{error}</p>}
-      </Card>
-    </Stack>
+        </div>
+      </div>
+    </div>
   );
 }

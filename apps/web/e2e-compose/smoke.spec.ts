@@ -288,7 +288,10 @@ test("the stack answers a question asked in a browser", async ({ page }) => {
   });
 
   await test.step("open the query behind the answer", async () => {
-    await page.getByRole("button", { name: /Show the query behind this/ }).click();
+    // The working is folded away now (D-047), so the query is reached by opening
+    // Evidence — and only that: a finding with one citation shows its query
+    // outright, so there is no second click.
+    await page.getByText("Evidence", { exact: true }).first().click();
 
     await expect(page.getByText(/SELECT COUNT\(\*\)/i)).toBeVisible();
     // **The database answered.** Everything above this line could be satisfied
@@ -326,14 +329,12 @@ test("the stack answers a question asked in a browser", async ({ page }) => {
     await page.getByRole("button", { name: "Send" }).click();
 
     await expect(page.getByText(SCRIPTED_ANSWER)).toHaveCount(2, { timeout: 120_000 });
-    // **`Show|Hide`, not `Show`.** The step above opened the first answer's
-    // evidence and its trace, so those two controls now read *Hide*. Matching
-    // only "Show" counted one of two and reported the product as broken when it
-    // was not — which is the failure mode a smoke can least afford, because the
-    // next person to see it red will believe it.
-    await expect(page.getByRole("button", { name: /the query behind this/ })).toHaveCount(2, {
-      timeout: 60_000,
-    });
+    // **Counted on the disclosures, not on the citation buttons.** A closed
+    // `<details>` keeps its contents out of the accessibility tree, so a role
+    // query for the citation inside it finds nothing and would report the
+    // product as broken when it is not — the failure mode a smoke can least
+    // afford, because the next person to see it red will believe it.
+    await expect(page.getByText("Evidence", { exact: true })).toHaveCount(2, { timeout: 60_000 });
     await expect(page.getByRole("button", { name: /how this was worked out/ })).toHaveCount(2);
   });
 
@@ -366,6 +367,6 @@ test("the stack answers a question asked in a browser", async ({ page }) => {
     // **Both** answers, and both sets of evidence: a reload rebuilds the whole
     // thread from durable rows, not just the last thing said.
     await expect(page.getByText(SCRIPTED_ANSWER)).toHaveCount(2, { timeout: 30_000 });
-    await expect(page.getByRole("button", { name: /the query behind this/ })).toHaveCount(2);
+    await expect(page.getByText("Evidence", { exact: true })).toHaveCount(2);
   });
 });

@@ -57,6 +57,17 @@ async function openConversation(page: import("@playwright/test").Page) {
   await expect(page.getByLabel("Ask a question")).toBeVisible();
 }
 
+/**
+ * Open an answer's Evidence disclosure.
+ *
+ * The working is folded away by default now (D-047), so the query is not on
+ * screen until this is clicked. Located by its text rather than by role,
+ * because `<summary>` has no stable ARIA role across engines.
+ */
+async function openEvidence(page: import("@playwright/test").Page) {
+  await page.getByText("Evidence", { exact: true }).first().click();
+}
+
 async function ask(page: import("@playwright/test").Page) {
   await page.getByLabel("Ask a question").fill(QUESTION);
   await page.getByRole("button", { name: "Send" }).click();
@@ -80,8 +91,10 @@ test("the citation opens into the query behind the answer", async ({ page }) => 
   await ask(page);
   await expect(page.getByText(ANSWER)).toBeVisible({ timeout: 15_000 });
 
-  await page.getByRole("button", { name: /Show the query behind this/ }).click();
+  await openEvidence(page);
 
+  // No second click: a finding with one citation shows its query outright
+  // (D-047), so opening the evidence *is* opening the query.
   await expect(page.getByText(/SELECT COUNT\(\*\) AS "order_count"/)).toBeVisible();
   await expect(page.getByRole("cell", { name: "3718" })).toBeVisible();
 });
@@ -170,14 +183,13 @@ test("the chart is drawn in the browser, inside the answer", async ({ page }) =>
   await expect(chart.locator("svg.marks")).toBeVisible({ timeout: 15_000 });
   await expect(chart.locator("svg .mark-line, svg .mark-group")).not.toHaveCount(0);
 
-  // **And it is inside the run's own card, not in a panel of its own** — B-048.
-  // Anchored to the citation rather than to the answer sentence: the sentence
-  // lives in the message bubble above, because the card suppresses it once the
-  // thread has caught up (the Phase 7 gate found this card showing a citation
-  // and no words). So "the same card as the evidence" is the honest form of
-  // "inside the answer".
-  const card = page.getByTestId("chart").locator("xpath=ancestor::section[1]");
-  await expect(card.getByRole("button", { name: /Show the query behind this/ })).toBeVisible();
+  // **And it is inside the run's own answer, not in a panel of its own** — B-048.
+  // Anchored on `data-testid="answer"` rather than on an ancestor `<section>`:
+  // the answer stopped being a `Card` in D-047 and became a plain element, and
+  // an xpath to the nearest section would now climb past it to something else
+  // and quietly keep passing.
+  const answer = page.getByTestId("chart").locator("xpath=ancestor::*[@data-testid='answer'][1]");
+  await expect(answer.getByText("Evidence", { exact: true })).toBeVisible();
 });
 
 test("the chart spec opens, the way the query does", async ({ page }) => {

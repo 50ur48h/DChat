@@ -6,32 +6,54 @@
  * depend on a third-party CDN (settled in WP0.3).
  */
 
+/*
+ * Warm paper, layered depth, one terracotta accent (D-047).
+ *
+ * The legacy names — `--bg`, `--fg`, `--primary`, `--space-N`, `--shadow-sm` —
+ * are kept and repointed rather than renamed. A dozen CSS Modules consume them,
+ * and repainting the product by changing the values here is a smaller, safer
+ * change than editing every file to learn a new spelling. The new names below
+ * are canonical; the old ones are aliases and new code should not reach for
+ * them.
+ */
 :root {
-  /* Surfaces and text */
-  --bg: #f7f8fa;
+  /* Surfaces */
+  --paper: #faf9f5;
+  --rail: #f2f0e9;
   --surface: #ffffff;
-  --surface-sunken: #f1f3f7;
-  --fg: #101828;
-  --fg-muted: #667085;
-  --fg-subtle: #98a2b3;
-  --border: #eaecf0;
+  --inset: #f6f4ee;
 
-  /* One friendly primary */
-  --primary: #5b5bd6;
-  --primary-hover: #4a4ac4;
-  --primary-soft: #eeeefc;
-  --on-primary: #ffffff;
-  --focus-ring: #c7c7f5;
+  /* Text */
+  --ink: #23211d;
+  --ink-muted: #6b6760;
+  --ink-subtle: #6f6a61;
 
-  /* Pastel accents: -soft is a background, -strong is its readable foreground */
-  /* Categorical chart series (B-109). A fixed order, never cycled: the eighth
-     slot is the cap `charts.MAX_SERIES` enforces, because a ninth would repeat
-     a hue and two series would look like one. Deliberately NOT the pastel
-     accents above — those mean success, information, warning, error, and a
-     rose bar would read as a failure. Validated as a set against the card
-     surface for lightness, chroma, colour-vision separation and contrast;
-     slots 3, 4 and 5 sit under 3:1 on white, which the legend and the
-     always-available result table relieve. */
+  /* Hairlines */
+  --line: #e6e2d8;
+  --line-strong: #d8d3c6;
+
+  /*
+   * One accent, two jobs.
+   *
+   * `--clay` is #b55231 and not the brighter #c15f3c for a measurable reason:
+   * white on #c15f3c is 4.23:1, which fails AA for the 14px text on the Send
+   * button. This is 4.98:1 and is visually the same terracotta.
+   */
+  --clay: #b55231;
+  --clay-hover: #9d4529;
+  --clay-deep: #9a4526;
+  --clay-soft: #f7ece6;
+  --clay-line: #efdfd5;
+  --on-clay: #ffffff;
+
+  --focus-ring: #e0b6a3;
+
+  /* Categorical chart series (B-109). Unchanged by D-047, and unchanged
+     deliberately: the set was validated against the card surface, and
+     `--surface` is still #ffffff, so the validation still holds. A fixed
+     order, never cycled — the eighth slot is the cap `charts.MAX_SERIES`
+     enforces, because a ninth would repeat a hue and two series would look
+     like one. */
   --chart-cat-1: #5b5bd6;
   --chart-cat-2: #eb6834;
   --chart-cat-3: #1baf7a;
@@ -41,16 +63,20 @@
   --chart-cat-7: #2a78d6;
   --chart-cat-8: #e34948;
 
-  --accent-mint-soft: #e6f6ee;
-  --accent-mint-strong: #0f7a52;
-  --accent-sky-soft: #e8f1fd;
-  --accent-sky-strong: #1a5fb4;
-  --accent-lilac-soft: #eeeefc;
-  --accent-lilac-strong: #4a4ac4;
-  --accent-peach-soft: #fdf1e3;
-  --accent-peach-strong: #a35b06;
-  --accent-rose-soft: #fdeced;
-  --accent-rose-strong: #b42318;
+  /* Accents, re-tuned warm. Still five, because roles and source statuses on
+     the admin screens are categories and need to stay distinguishable; the
+     thread itself only ever uses mint and peach. Every `-strong` is AA on both
+     `--paper` and `--surface`. */
+  --accent-mint-soft: #eaf2e9;
+  --accent-mint-strong: #3f6b3a;
+  --accent-sky-soft: #eaeff5;
+  --accent-sky-strong: #3a5a7d;
+  --accent-lilac-soft: #f0ecf4;
+  --accent-lilac-strong: #6b4d80;
+  --accent-peach-soft: #f8f0e2;
+  --accent-peach-strong: #8a6320;
+  --accent-rose-soft: #f8ebe9;
+  --accent-rose-strong: #a33c2c;
 
   /* Semantic aliases, so status code never names a hue */
   --ok: var(--accent-mint-strong);
@@ -60,28 +86,51 @@
   --danger: var(--accent-rose-strong);
   --danger-soft: var(--accent-rose-soft);
 
-  /* 4px scale */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
-  --space-7: 48px;
-  --space-8: 64px;
+  /* 4px scale, extended: generous spacing is most of what makes this work */
+  --s1: 4px;   --s2: 8px;   --s3: 12px;  --s4: 16px;
+  --s5: 20px;  --s6: 24px;  --s7: 32px;  --s8: 40px;
+  --s9: 48px;  --s10: 64px; --s11: 80px; --s12: 96px;
 
   --radius-sm: 8px;
   --radius-md: 12px;
-  --radius-lg: 16px;
+  --radius-lg: 18px;
+  --radius-xl: 22px;
   --radius-full: 999px;
 
-  /* Soft and low contrast: large blur, small offset, never a hard drop */
-  --shadow-sm: 0 1px 2px rgb(16 24 40 / 4%), 0 4px 16px rgb(16 24 40 / 5%);
-  --shadow-md: 0 2px 4px rgb(16 24 40 / 5%), 0 12px 28px rgb(16 24 40 / 9%);
+  /* Depth is layered, not dropped: every raised surface carries a hairline as
+     well as a shadow. A shadow alone reads as floating. */
+  --lift: 0 1px 1px rgb(35 33 29 / 4%), 0 6px 20px rgb(35 33 29 / 5%);
+  --lift-md: 0 1px 2px rgb(35 33 29 / 6%), 0 14px 34px rgb(35 33 29 / 9%);
+  --lift-lg: 0 2px 3px rgb(35 33 29 / 5%), 0 18px 44px rgb(35 33 29 / 8%);
 
   --font-sans:
     ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  /* Exactly one job: the words the agent itself produced. A serif heading, a
+     serif label or a serif empty state is a bug (docs/design.md). */
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* ---- Legacy aliases. Do not use in new code. ---- */
+  --bg: var(--paper);
+  --surface-sunken: var(--inset);
+  --fg: var(--ink);
+  --fg-muted: var(--ink-muted);
+  --fg-subtle: var(--ink-subtle);
+  --border: var(--line);
+  --primary: var(--clay);
+  --primary-hover: var(--clay-hover);
+  --primary-soft: var(--clay-soft);
+  --on-primary: var(--on-clay);
+  --space-1: var(--s1);
+  --space-2: var(--s2);
+  --space-3: var(--s3);
+  --space-4: var(--s4);
+  --space-5: var(--s6);
+  --space-6: var(--s7);
+  --space-7: var(--s9);
+  --space-8: var(--s10);
+  --shadow-sm: var(--lift);
+  --shadow-md: var(--lift-md);
 
   color-scheme: light;
 }
@@ -100,23 +149,33 @@
  * values and no combination of media query and attribute that could disagree.
  */
 [data-theme="dark"] {
-  --bg: #0e1014;
-  --surface: #171a21;
-  --surface-sunken: #1e222b;
-  --fg: #f2f4f7;
-  --fg-muted: #98a2b3;
-  --fg-subtle: #667085;
-  --border: #262b35;
+  /* The same warmth, inverted — not a cool grey theme with the colours
+     swapped. Surfaces lift instead of darkening; the accent lightens rather
+     than saturating. */
+  --paper: #171614;
+  --rail: #1d1b18;
+  --surface: #201e1b;
+  --inset: #26231f;
 
-  --primary: #8b8bf0;
-  --primary-hover: #a0a0f5;
-  --primary-soft: #23233a;
-  --on-primary: #0e1014;
-  --focus-ring: #4a4a8f;
+  --ink: #f2efe8;
+  --ink-muted: #a8a299;
+  --ink-subtle: #948e84;
+
+  --line: #33302b;
+  --line-strong: #423e37;
+
+  --clay: #d98b66;
+  --clay-hover: #e69c78;
+  --clay-deep: #e09b78;
+  --clay-soft: #2e2621;
+  --clay-line: #43362d;
+  --on-clay: #171614;
+
+  --focus-ring: #7a4f39;
 
   /* The same eight hues stepped for the dark surface, not a second palette.
-     Slot 1 is a shade below `--primary` here: the dark primary sits just
-     outside the lightness band these were validated in. */
+     Slot 1 is a shade below the light primary here: these were validated in a
+     lightness band the dark accent sits outside. */
   --chart-cat-1: #7a7ae6;
   --chart-cat-2: #d95926;
   --chart-cat-3: #199e70;
@@ -126,20 +185,21 @@
   --chart-cat-7: #3987e5;
   --chart-cat-8: #e66767;
 
-  /* Pastels lose saturation in the dark rather than gaining it */
-  --accent-mint-soft: #12261e;
-  --accent-mint-strong: #6ee7b7;
-  --accent-sky-soft: #12203a;
-  --accent-sky-strong: #93c5fd;
-  --accent-lilac-soft: #23233a;
-  --accent-lilac-strong: #c4b5fd;
-  --accent-peach-soft: #2b2013;
-  --accent-peach-strong: #fcd34d;
-  --accent-rose-soft: #2e1618;
-  --accent-rose-strong: #fca5a5;
+  /* Accents lose saturation in the dark rather than gaining it */
+  --accent-mint-soft: #1b2a1d;
+  --accent-mint-strong: #8fbe86;
+  --accent-sky-soft: #1a2431;
+  --accent-sky-strong: #9dbede;
+  --accent-lilac-soft: #262032;
+  --accent-lilac-strong: #c0a9d4;
+  --accent-peach-soft: #2c2417;
+  --accent-peach-strong: #ddb35f;
+  --accent-rose-soft: #2e1f1c;
+  --accent-rose-strong: #e29a8c;
 
-  --shadow-sm: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 24%);
-  --shadow-md: 0 2px 4px rgb(0 0 0 / 32%), 0 12px 28px rgb(0 0 0 / 36%);
+  --lift: 0 1px 2px rgb(0 0 0 / 32%), 0 6px 20px rgb(0 0 0 / 26%);
+  --lift-md: 0 2px 4px rgb(0 0 0 / 36%), 0 14px 34px rgb(0 0 0 / 34%);
+  --lift-lg: 0 3px 6px rgb(0 0 0 / 38%), 0 18px 44px rgb(0 0 0 / 40%);
 
   /* Tells the browser to paint its own furniture — scrollbars, form controls,
      the canvas behind the page — in dark. Without it a dark page keeps a
