@@ -50,7 +50,7 @@ make evals              # eval harness with FakeLLM (Phase 9+)
   their machine, and decisions. Their time is the scarce resource.
 
 ## Built, tested, unreachable — this project's characteristic defect
-Four instances so far, and **not one was caught by CI**:
+Five instances so far, and **not one was caught by CI**:
 
 - **B-083** — a definition reached the critic and never the model, so the rule
   was enforced against a planner that had not been told it. `Definition.render()`,
@@ -62,6 +62,22 @@ Four instances so far, and **not one was caught by CI**:
   nothing.
 - **B-109** — a colour channel assembled, carried, accepted by the tool and
   asserted by a test, with no field on the schema the model actually fills.
+- **B-133** — `answered` computed on every run since WP7.2b, written into a trace
+  event and onto no column, so the screen had no way to ask and labelled every
+  honest refusal *"answered"* — the one claim a refusal exists to deny.
+
+**B-133 sharpens what "tested" is worth here, and it is the most useful thing on
+this list.** `answered` *had* a test. It asserted `outcome.answered is False` — on
+the **outcome object**, which is the one thing the product cannot look at. A test
+on an intermediate value proves the value is right and says **nothing** about
+whether anything reads it. The assertion was true, stayed true, and was true the
+whole time the screen was contradicting it.
+
+So when you write the test, ask what it is holding: a value in flight, or the
+thing a person receives. B-133's fix moved the assertion one object outward — to
+`view.answered`, what the API actually returns — and that single step is the
+difference between a test that guards the behaviour and a test that guards a
+local variable.
 
 **Coverage cannot see this class, by construction.** A unit test hands a function
 its arguments directly, which is the one thing the product cannot do — so the
