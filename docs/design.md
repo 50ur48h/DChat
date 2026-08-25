@@ -307,6 +307,60 @@ first-time reader may not notice that evidence exists. That is the price of a
 focused answer, and the cheap retreat if it proves wrong is a resting opacity
 around 40% rather than 0.
 
+### The working state
+
+While a run is going, the thread shows what the agent is **actually doing**, from
+the events it is already streaming (`agent_events`, architecture 10.3). It
+collapses to a single line when the run settles and stays expandable.
+
+**The rule that matters most: nothing here may be invented.** Every row is one
+durable event, in the order it was written, with the wording `trace.tsx` already
+maps type names to. There is no scripted sequence, no minimum display time, no
+step that appears because a designer expected it to. A progress display that runs
+ahead of the work is the most convincing lie an interface can tell, and this
+product's whole claim is that its account of itself is checkable. If the events
+stop, the display stops.
+
+**Shape.**
+
+- A **header button** — a small mark, a status word, a chevron. While working,
+  the word shimmers (`Thinking`, or the phase word); once settled it is
+  `Thought for N seconds`, where N is real: the run's `started_at` to
+  `finished_at`, falling back to the first and last event timestamps. **Never a
+  rounded-up guess** — if neither is known, the word is `Thought` with no number
+  rather than a made-up one.
+- An **expandable trace** beneath it, a hairline running down the left, rows
+  fading up as they arrive.
+- Each row is a step word and, where the event carries one, a detail — `4 tables:
+  orders, stores…`, `1 row · 31 ms`. The detail comes from fields 10.3 promises,
+  and anything absent renders as nothing rather than as `undefined`.
+- The **last row while working carries a spinner**; the ones above it carry a
+  check. Once the run settles every row carries a check, because every one of
+  them finished.
+
+**Behaviour.** It opens itself while the run is live and collapses when the run
+settles — watching is the point during, the answer is the point after — but an
+explicit toggle wins from then on. Derived from `live`, never synced to it in an
+effect.
+
+**Motion is the one place this design uses it, and it is bounded.** A shimmer on
+the status word, a fade-up per row, a grid-rows transition on the expander.
+Everything is off under `prefers-reduced-motion`, and the trace must be
+completely readable with all of it disabled — motion may say *this is happening
+now*, and may never be the only thing that says it.
+
+**Accessibility.** The header is a real `<button>` with `aria-expanded` and a
+40px target. The status word lives in a `role="status"` region so a change is
+announced without stealing focus. The spinner is decorative and `aria-hidden`;
+the row's word is what carries the meaning.
+
+**Where else this pattern belongs.** Only where there is real progress to report.
+A long operation that returns in one shot — a catalog refresh, a connection
+test — has nothing to stream, and dressing it in steps would be inventing them.
+Those get an indeterminate shimmer and their real result. **Document ingestion is
+the honest second home**: `status`, `chunk_count` and `embedded_count` are real
+progressive state and describe themselves.
+
 ## Accessibility, non-negotiable
 
 Unchanged in force, and the figures below are measured against the new palette

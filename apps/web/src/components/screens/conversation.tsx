@@ -481,13 +481,19 @@ function RunProgress({ orgId, run }: { orgId: string; run: Run }) {
         </Badge>
       </Row>
       <p className={styles.note}>
-        This can take a minute. The answer arrives here on its own — you can leave the page and
-        come back to it.
+        The answer arrives here on its own — you can leave the page and come back to it.
       </p>
-      {/* The trace replaces the single summary line this card used to show. It
-          streams, so a step appears when it happens; and it replays from the
-          durable rows, so a refresh mid-run loses nothing. */}
-      <Trace orgId={orgId} runId={run.id} live defaultOpen />
+      {/* The working state (D-047). It streams, so a step appears when it
+          happens, and it replays from the durable rows, so a refresh mid-run
+          loses nothing. */}
+      <Trace
+        orgId={orgId}
+        runId={run.id}
+        live
+        defaultOpen
+        startedAt={run.started_at}
+        finishedAt={run.finished_at}
+      />
     </Card>
   );
 }
@@ -626,7 +632,13 @@ function AnswerCard({
             {/* Its own toggle rather than a `<details>`, because it has to open
                 itself while a run is live. Styled to match the summary beside
                 it in `trace.module.css`. */}
-            <Trace orgId={orgId} runId={run.id} live={false} />
+            <Trace
+              orgId={orgId}
+              runId={run.id}
+              live={false}
+              startedAt={run.started_at}
+              finishedAt={run.finished_at}
+            />
           </div>
         </>
       )}

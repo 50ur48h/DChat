@@ -128,8 +128,10 @@ test("the trace shows how the answer was worked out", async ({ page }) => {
 
   // Collapsed once the run is over — the answer is the point then — but still
   // there, because "how did you get that" is the question this product exists
-  // to be able to answer.
-  const toggle = page.getByRole("button", { name: /how this was worked out/ });
+  // to be able to answer. **The word is the settled one and it carries a real
+  // duration** (D-048): a run that took no measurable time would say `Thought`
+  // with no number rather than invent one, so the pattern allows both.
+  const toggle = page.getByRole("button", { name: /Thought(\s+for\s+\d+\s+\w+)?$/ });
   await expect(toggle).toBeVisible();
   await toggle.click();
 
@@ -153,7 +155,7 @@ test("a refresh mid-run replays the whole trace", async ({ page }) => {
   await page.reload();
 
   await expect(page.getByText(ANSWER)).toBeVisible({ timeout: 15_000 });
-  await page.getByRole("button", { name: /how this was worked out/ }).click();
+  await page.getByRole("button", { name: /Thought(\s+for\s+\d+\s+\w+)?$/ }).click();
   await expect(page.getByText("Read the catalog")).toBeVisible();
   await expect(page.getByText("Finished")).toBeVisible();
 });
