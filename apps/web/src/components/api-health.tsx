@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 
 import { ApiError, apiBaseUrl, fetchHealth, type Health } from "@/lib/api-client";
 
+import { Pending } from "@/components/ui/pending";
+
 import styles from "./api-health.module.css";
 
 type State =
@@ -43,11 +45,10 @@ export function ApiHealth() {
         API health
       </h2>
 
-      {state.kind === "loading" && (
-        <p className={styles.status} role="status">
-          Checking…
-        </p>
-      )}
+      {/* The same shimmer the working state uses, so every "something is
+          happening" in this product reads the same way. `Pending` carries its
+          own live region, so the word is still announced. */}
+      {state.kind === "loading" && <Pending>Checking…</Pending>}
 
       {state.kind === "healthy" && (
         <>

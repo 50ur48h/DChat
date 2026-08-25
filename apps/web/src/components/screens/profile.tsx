@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Row, Stack } from "@/components/ui/page";
+import { SkeletonList } from "@/components/ui/skeleton";
 import { createApi, type Me } from "@/lib/api-client";
 import { useSession } from "@/lib/auth/session";
 import { emailIsUnknown, personLabel } from "@/lib/identity";
@@ -88,7 +89,7 @@ export function Profile() {
             </dd>
           </dl>
         ) : (
-          <p className={styles.empty}>Loading…</p>
+          <SkeletonList rows={2} label="Loading your profile" />
         )}
         {error && <p className={styles.error}>{error}</p>}
       </Card>

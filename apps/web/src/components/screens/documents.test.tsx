@@ -193,3 +193,35 @@ describe("<Documents />", () => {
     expect(await screen.findByText(/A Contributor or Admin can add one/)).toBeInTheDocument();
   });
 });
+
+describe("the indexing meter", () => {
+  it("draws a proportion only where two real counts exist (D-049)", async () => {
+    /**
+     * **A meter needs a denominator that is not invented.** A part-embedded
+     * document has one — passages stored against passages embedded — and the
+     * bar is a proportion of those two numbers and nothing else.
+     */
+    stubFetch(json([PART_EMBEDDED]));
+
+    render(<Documents orgId="o1" role="admin" />);
+
+    const meter = await screen.findByRole("progressbar", { name: /Operations handbook/ });
+    expect(meter).toHaveAttribute("aria-valuemax", "4");
+    expect(meter).toHaveAttribute("aria-valuenow", "1");
+  });
+
+  it("draws nothing at all when there is no denominator", async () => {
+    /**
+     * Before any passage is stored the total does not exist, so a bar at 0%
+     * would be claiming a total nobody knows. A failed document gets none
+     * either: it is not part-way anywhere, it has stopped. The words carry
+     * both cases instead.
+     */
+    stubFetch(json([SCANNED]));
+
+    render(<Documents orgId="o1" role="admin" />);
+
+    expect(await screen.findByText("Scanned contract")).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+});

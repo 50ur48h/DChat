@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Select } from "@/components/ui/input";
 import { Row, Stack } from "@/components/ui/page";
+import { SkeletonList } from "@/components/ui/skeleton";
 import {
   createApi,
   type ArmedRecoveryGrant,
@@ -131,7 +132,9 @@ export function Members({ orgId, role: myRole }: { orgId: string; role: string |
         title="Members"
         subtitle={isAdmin ? undefined : "Only an Admin can change roles or invite people."}
       >
-        {members === null && !error && <p className={styles.muted}>Loading…</p>}
+        {members === null && !error && (
+          <SkeletonList rows={3} avatar label="Loading members" />
+        )}
         {members && (
           <table className={styles.table}>
             <thead>
@@ -270,7 +273,7 @@ export function Members({ orgId, role: myRole }: { orgId: string; role: string |
           )}
 
           {grants === null ? (
-            <p className={styles.muted}>Loading…</p>
+            <SkeletonList rows={2} label="Loading invitations" />
           ) : grants.length === 0 ? (
             <p className={styles.muted}>
               Nothing armed. This organization has no way back if its Admins lose access.

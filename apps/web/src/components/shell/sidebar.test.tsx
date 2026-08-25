@@ -186,7 +186,9 @@ describe("<Sidebar />", () => {
     // so `fetch` — and therefore `release` — does not exist yet on the first
     // tick, and a bare `expect` here would pass while leaving nothing to release.
     await waitFor(() => expect(release).toBeDefined());
-    expect(screen.getByText("Loading…")).toBeInTheDocument();
+    // The skeleton's single announced label, not the word "Loading…": a screen
+    // reader should hear this once rather than four anonymous boxes (D-049).
+    expect(screen.getByText("Loading your chats")).toBeInTheDocument();
     expect(screen.queryByText(/No chats yet/)).not.toBeInTheDocument();
 
     release?.(json([]));

@@ -25,6 +25,7 @@ import { Badge, ROLE_TONES } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Row, Stack } from "@/components/ui/page";
+import { SkeletonList } from "@/components/ui/skeleton";
 import { createApi, type ActiveDataSource, type Me } from "@/lib/api-client";
 import { useSession } from "@/lib/auth/session";
 import { emailIsUnknown, personLabel } from "@/lib/identity";
@@ -111,7 +112,7 @@ export function Settings({ orgId }: { orgId: string }) {
             </dd>
           </dl>
         ) : (
-          <p className={styles.muted}>Loading…</p>
+          <SkeletonList rows={2} label="Loading settings" />
         )}
         {error && <p className={styles.error}>{error}</p>}
       </Card>

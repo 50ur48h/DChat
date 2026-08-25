@@ -1,7 +1,8 @@
 # STATUS — data-agent build
 
-Current position: **Phase 13 — the chat product. WP13.3 in review; WP13.1a
-                  (#121), WP13.1b (#122) and WP13.2 (#123) merged.**
+Current position: **Phase 13 — the chat product. WP13.4 in review; WP13.1a
+                  (#121), WP13.1b (#122), WP13.2 (#123) and WP13.3 (#124)
+                  merged.**
                   Phases 0-11 done and signed off. **Phase 12 STOPPED AFTER
                   WP12.2 (D-043)** — WP12.3 and WP12.4 are deferred, not
                   cancelled. **There is no `v1.0.0` tag and there will not be one
@@ -67,7 +68,15 @@ Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-25 by Claude Code (**WP13.3 — the working state, D-048.**
+Last updated: 2026-08-26 by Claude Code (**WP13.4 — all six states, D-049,
+              closing B-142.** Skeletons, empty states with one action, `Pending` for
+              one-shot operations, a real ingestion meter, the optimistic question
+              bubble and the shared shimmer. The rule that came out of it: which
+              pattern applies is decided by what is knowable. Also learned — a grep
+              of compiled chunks can find an **orphan**, and the manifest is what
+              settles whether a chunk is reachable; `rm -rf /app/.next` does not
+              reliably empty that volume. Previously: **WP13.3 — the working state,
+              D-048.**
               The thinking state ported to CSS Modules and driven by the real event
               stream: no scripted timings, and no minimum display time either, because
               that is the same lie told more carefully. Found and fixed on the way: a
@@ -111,6 +120,74 @@ Last updated: 2026-08-25 by Claude Code (**WP13.3 — the working state, D-048.*
               class it belongs to is now the first line of the operational-debt list)
 
 ---
+
+## WP13.4 — all six states (D-049, closes B-142)
+
+The owner picked every candidate from the `C-states` mockup. Sixteen call sites,
+three new primitives, and one rule that is the actual result:
+
+**Which pattern applies is decided by what is knowable, not by what looks busy.**
+
+* **Skeleton** where the shape is known and the content is not — seven screens
+  that said `Loading…`. It claims no progress, so unlike a spinner it cannot turn
+  out to have been wrong. **Prefer too few rows**: three skeletons where one item
+  arrives is a small lie about the shape of the answer, and the page still
+  jumps — upwards, which is worse.
+* **Pending** where even the shape is unknown — the catalog refresh, the column
+  profile and the connection test, which are single requests that return once.
+  A shimmering word, an indeterminate bar, then the API's own sentence. **Never
+  steps**, because steps there could only be invented (D-048).
+* **Meter** only where two real counts exist. Document ingestion is the one place
+  in this product that qualifies. Before any passage is stored there is no
+  denominator, so **no bar is drawn at all** — a bar at 0% claims a total nobody
+  knows.
+
+Empty states carry a mark, what belongs there, and exactly one action — or, for
+a Reader, the sentence naming who can act, never a disabled control (B-008).
+
+**The optimistic question** is the one with a truth claim in it. The chat home
+creates, posts and navigates, and for that moment showed nothing the person had
+typed. It now renders the question immediately and **faint**; the faintness is
+the honest part, and if the write fails the bubble goes and the reason takes its
+place. It never hardens into something that looks saved.
+
+### A refinement to the web-container recipe, learned here
+
+CLAUDE.md says to ask the container what it compiled and then fetch that chunk by
+name. That found something alarming and wrong: the **old** empty-state strings
+were still in a compiled chunk after `rm -rf /app/.next` and a restart, and the
+new ones were in a different chunk. It looked exactly like the partial-recompile
+trap.
+
+It was not. The stale chunk was **four hours old** — from the WP13.2 session, so
+the `rm -rf` had not actually emptied the volume — and **nothing referenced it**.
+The page's own `page_client-reference-manifest.js` points at the fresh chunk.
+
+So: *grep found an orphan on disk, not something being served.* The check that
+settles it is **whether any manifest references the chunk**, not whether the
+string exists somewhere under `.next`:
+
+```sh
+docker exec dataagent-web-1 sh -c   "grep -rl '<chunk-name>' /app/.next --include='*.json' --include='*.js'    | grep -v 'static/chunks/<chunk-name>'"
+```
+
+Empty means nothing can load it. Also worth knowing: **`rm -rf /app/.next` does
+not reliably empty that volume**, and its file timestamps are the quickest way to
+tell a fresh compile from a survivor.
+
+### Evidence
+
+* `make test.web` **188 passed** — including new tests for the three primitives
+  and for the two honesty rules: the optimistic bubble disappears on a failed
+  send, and the meter is not drawn without a denominator.
+* `make lint.web`, `make typecheck.web` green.
+* **`make test.web.smoke` green twice from a clean stack**, after failing once at
+  the reload step; the failure did not reproduce in two further runs and is
+  recorded rather than hidden.
+* `make test.web.e2e` 13/16, all three failures the B-140 sign-in signature.
+* Served and checked: the new wording is in the chunks the manifests reference,
+  and `>Loading…<` is gone from every compiled chunk.
+* No Python changed.
 
 ## WP13.3 — the working state, from real events (D-048)
 

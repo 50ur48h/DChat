@@ -110,3 +110,31 @@
     line-height: 32px;
   }
 }
+
+/*
+ * The question you just sent, before the thread exists to hold it (D-049).
+ *
+ * Deliberately the thread's own bubble, at reduced opacity: it should be
+ * recognisably the same object it is about to become, and recognisably not
+ * finished. It never hardens here — the navigation replaces this whole screen.
+ */
+.sentTurn {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+  align-items: flex-end;
+}
+
+.sentBubble {
+  max-width: 78%;
+  opacity: 0.6;
+  background: var(--clay-soft);
+  border: 1px solid var(--clay-line);
+  border-radius: var(--radius-xl) var(--radius-xl) var(--s2) var(--radius-xl);
+  padding: var(--s5) var(--s6);
+  font-size: 15px;
+  line-height: 25px;
+  color: var(--ink);
+  white-space: pre-wrap;
+  text-align: left;
+}

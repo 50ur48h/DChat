@@ -114,7 +114,7 @@ describe("<DataSources />", () => {
 
     render(<DataSources orgId="org1" role="admin" />);
 
-    expect(await screen.findByText(/None yet/)).toBeInTheDocument();
+    expect(await screen.findByText("No databases registered")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Register" })).toBeInTheDocument();
   });
 
@@ -122,7 +122,7 @@ describe("<DataSources />", () => {
     const calls = stubFetch(json([]), json(SOURCE, 201), json([SOURCE]));
 
     render(<DataSources orgId="org1" role="admin" />);
-    await screen.findByText(/None yet/);
+    await screen.findByText("No databases registered");
 
     for (const [label, value] of [
       ["Name", "Pizza demo"],
@@ -155,7 +155,7 @@ describe("<DataSources />", () => {
     );
 
     render(<DataSources orgId="org1" role="admin" />);
-    await screen.findByText(/None yet/);
+    await screen.findByText("No databases registered");
 
     for (const [label, value] of [
       ["Name", "Pizza demo"],
@@ -215,7 +215,7 @@ describe("<DataSources />", () => {
     );
 
     render(<DataSources orgId="org1" role="admin" />);
-    await screen.findByText(/None yet/);
+    await screen.findByText("No databases registered");
 
     for (const [label, value] of [
       ["Name", "Cloud"],

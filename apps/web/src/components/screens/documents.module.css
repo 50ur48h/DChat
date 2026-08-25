@@ -83,3 +83,29 @@
   color: var(--danger-text, #b42318);
   font-size: var(--text-sm);
 }
+
+/* A proportion of two real counts — passages stored, passages embedded. Never
+   drawn when either is unknown; see `indexedFraction`. */
+.meter {
+  display: block;
+  height: 6px;
+  margin-top: var(--s3);
+  max-width: 320px;
+  border-radius: var(--radius-full);
+  background: var(--inset);
+  overflow: hidden;
+}
+
+.meterFill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--clay);
+  transition: width 400ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .meterFill {
+    transition: none;
+  }
+}

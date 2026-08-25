@@ -28,6 +28,7 @@ import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { SkeletonList } from "@/components/ui/skeleton";
 import { ApiError, createApi, type Conversation } from "@/lib/api-client";
 import { useSession } from "@/lib/auth/session";
 import { personLabel, type Named } from "@/lib/identity";
@@ -185,9 +186,13 @@ export function Sidebar({
       </Link>
 
       <div className={styles.list}>
-        {conversations === null && !error && <p className={styles.muted}>Loading…</p>}
+        {/* `null` is "not asked yet" and `[]` is "there is nothing" — two
+            different claims, and the skeleton is what keeps them apart. */}
+        {conversations === null && !error && (
+          <SkeletonList rows={4} label="Loading your chats" />
+        )}
         {conversations?.length === 0 && (
-          <p className={styles.muted}>No chats yet. Ask something to start one.</p>
+          <p className={styles.emptyRail}>No chats yet. Ask something to start one.</p>
         )}
         {error && <p className={styles.error}>{error}</p>}
 

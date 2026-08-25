@@ -39,6 +39,7 @@ import { Trace } from "@/components/screens/trace";
 import { Badge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Pending } from "@/components/ui/pending";
 import { Row } from "@/components/ui/page";
 import {
   ApiError,
@@ -930,7 +931,8 @@ export function ConversationThread({
           <Button variant="primary" disabled={sending || draft.trim().length === 0} onClick={() => void send()}>
             {sending ? "Sending…" : "Send"}
           </Button>
-          {live && <span className={styles.step}>a question is already running</span>}
+          {sending && <Pending spinner={false}>Sending your question…</Pending>}
+          {live && !sending && <span className={styles.step}>a question is already running</span>}
         </Row>
         {error && <p className={styles.failure}>{error}</p>}
         </div>
