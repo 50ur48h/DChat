@@ -239,7 +239,6 @@ def _compose_from_prompt(request: Any) -> str:
         raise AssertionError("the composing prompt named no execution")
     return FinalizeIn(
         answer=f"Answered from {len(ids)} query result(s).",
-        answered=True,
         supported_by=ids,
         confidence="high",
     ).model_dump_json()
