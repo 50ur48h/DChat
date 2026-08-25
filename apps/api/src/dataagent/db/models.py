@@ -948,6 +948,12 @@ class Conversation(Base):
     created_at: Mapped[CreatedAt]
 
 
+#: The three endings a finished run can have (**D-044**). Mirrors revision
+#: 0030's `OUTCOME_STATES` and `composer.RUN_STATES`;
+#: `tests/agent/test_outcome_state.py` is what keeps the three honest.
+RUN_OUTCOME_STATES: tuple[str, ...] = ("answered", "partly", "refused")
+
+
 class AgentRun(Base):
     """One question, from asked to answered (architecture Part 10.1, 4.4).
 
@@ -977,6 +983,23 @@ class AgentRun(Base):
                 ", ".join(f"'{s}'" for s in TERMINAL_RUN_STATUSES)
             ),
             name="finished_at_matches_status",
+        ),
+        # **Declared here as well as in revision 0030**, because
+        # `test_models_and_migrations_do_not_drift` compares the two and a
+        # constraint that exists only in a migration is one autogenerate will
+        # propose dropping the next time somebody runs it.
+        CheckConstraint(
+            "outcome_state IS NULL OR outcome_state IN ({})".format(
+                ", ".join(f"'{state}'" for state in RUN_OUTCOME_STATES)
+            ),
+            name="outcome_state_valid",
+        ),
+        # The property the card depends on, enforced where it cannot be edited
+        # away: `partly` without the missing half is a badge that says less than
+        # the wrong one did (**D-044**).
+        CheckConstraint(
+            "outcome_state <> 'partly' OR (unanswered IS NOT NULL AND unanswered <> '')",
+            name="partly_names_what_is_missing",
         ),
         Index(
             "ix_agent_runs_org_id_conversation_id_created_at",

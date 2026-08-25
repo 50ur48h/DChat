@@ -30,6 +30,7 @@ from dataagent.agent.composer import RUN_STATES, run_state
 from dataagent.agent.runner import execute_run
 from dataagent.agent.tools.base import ToolContext
 from dataagent.agent.tools.finalize import FinalizeIn
+from dataagent.db.models import RUN_OUTCOME_STATES
 from dataagent.llm.fake import FakeLLM
 from dataagent.runs import service as runs
 from dataagent.runs.routes import run_out
@@ -87,18 +88,25 @@ def test_whitespace_is_not_a_named_gap() -> None:
     assert run_state(_draft(unanswered="   "), ("exec-1",)) == "answered"
 
 
-def test_the_states_match_the_migration() -> None:
-    """Two lists in two languages, so something has to count them.
+def test_the_states_match_everywhere_they_are_written() -> None:
+    """**Three lists in two languages, so something has to count them.**
 
-    The same arrangement `TENANT_TABLES` has with revision 0002: the CHECK
-    constraint decides what the column will accept, and a state this module can
-    produce but the database will reject is a run that fails at the last write.
+    `composer.RUN_STATES` is what this module can produce, `models.
+    RUN_OUTCOME_STATES` feeds the CHECK the ORM declares, and revision 0030's
+    `OUTCOME_STATES` is what the database was actually built with. The third
+    copy is not redundancy for its own sake: a constraint that exists only in a
+    migration is one `test_models_and_migrations_do_not_drift` reports as drift
+    and autogenerate proposes dropping — which is how it was found.
+
+    Same arrangement `TENANT_TABLES` has with revision 0002. A state this module
+    can produce and the column will reject is a run that fails at its last write.
     """
     declared = re.search(r"OUTCOME_STATES = \(([^)]*)\)", MIGRATION.read_text(encoding="utf-8"))
     assert declared, "OUTCOME_STATES not found in revision 0030"
     in_migration = tuple(re.findall(r'"([a-z]+)"', declared.group(1)))
 
     assert in_migration == RUN_STATES
+    assert RUN_OUTCOME_STATES == RUN_STATES
 
 
 # ---------------------------------------------------------------------------
