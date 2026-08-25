@@ -40,15 +40,31 @@ Blocked on user: **yes — the direction.** Nothing technical blocks. The two
                  both again.
                  Not blocking, and still true: an **Anthropic key** would close
                  **B-029 (P1)** and with it the Phase 6 gate. The **OpenAI key**
-                 is a repository secret (owner, 2026-08-17), so `nightly-evals.yml`
-                 can run — keep its token cap tight; the local live run spent
-                 **223k tokens** for twenty questions.
+                 is a repository secret (owner, 2026-08-17).
+                 **Correction, 2026-08-25 (B-139): this line used to say that the
+                 key means `nightly-evals.yml` "can run". It runs every night and
+                 has never once completed** — nine scheduled runs, 2026-08-17
+                 through 2026-08-25, all red in about thirty seconds. The five
+                 `LLM_*` settings come from repository **variables**, the
+                 repository has **none**, and an empty string is not parseable
+                 into `llm_role_map`. It dies during `alembic upgrade head`,
+                 before any model call, so the token cap has never been tested
+                 and no night has ever spent a cent. **Left red deliberately**
+                 (owner, 2026-08-25): honestly red beats noisily green while the
+                 harness is not yet worth believing. Keep the cap tight whenever
+                 it does run — the local live run spent **223k tokens** for
+                 twenty questions.
 Last updated: 2026-08-25 by Claude Code (**session-end handoff, state only.** Phase 12
               stopped after WP12.2 (D-043); the next direction is the owner's and is not
               set here. Dev is deployed, current at `fa7ace3` and answering questions;
               `main` is ahead of it by #118 and two migrations. This session merged #108
               through #118 — B-120, B-123..B-128, B-130..B-134 and D-042..D-044 — and the
-              engine trial loop found B-134 through B-138. Nothing is in progress)
+              engine trial loop found B-134 through B-138. Nothing is in progress.
+              **Amended 2026-08-25, docs only: B-139** — `nightly-evals` has failed
+              every scheduled night it has ever run, nine for nine, and the header's
+              claim that the OpenAI secret means it "can run" was wrong and is
+              corrected above. Filed, **not fixed**, at the owner's direction. The
+              class it belongs to is now the first line of the operational-debt list)
 
 ---
 
@@ -151,6 +167,21 @@ deletes on 2026-08-25.
 
 ## Operational debt, in one place
 
+* **Nothing reads a scheduled workflow's conclusion, so a non-blocking job can be
+  red indefinitely.** This is a class, not an incident, and it will recur with the
+  next scheduled thing this repository adds. There is no required check over a
+  `schedule:` run, by design — a job that fails for reasons nobody controls must
+  not block a merge — and the cost of that design is that its result reaches
+  nobody unless a person opens the Actions tab and looks. **B-139** is the first
+  instance and was found that way, on the ninth night.
+* **`nightly-evals` has never once completed** (**B-139**). Nine scheduled runs,
+  2026-08-17 through 2026-08-25, every one red in about thirty seconds. The five
+  `LLM_*` settings come from repository **variables** and the repository has none,
+  so an empty string reaches `llm_role_map` and `Settings()` refuses it during
+  `alembic upgrade head` — before any model call. **Left red on purpose** (owner,
+  2026-08-25): a green nightly would not mean much while the harness is not worth
+  believing, and honestly red beats noisily green. It also means the Phase 12 gate
+  criterion *"nightly evals on"* cannot currently be met.
 * **CI takes 30+ minutes, and `coverage` is a required check gated on the slowest
   job.** `coverage` needs `[api, mssql]`, so it starts only after `api` finishes —
   roughly thirteen minutes in — which means every PR's mergeability rests on a
@@ -3999,6 +4030,12 @@ unexplained.
 - [ ] WP12.4 ~~Prod env~~ + ASVS-lite checklist + restore drill + v1.0 tag ← gate
       — **prod is deferred (D-041)**; every other criterion applies, against dev
 - [ ] GATE: arch Part 14 acceptance; nightly evals on; user sign-off
+      — **"nightly evals on" cannot currently be met (B-139).** The workflow has
+      run on schedule nine times and failed nine times, in about thirty seconds
+      each, on unset repository variables. It is **left red deliberately** (owner,
+      2026-08-25), so this criterion is blocked on a decision rather than on an
+      oversight: it opens when the harness is worth believing, not when the
+      variables are set.
 
 ### What Phase 12 already owes, from the backlog
 
