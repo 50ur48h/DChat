@@ -147,6 +147,32 @@ chrome; feature components compose them.
 - **PageHeader** — display title, optional muted subtitle, optional right slot
   for the single primary action.
 
+### The shell (WP13.1b)
+
+Every screen inside an organization renders inside `components/shell/`.
+
+- **AppShell** — a flex row: the rail, then the page. The page gets
+  `min-width: 0` so wide content (a result table, a SQL block) scrolls inside its
+  own container instead of pushing the rail off screen. Below 768px the two stack
+  and the rail gives its height back.
+- **Sidebar** — `--surface-sunken`, 260px, sticky full height, collapsing to a
+  60px icon rail. The one hairline in the design that earns its place is its
+  right edge, because the two surfaces are close in value. New chat at the top,
+  chats in the middle, the person and Settings at the bottom. Row controls
+  (rename, archive) appear on `:hover` **and** `:focus-within` — hover alone
+  would make them unreachable without a pointer.
+  - The collapsed/expanded choice persists per browser via `lib/persisted.ts`.
+- **Destructive wording is the true word.** The control that puts a chat away
+  says **Archive**, and its confirmation says the chat can be brought back,
+  because that is what happens (D-039). A trash icon that quietly archived would
+  be a control whose word does not match its action — the same defect as a badge
+  reading *answered* on a refusal. There is no delete in this product; if one is
+  ever added it needs a DECISIONS entry, not an icon.
+- **Unbuilt sections are shown as unbuilt.** A section that is planned and not
+  built carries a `Coming soon` badge and prose, and **no controls at all** — not
+  a disabled select, not a dead toggle. A control that looks operable and does
+  nothing is a promise the product does not keep.
+
 ## Accessibility, non-negotiable
 
 - Every interactive element has a visible `:focus-visible` ring; never
@@ -159,9 +185,25 @@ chrome; feature components compose them.
 
 ## Dark mode
 
-Tokens are redefined under `prefers-color-scheme: dark`; nothing else changes.
+**Light is the default, and the operating system does not get a vote** (D-046).
+Tokens are redefined under `[data-theme="dark"]` and under nothing else — there
+is no `prefers-color-scheme` rule anywhere in `globals.css`, deliberately, so
+there is exactly one route into the dark values and no combination of media
+query and attribute that could disagree.
+
 Surfaces lift instead of darkening (`--bg` `#0e1014`, `--surface` `#171a21`), and
-pastels lose saturation rather than gaining it.
+pastels lose saturation rather than gaining it. Both roots also set
+`color-scheme`, so the browser paints its own furniture — scrollbars, form
+controls, the canvas behind the page — to match.
+
+The attribute is written by `lib/theme.tsx` and, before first paint, by a small
+inline script in `app/layout.tsx`. **That script is the one place this app
+injects one**, and it is not decoration: the attribute has to be on `<html>`
+before the browser paints, and the earliest React can run is after hydration —
+several hundred milliseconds of white for someone who chose dark. It reads
+storage, sets one attribute, and stops.
+
+Adding a `prefers-color-scheme` rule back is a change to this section first.
 
 ## No component library
 

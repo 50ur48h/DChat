@@ -71,7 +71,8 @@ test("the answer appears after one question, with no further interaction", async
 
   // And then — with nothing else touched — the answer arrives.
   await expect(page.getByText(ANSWER)).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText("answered")).toBeVisible();
+  // `exact`: the shell adds ancestors that also contain this word (WP13.1b).
+  await expect(page.getByText("answered", { exact: true })).toBeVisible();
 });
 
 test("the citation opens into the query behind the answer", async ({ page }) => {

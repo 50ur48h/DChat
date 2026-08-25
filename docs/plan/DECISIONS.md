@@ -4,6 +4,60 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-046 — light is the default, and the operating system does not get a vote
+Date: 2026-08-25 · Phase: 13 · PR: this one
+Context: `globals.css` defined dark under `@media (prefers-color-scheme: dark)`,
+which is the conventional default and made the operating system the decision
+maker. The consequence is easy to miss and was: **anyone whose desktop is set to
+dark had never seen the design this product is actually designed in.**
+`docs/design.md` describes light — "light backgrounds, generous space, rounded
+cards that lift off the page", `--bg #f7f8fa` chosen so cards can lift off it —
+and the dark tokens are a translation of that, validated separately but never the
+subject. The owner set light as the default for the chat product on 2026-08-25;
+this records how, and what it costs.
+Options: (a) keep the media query and add an override, so three states exist —
+OS-dark, explicit-dark, explicit-light — refused below; (b) drop the media query
+and gate dark on an explicit choice alone; (c) drop dark entirely, which throws
+away a validated palette and a real preference.
+Decision: **(b)**. Dark is defined under `[data-theme="dark"]` and under nothing
+else. There is no `prefers-color-scheme` rule left in `globals.css`, which is the
+point: **one route into the dark values, and no combination of media query and
+attribute that can disagree.** (a) reads as more considerate and is the version
+with a bug in it — a person on a dark desktop who chooses light needs an
+attribute that beats the media query, so every token needs two selectors and
+`:root:not([data-theme="light"])` guards, and a token defined in only one of the
+three places is a colour that is right in two states and wrong in the third.
+That failure is invisible in review and appears as one unreadable card.
+**A pre-paint script, and it is the one script this app injects.** The attribute
+has to be on `<html>` before the browser paints, and the earliest React can run
+is after hydration — several hundred milliseconds of white for someone who chose
+dark. `app/layout.tsx` therefore carries a `dangerouslySetInnerHTML` script that
+reads storage, sets one attribute, and stops. Nothing in it is dynamic: the only
+interpolation is `THEME_STORAGE_KEY`, a compile-time constant from our own
+module, and it writes an attribute rather than markup. It is wrapped in
+`try/catch` because a browser with site data blocked **throws** on
+`localStorage` rather than returning null, and an exception there would run
+before anything else on the page. `<html>` carries `suppressHydrationWarning`
+for exactly this, scoped to that element.
+**Read through `useSyncExternalStore`, not an effect.** The obvious shape —
+default in `useState`, correct it from an effect — is a cascading render that
+`react-hooks/set-state-in-effect` rejects, and it flashes the wrong value for one
+frame. `lib/persisted.ts` wraps `localStorage` as an external store with a
+separate server snapshot, which keeps the server HTML and the first client render
+identical. It deliberately does **not** cache: `Object.is` on a string already
+compares by value, so a cache buys React nothing and adds a way for the module to
+disagree with storage that nothing invalidates — clearing site data does not fire
+a `storage` event in the window that did it. The sidebar's collapsed flag uses
+the same store.
+Consequences: `docs/design.md`'s "Dark mode" section is rewritten and now says
+the attribute is the only selector; adding a `prefers-color-scheme` rule back is
+a change to that section first. Dark remains fully supported and is reachable
+from Settings → Appearance. A person on a dark desktop who has never opened
+Settings now sees the light design, which is the intended change and the whole
+cost of the decision. The choice is per browser and never leaves it: there is no
+server-side preference, and one is not owed until a person asks why their phone
+disagrees with their laptop.
+
 ## D-045 — an Admin chooses the database once; a member never picks
 Date: 2026-08-25 · Phase: 13 · PR: this one · Migration: 0031
 Context: today a member signs in, picks an organization, clicks **Ask**, picks a

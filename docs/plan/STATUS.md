@@ -1,6 +1,7 @@
 # STATUS — data-agent build
 
-Current position: **Phase 13 — the chat product. WP13.1a in review.**
+Current position: **Phase 13 — the chat product. WP13.1b in review; WP13.1a
+                  merged (#121).**
                   Phases 0-11 done and signed off. **Phase 12 STOPPED AFTER
                   WP12.2 (D-043)** — WP12.3 and WP12.4 are deferred, not
                   cancelled. **There is no `v1.0.0` tag and there will not be one
@@ -16,18 +17,20 @@ Current position: **Phase 13 — the chat product. WP13.1a in review.**
                   — #118 included, which carries migrations 0029 and 0030 — is
                   not deployed. See *"Deploying what is on main"* below before
                   dispatching.
-Next step:        **WP13.1b — the chat shell.** The owner set the direction on
-                  2026-08-25: a chat product, not a database tool. WP13.1a (this
-                  PR) is the backend half — an org-level active data source, so a
-                  member never picks. **13.1b is the shell**: sidebar with new
-                  chat, rename, archive and collapse; chat as the app's home;
-                  admin pages behind settings; a settings page with honest
-                  placeholders; light mode default with a theme toggle. See
-                  *"Phase 13: the chat product"* below for the full split.
-                  **The smoke rewrite is 13.1b's deliverable, not its cleanup** —
-                  `e2e-compose/smoke.spec.ts` drives the exact navigation the
-                  shell removes, so rewriting it is how *"every question I ask
-                  today still works"* gets proven rather than asserted.
+Next step:        **The owner's.** WP13.1a and WP13.1b together deliver the chat
+                  product the owner asked for on 2026-08-25, and the pieces
+                  explicitly held back are **system instructions, tone, model
+                  selection and the answer-card polish (B-046/047/048)** — named
+                  as next by the owner, not opened by this session.
+                  **What the owner should judge first is the rendered UI**: light
+                  mode's appearance and whether this reads as a chat product are
+                  the two things no test here can answer. The manual script is in
+                  #122.
+                  Two findings are filed and not fixed: **B-140** (the browser
+                  suite is flaky on the Windows host — proven on `main`, so trust
+                  CI over a red local run) and **B-141** (no organization
+                  switcher, so `/` deliberately does not redirect a multi-org
+                  member).
                   **Still not open unless the owner says so:** WP12.3, WP12.4, and
                   the trial findings (B-135, B-136, B-137). They are recorded
                   under *"Deferred work"* with what each still owes, and that
@@ -64,7 +67,15 @@ Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-25 by Claude Code (**WP13.1a — the organization's database,
+Last updated: 2026-08-25 by Claude Code (**WP13.1b — the chat shell, D-046.** The
+              product opens in a chat: a collapsing sidebar, chat as the home, admin
+              screens behind Settings, light as the default with dark a choice. No
+              Python at all — the run and trace machinery is reused, not rewritten.
+              The compose smoke was rewritten and is green clean and on reuse, which
+              is how *"every question still works"* is proven. Found and filed:
+              **B-140**, the browser suite is flaky on this Windows host and `main`
+              fails the same way, and **B-141**, no org switcher. Previously: **WP13.1a
+              — the organization's database,
               D-045.** Revision 0031, two routes, the Admin control, and the
               member-facing picker's replacement. D-022 is untouched: a thread is
               still stamped with the source it used. Found on the way — the
@@ -84,6 +95,107 @@ Last updated: 2026-08-25 by Claude Code (**WP13.1a — the organization's databa
               class it belongs to is now the first line of the operational-debt list)
 
 ---
+
+## WP13.1b — the chat shell (D-046)
+
+The product opens in a chat. A member signs in and lands in a composer; the
+database is something an Admin configured once (D-045) and nobody picks again.
+
+**What shipped.** A collapsing sidebar — new chat, your chats, rename, archive,
+the person and Settings at the bottom — wrapping every screen inside an
+organization via `app/orgs/[orgId]/layout.tsx`. Chat is the home:
+`/orgs/{id}/conversations` is a composer, and `/orgs/{id}` redirects to it. The
+admin screens moved behind **Settings**, which also carries profile, organization,
+appearance, archived chats, and three sections that are named and honestly
+unbuilt. Light is the default and dark is a choice (D-046).
+
+**The conversation, message, run and trace machinery is untouched.** There is no
+Python in this PR at all. The chat home creates the thread, posts the question,
+and navigates; `conversation.tsx` picks the run up from `last_run_id` exactly as
+it already did.
+
+### Three things the work found
+
+**A screen that refused on the platform's behalf, in words the platform would
+contradict.** The chat home first gated its composer on the Admin's choice alone.
+An organization with exactly one registered database and no explicit choice would
+have been told *"nothing to ask about"* — while `resolve_data_source` resolves a
+single source perfectly well and would have answered. The composer now mirrors
+the resolver for *display* only, and the two reasons it genuinely cannot ask —
+none registered, or several with none chosen — are said separately because they
+are different problems with different fixes.
+
+**Archiving promised something the product could not do.** The sidebar's
+confirmation says a chat can be brought back, and the screen that could bring it
+back was the conversations list this work package deletes. `ArchivedChats` in
+Settings is what makes that sentence true; shipping the sidebar without it would
+have left a promise in the product with nothing behind it.
+
+**A cache that bought nothing and could go stale.** `lib/persisted.ts` first
+cached the stored value so `getSnapshot` would be referentially stable. It does
+not need to be: `Object.is` on a string already compares by value, so the cache
+bought React nothing and added a way for the module to disagree with storage that
+nothing invalidates. The tests found it as cross-test leakage; the product
+version was clearing site data. Removed.
+
+### The smoke rewrite is the deliverable, and it is green
+
+`e2e-compose/smoke.spec.ts` drove the exact navigation this work removes — Org
+page → Data sources → Back → Ask → *Start a conversation* → Start → *Open the new
+conversation*. Every one of those steps is rewritten, so the file is now the
+proof that **every question that worked yesterday still works**, rather than an
+assertion that it does. It passes **from a clean stack and from a reused one**,
+both verified: a real compose stack, a real browser, a real Postgres, the
+scripted model.
+
+Two fixes it forced, both real: the `organization` helper read `page.url()`
+before the front door's client-side redirect had run, and the new "choose the
+database" step was not idempotent — the second walk finds the choice already
+made. And `getByText("answered")` became a strict-mode violation because the
+shell adds ancestors that contain the word; it is `exact` now, not `.first()`,
+because `.first()` would have hidden a real duplicate.
+
+A second browser spec, `e2e/shell.spec.ts`, holds the shell's own properties
+against the stub API: landing in chat, composer-to-answer across a route change,
+collapse surviving a **reload**, dark not inherited from the OS, the unbuilt
+sections offering no controls, and the old `/orgs/{id}` URL still reaching the
+product.
+
+### The browser suite is flaky on this host, and it is not this branch (B-140)
+
+Worth reading before anyone trusts a red local run. Growing the suite from nine
+tests to sixteen produced 2, 5, 8 and 11 failures across consecutive runs, all
+the same symptom — the page renders the sign-in card because its JavaScript never
+took over — and **in a different test every time**. That reads exactly like a
+defect the branch introduced.
+
+**It is not.** Stashing the branch and running the identical suite on clean
+`main` failed **2 of 9** with the same symptom. The per-load failure rate belongs
+to the Windows host; a bigger suite only samples it more often. CI is Linux and
+has been green throughout.
+
+Two genuine faults were fixed on the way and are *not* that flake: two spec files
+each bound the fixed stub port and raced on it — which `stub-api.ts`'s own header
+had warned about in advance — and Playwright restarts a worker after a failure,
+so the replacement could reach `listen` while the previous socket was still in
+`TIME_WAIT`. One stub per worker process with a retrying bind removed the
+cascade. One hypothesis was tested and **refused**: Next warns that `next start`
+does not work with `output: standalone`, and disabling standalone for the test
+build made things **worse**, so the shipped config was left alone rather than
+changed on a guess.
+
+### Evidence
+
+* `make test.web` **178 passed**, `make lint.web`, `make typecheck.web` green.
+* **`make test.web.smoke` passes clean and on reuse** — the whole product in a
+  browser on its own compose stack.
+* `make test.web.e2e`: 16 tests, 14–16 passing per run, failures moving between
+  tests every run. See **B-140**.
+* No Python changed, so the API suites are untouched.
+
+**Not verified: the rendered UI.** Light mode's appearance, the sidebar's feel,
+and whether this reads as a chat product are the owner's to judge — that is what
+the manual script in the PR is for.
 
 ## Phase 13: the chat product — WP13.1a, the organization's database (D-045)
 

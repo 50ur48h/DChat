@@ -93,8 +93,41 @@ async function running(page: Page) {
   await expect(page.getByText("Healthy")).toBeVisible({ timeout: 90_000 });
 }
 
-/** The organization this walk owns: created on the first run, reused after. */
+/**
+ * The organization this walk owns: created on the first run, reused after.
+ *
+ * **Both paths end in the chat, because that is where the product now opens**
+ * (WP13.1b). A member who already has an organization is redirected there by the
+ * front door and never sees a list; one who does not gets the bootstrap screen,
+ * which is the only place an organization can be created and is therefore still
+ * a real screen rather than a leftover.
+ *
+ * The walk stays inside the organization from here by clicking, never by a URL
+ * this file assembled. An id built here would name a row nothing else knows
+ * about, and every step after would 404 in a way that looked like a routing bug
+ * rather than like a test at fault.
+ */
 async function organization(page: Page): Promise<void> {
+  const chat = /\/orgs\/[0-9a-f-]{36}\/conversations$/;
+
+  /**
+   * **Wait for one of the two outcomes before deciding which happened.**
+   *
+   * The front door's redirect is a client-side `replace` that runs after the
+   * page has loaded, so reading `page.url()` straight away sees `/` even for a
+   * member who is about to land in the chat. The first version of this helper
+   * did exactly that, and on the second run — when the organization already
+   * existed — it went looking for a create-organization form on the chat screen
+   * and sat there until the test timed out.
+   */
+  await expect(
+    page
+      .getByRole("heading", { name: "Create an organization" })
+      .or(page.getByRole("heading", { name: "What would you like to know?" }).first()),
+  ).toBeVisible({ timeout: 60_000 });
+
+  if (chat.test(page.url())) return;
+
   const listed = page.getByText(ORG, { exact: true });
   if ((await listed.count()) === 0) {
     await page.getByLabel("Name", { exact: true }).fill(ORG);
@@ -102,12 +135,22 @@ async function organization(page: Page): Promise<void> {
   }
   await expect(listed).toBeVisible();
 
-  // Into it, and the walk stays inside it from here — every later screen is
-  // reached by clicking, never by a URL this file assembled. An id built here
-  // would name a row nothing else knows about, and every step after would 404
-  // in a way that looked like a routing bug rather than like a test at fault.
+  // `/orgs/{id}` is a redirect to the chat now; following it is what a person
+  // clicking from the bootstrap screen actually does.
   await page.getByRole("button", { name: "Members" }).first().click();
-  await page.waitForURL(/\/orgs\/[0-9a-f-]{36}$/);
+  await page.waitForURL(chat, { timeout: 30_000 });
+}
+
+/** Into Settings, which is where every admin screen moved (WP13.1b). */
+async function settings(page: Page): Promise<void> {
+  await page.getByRole("link", { name: /Settings/ }).click();
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+}
+
+/** Back to the chat, the way the sidebar offers it. */
+async function newChat(page: Page): Promise<void> {
+  await page.getByRole("link", { name: /New chat/ }).first().click();
+  await page.waitForURL(/\/orgs\/[0-9a-f-]{36}\/conversations$/, { timeout: 30_000 });
 }
 
 test("the stack answers a question asked in a browser", async ({ page }) => {
@@ -130,19 +173,26 @@ test("the stack answers a question asked in a browser", async ({ page }) => {
 
   let conversation = "";
 
-  await test.step("sign in through the dev issuer", async () => {
+  await test.step("sign in, and land in the chat", async () => {
     await page.goto("/");
     await running(page);
 
     await page.getByLabel("Who are you").fill(SUBJECT);
     await page.getByRole("button", { name: "Continue" }).click();
-    await expect(page.getByText("Signed in as")).toBeVisible();
 
     await organization(page);
+
+    // **The direction of WP13.1b, asserted rather than assumed.** Signing in
+    // used to end on a profile with an Ask button; it now ends in a composer.
+    await expect(
+      page.getByRole("heading", { name: "What would you like to know?" }).first(),
+    ).toBeVisible({ timeout: 30_000 });
   });
 
-  await test.step("register the seeded database", async () => {
-    await page.getByRole("button", { name: "Data sources" }).click();
+  await test.step("register the seeded database, from Settings", async () => {
+    // The admin screens moved behind Settings when the chat became the home.
+    await settings(page);
+    await page.getByRole("link", { name: "Data sources" }).click();
     await expect(page.getByRole("heading", { name: "Register a database" })).toBeVisible();
 
     if ((await page.getByRole("heading", { name: SOURCE.name }).count()) === 0) {
@@ -182,28 +232,59 @@ test("the stack answers a question asked in a browser", async ({ page }) => {
     await expect(page.getByText(/Profiled \d+ column\(s\)/)).toBeVisible();
   });
 
-  await test.step("start a conversation about that database", async () => {
-    await page.getByRole("button", { name: "Back" }).click();
-    await page.getByRole("button", { name: "Ask" }).click();
-    await expect(page.getByRole("heading", { name: "Start a conversation" })).toBeVisible();
+  await test.step("choose the database this organization answers from", async () => {
+    /**
+     * **D-045's control, exercised where it matters.** An Admin chooses once;
+     * no member ever picks a database again, which is why the step after this
+     * one is a person typing a question and nothing else.
+     */
+    // Idempotent, like the registration step above and for the same reason: this
+    // walk is run repeatedly against a stack that may already have been walked,
+    // and a step that only works on a clean database is a step that fails for a
+    // reason no reader will connect to the product.
+    const badge = page.getByText("Answers questions");
+    if ((await badge.count()) === 0) {
+      await page.getByRole("button", { name: "Answer questions from this" }).click();
+    }
+    await expect(badge).toBeVisible();
+  });
 
-    await page.getByRole("button", { name: "Start", exact: true }).click();
-    await page.getByRole("link", { name: "Open the new conversation" }).click();
-    await page.waitForURL(/\/conversations\/[0-9a-f-]{36}$/);
+  await test.step("ask from the chat, which creates the thread", async () => {
+    /**
+     * **The walk this work package exists to make possible.** It used to be
+     * four steps — Back, Ask, Start, and a link to open what Start had made —
+     * with a database picker in the middle. It is now: type the question.
+     *
+     * The thread is created by sending, so this step is both "start a
+     * conversation" and "ask", and there is no longer a moment where an empty
+     * conversation exists on screen.
+     */
+    await settings(page);
+    await newChat(page);
+
+    const box = page.getByLabel("Your question");
+    await expect(box).toBeEnabled({ timeout: 30_000 });
+    await expect(page.getByText(SOURCE.name)).toBeVisible();
+
+    await box.fill(QUESTION);
+    await page.getByRole("button", { name: "Send" }).click();
+
+    await page.waitForURL(/\/conversations\/[0-9a-f-]{36}$/, { timeout: 30_000 });
     conversation = page.url();
   });
 
-  await test.step("ask, and wait for the answer card", async () => {
-    await page.getByLabel("Ask a question").fill(QUESTION);
-    await page.getByRole("button", { name: "Send" }).click();
-
+  await test.step("wait for the answer card", async () => {
     // The run is accepted before it finishes, and the screen has to notice it
     // finish by itself — the Phase 7 gate's own property (B-044), here against a
     // real API rather than a stub of one. Generous, because this is where a real
     // agent run happens: catalog retrieval, a validated statement, an execution
     // against another database, a stored artifact and a dozen durable events.
     await expect(page.getByText(SCRIPTED_ANSWER)).toBeVisible({ timeout: 120_000 });
-    await expect(page.getByText("answered")).toBeVisible();
+    // `exact`, because the shell wraps the card in further elements and a
+    // substring match now resolves to the badge and its ancestors alike. The
+    // badge is the assertion; a `.first()` here would have hidden a real
+    // duplicate instead of naming the one element that matters.
+    await expect(page.getByText("answered", { exact: true })).toBeVisible();
   });
 
   await test.step("open the query behind the answer", async () => {
