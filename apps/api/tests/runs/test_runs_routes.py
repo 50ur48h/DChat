@@ -529,3 +529,227 @@ async def test_the_runs_of_a_conversation_that_does_not_exist_are_not_found(api:
     )
 
     assert status == 404
+
+
+# ---------------------------------------------------------------------------
+# The database the *organization* asks questions of (D-045)
+# ---------------------------------------------------------------------------
+
+
+async def test_a_conversation_is_stamped_with_the_organizations_choice(api: Api) -> None:
+    """The reachability proof: a member names nothing and still gets the database.
+
+    **This drives the live path and asserts at the far end of it.** An Admin sets
+    the choice through the route; a member POSTs a conversation with an empty
+    body; and what is asserted is `data_source_id` on the **conversation the API
+    returns**, then on both read routes — not on a service return value and not
+    on the organization row. B-133 is why: `answered` had a passing test on the
+    outcome object, which is the one thing the product cannot look at, and it
+    stayed green for as long as the screen contradicted it.
+
+    So this goes red if the column stops being written, if `create_conversation`
+    stops reading it, or if `ConversationOut` stops carrying it — any one of
+    which breaks the feature, and none of which a test on an intermediate value
+    would notice.
+    """
+    org_id = await _org_with_a_reader(api)
+    data_source_id = await _register_source(org_id, "Pizza (PostgreSQL)")
+
+    status, chosen = await api.call(
+        "PUT",
+        f"/v1/orgs/{org_id}/active-data-source",
+        "alice",
+        {"data_source_id": str(data_source_id)},
+    )
+    assert status == 200
+    assert chosen["data_source_name"] == "Pizza (PostgreSQL)"
+
+    # Bob is a Reader and names nothing — the flow this work package exists for.
+    status, conversation = await api.call("POST", f"/v1/orgs/{org_id}/conversations", "bob", {})
+
+    assert status == 201
+    assert conversation["data_source_id"] == str(data_source_id)
+    assert conversation["data_source_name"] == "Pizza (PostgreSQL)"
+
+    _, detail = await api.call(
+        "GET", f"/v1/orgs/{org_id}/conversations/{conversation['id']}", "bob"
+    )
+    assert detail["data_source_id"] == str(data_source_id)
+
+    _, listed = await api.call("GET", f"/v1/orgs/{org_id}/conversations", "bob")
+    assert listed[0]["data_source_id"] == str(data_source_id)
+
+
+async def test_a_later_change_does_not_repoint_a_thread_that_already_exists(api: Api) -> None:
+    """The property that keeps D-022 whole while D-045 moves the choice.
+
+    A thread is about one database. Stamping at creation rather than resolving at
+    each run is what makes that true across an Admin changing their mind: the old
+    thread keeps the source its answers were drawn from, and its follow-up
+    questions still reach the same database as the question they follow.
+    """
+    org_id = await _org(api)
+    first = await _register_source(org_id, "Pizza (PostgreSQL)")
+    second = await _register_source(org_id, "Warehouse (PostgreSQL)")
+
+    await api.call(
+        "PUT", f"/v1/orgs/{org_id}/active-data-source", "alice", {"data_source_id": str(first)}
+    )
+    _, thread = await api.call("POST", f"/v1/orgs/{org_id}/conversations", "alice", {})
+    assert thread["data_source_id"] == str(first)
+
+    await api.call(
+        "PUT", f"/v1/orgs/{org_id}/active-data-source", "alice", {"data_source_id": str(second)}
+    )
+
+    _, unchanged = await api.call("GET", f"/v1/orgs/{org_id}/conversations/{thread['id']}", "alice")
+    assert unchanged["data_source_id"] == str(first), (
+        "an Admin's later choice must not re-point a thread that already ran"
+    )
+
+    _, fresh = await api.call("POST", f"/v1/orgs/{org_id}/conversations", "alice", {})
+    assert fresh["data_source_id"] == str(second), "a new thread gets the new choice"
+
+
+async def test_naming_a_source_still_beats_the_organizations_choice(api: Api) -> None:
+    """D-045 fills a blank. It does not override a caller who said what they meant."""
+    org_id = await _org(api)
+    default = await _register_source(org_id, "Pizza (PostgreSQL)")
+    other = await _register_source(org_id, "Warehouse (PostgreSQL)")
+
+    await api.call(
+        "PUT", f"/v1/orgs/{org_id}/active-data-source", "alice", {"data_source_id": str(default)}
+    )
+
+    _, conversation = await api.call(
+        "POST", f"/v1/orgs/{org_id}/conversations", "alice", {"data_source_id": str(other)}
+    )
+
+    assert conversation["data_source_id"] == str(other)
+
+
+async def test_clearing_the_choice_returns_a_conversation_to_naming_none(api: Api) -> None:
+    """Null is a real value here, which is why the route is a PUT.
+
+    An organization whose Admin clears the choice is back in the state every
+    organization was in before revision 0031 — and that state still works.
+    """
+    org_id = await _org(api)
+    data_source_id = await _register_source(org_id, "Pizza (PostgreSQL)")
+    await api.call(
+        "PUT",
+        f"/v1/orgs/{org_id}/active-data-source",
+        "alice",
+        {"data_source_id": str(data_source_id)},
+    )
+
+    status, cleared = await api.call(
+        "PUT", f"/v1/orgs/{org_id}/active-data-source", "alice", {"data_source_id": None}
+    )
+    assert status == 200
+    assert cleared["data_source_id"] is None
+    assert cleared["data_source_name"] is None
+
+    _, conversation = await api.call("POST", f"/v1/orgs/{org_id}/conversations", "alice", {})
+    assert conversation["data_source_id"] is None
+
+
+async def test_the_choice_cannot_be_another_organizations_database(api: Api) -> None:
+    """The check the foreign key cannot make — the same one D-022 needed.
+
+    A constraint check does not consult row-level security, so Globex's source id
+    satisfies the database perfectly well from inside Acme. Pointing an entire
+    organization at another tenant's data is the worst version of this mistake:
+    every question every member asks would be answered, confidently and with
+    citations, from somebody else's database.
+    """
+    acme = await _org(api)
+    _, globex = await api.call("POST", "/v1/orgs", "alice", {"name": "Globex"})
+    theirs = await _register_source(str(globex["org_id"]), "Globex warehouse")
+
+    status, _ = await api.call(
+        "PUT", f"/v1/orgs/{acme}/active-data-source", "alice", {"data_source_id": str(theirs)}
+    )
+
+    assert status == 404
+
+    _, still = await api.call("GET", f"/v1/orgs/{acme}/active-data-source", "alice")
+    assert still["data_source_id"] is None, "a refused choice must not have been written"
+
+
+async def test_a_source_that_does_not_exist_is_refused(api: Api) -> None:
+    org_id = await _org(api)
+
+    status, _ = await api.call(
+        "PUT",
+        f"/v1/orgs/{org_id}/active-data-source",
+        "alice",
+        {"data_source_id": str(uuid.uuid4())},
+    )
+
+    assert status == 404
+
+
+async def test_only_an_admin_may_choose_and_every_member_may_read(api: Api) -> None:
+    """B-008's rule, at the API end of it.
+
+    Bob is a Reader. He must be refused the choice — and he must be *allowed* the
+    read, because the chat screen has to know whether asking is possible before
+    it offers him a composer, and a screen that cannot ask has to guess.
+    """
+    org_id = await _org_with_a_reader(api)
+    data_source_id = await _register_source(org_id, "Pizza (PostgreSQL)")
+    await api.call(
+        "PUT",
+        f"/v1/orgs/{org_id}/active-data-source",
+        "alice",
+        {"data_source_id": str(data_source_id)},
+    )
+
+    refused, _ = await api.call(
+        "PUT", f"/v1/orgs/{org_id}/active-data-source", "bob", {"data_source_id": None}
+    )
+    assert refused == 403
+
+    allowed, seen = await api.call("GET", f"/v1/orgs/{org_id}/active-data-source", "bob")
+    assert allowed == 200
+    assert seen["data_source_name"] == "Pizza (PostgreSQL)"
+
+    # And the refusal changed nothing.
+    _, unchanged = await api.call("GET", f"/v1/orgs/{org_id}/active-data-source", "alice")
+    assert unchanged["data_source_id"] == str(data_source_id)
+
+
+async def test_removing_the_chosen_source_leaves_the_organization_choosing_none(api: Api) -> None:
+    """`ON DELETE SET NULL`, which is the reason this is a column and not JSON.
+
+    The migration claims a removed source degrades the pointer to "none chosen" —
+    a state the resolver already handles — rather than to an id that resolves to
+    nothing. This is that claim, proven rather than asserted in a docstring.
+    """
+    from sqlalchemy import text as sql_text
+
+    from dataagent.tenancy.session import org_session
+
+    org_id = await _org(api)
+    data_source_id = await _register_source(org_id, "Pizza (PostgreSQL)")
+    await api.call(
+        "PUT",
+        f"/v1/orgs/{org_id}/active-data-source",
+        "alice",
+        {"data_source_id": str(data_source_id)},
+    )
+
+    async with org_session(uuid.UUID(org_id)) as session:
+        await session.execute(
+            sql_text("DELETE FROM data_sources WHERE id = :i"), {"i": data_source_id}
+        )
+
+    _, after = await api.call("GET", f"/v1/orgs/{org_id}/active-data-source", "alice")
+    assert after["data_source_id"] is None
+    assert after["data_source_name"] is None
+
+    # And the organization still works: a new thread simply names none.
+    status, conversation = await api.call("POST", f"/v1/orgs/{org_id}/conversations", "alice", {})
+    assert status == 201
+    assert conversation["data_source_id"] is None

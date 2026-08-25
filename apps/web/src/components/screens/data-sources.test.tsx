@@ -46,12 +46,37 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/** A fetch stub that answers each call from a queue, remembering every request. */
+/** Nothing chosen — the state every organization is in until an Admin picks. */
+const NOTHING_CHOSEN = { data_source_id: null, data_source_name: null };
+
+/**
+ * A fetch stub that answers each call from a queue, remembering every request.
+ *
+ * `…/active-data-source` is answered off the queue rather than from it (D-045).
+ * The screen loads it in the same `Promise.all` as the source list, so a single
+ * queue would hand one of the two the other's body and every test would fail on
+ * a shape error rather than on what it is about. `chosen` overrides it for the
+ * tests that are about the choice.
+ */
 function stubFetch(...responses: Response[]) {
+  return stubFetchWith({ chosen: NOTHING_CHOSEN }, ...responses);
+}
+
+function stubFetchWith(options: { chosen: unknown }, ...responses: Response[]) {
   const calls: { url: string; init: RequestInit }[] = [];
   let index = 0;
   const fetchMock = vi.fn((url: string, init: RequestInit = {}) => {
     calls.push({ url, init });
+    if (url.includes("/active-data-source")) {
+      // A PUT answers with what it was asked to set, which is what the API does
+      // and what lets a test assert the screen re-reads rather than guesses.
+      if (init.method === "PUT") {
+        return Promise.resolve(json(JSON.parse(String(init.body ?? "{}")).data_source_id === null
+          ? NOTHING_CHOSEN
+          : { data_source_id: "ds1", data_source_name: "Pizza demo" }));
+      }
+      return Promise.resolve(json(options.chosen));
+    }
     const response = responses[Math.min(index, responses.length - 1)];
     index += 1;
     return Promise.resolve(response?.clone() ?? json([]));
@@ -235,5 +260,75 @@ describe("<DataSources />", () => {
     render(<DataSources orgId="org1" role="admin" />);
 
     expect(await screen.findByText("Your role does not permit this action")).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // The database the organization answers from (D-045)
+  // -------------------------------------------------------------------------
+
+  it("says which database answers questions, before any badge is read", async () => {
+    stubFetchWith(
+      { chosen: { data_source_id: "ds1", data_source_name: "Pizza demo" } },
+      json([SOURCE]),
+    );
+
+    render(<DataSources orgId="org1" role="reader" />);
+
+    // The sentence, not only the badge: a member cannot change this and still
+    // needs to know what their answers are drawn from.
+    expect(await screen.findByText(/Questions are answered from/)).toBeInTheDocument();
+    expect(await screen.findByText("Answers questions")).toBeInTheDocument();
+  });
+
+  it("tells a Reader that nothing is chosen, and who can fix it", async () => {
+    stubFetch(json([SOURCE]));
+
+    render(<DataSources orgId="org1" role="reader" />);
+
+    expect(await screen.findByText(/An Admin can choose one/)).toBeInTheDocument();
+    // B-008: the control is not offered to someone the API would refuse.
+    expect(
+      screen.queryByRole("button", { name: "Answer questions from this" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("lets an Admin choose the database, and sends the id", async () => {
+    const calls = stubFetch(json([SOURCE]));
+
+    render(<DataSources orgId="org1" role="admin" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Answer questions from this" }));
+
+    await waitFor(() => {
+      const put = calls.find((call) => call.init.method === "PUT");
+      expect(put).toBeDefined();
+      expect(put?.url).toContain("/v1/orgs/org1/active-data-source");
+      expect(String(put?.init.body)).toContain("ds1");
+    });
+  });
+
+  it("offers the opposite word on the source that is already chosen", async () => {
+    /**
+     * The control's word has to match what pressing it does. A single button
+     * that says "Answer questions from this" on a source already answering them
+     * would be the same class of lie as a badge reading *answered* on a refusal
+     * (B-133) — the word and the action disagreeing, with the word winning.
+     */
+    const calls = stubFetchWith(
+      { chosen: { data_source_id: "ds1", data_source_name: "Pizza demo" } },
+      json([SOURCE]),
+    );
+
+    render(<DataSources orgId="org1" role="admin" />);
+
+    expect(
+      screen.queryByRole("button", { name: "Answer questions from this" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Stop answering from this" }));
+
+    await waitFor(() => {
+      const put = calls.find((call) => call.init.method === "PUT");
+      expect(String(put?.init.body)).toContain("null");
+    });
   });
 });

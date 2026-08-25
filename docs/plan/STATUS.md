@@ -1,6 +1,7 @@
 # STATUS — data-agent build
 
-Current position: **Phases 0-11 done and signed off. Phase 12 STOPPED AFTER
+Current position: **Phase 13 — the chat product. WP13.1a in review.**
+                  Phases 0-11 done and signed off. **Phase 12 STOPPED AFTER
                   WP12.2 (D-043)** — WP12.3 and WP12.4 are deferred, not
                   cancelled. **There is no `v1.0.0` tag and there will not be one
                   until WP12.4 resumes.**
@@ -15,14 +16,22 @@ Current position: **Phases 0-11 done and signed off. Phase 12 STOPPED AFTER
                   — #118 included, which carries migrations 0029 and 0030 — is
                   not deployed. See *"Deploying what is on main"* below before
                   dispatching.
-Next step:        **The owner sets it. Nothing here proposes one.**
-                  Phase 12 ended at WP12.2 and the next direction is the owner's
-                  to decide; they will bring it to the next session.
-                  **The next session must not open WP12.3, WP12.4, or the trial
-                  findings (B-135, B-136, B-137) unless the owner says so.** They
-                  are recorded under *"Deferred work"* with what each still owes,
-                  and that record is the whole of their status — it is not a
-                  queue and must not be read as one.
+Next step:        **WP13.1b — the chat shell.** The owner set the direction on
+                  2026-08-25: a chat product, not a database tool. WP13.1a (this
+                  PR) is the backend half — an org-level active data source, so a
+                  member never picks. **13.1b is the shell**: sidebar with new
+                  chat, rename, archive and collapse; chat as the app's home;
+                  admin pages behind settings; a settings page with honest
+                  placeholders; light mode default with a theme toggle. See
+                  *"Phase 13: the chat product"* below for the full split.
+                  **The smoke rewrite is 13.1b's deliverable, not its cleanup** —
+                  `e2e-compose/smoke.spec.ts` drives the exact navigation the
+                  shell removes, so rewriting it is how *"every question I ask
+                  today still works"* gets proven rather than asserted.
+                  **Still not open unless the owner says so:** WP12.3, WP12.4, and
+                  the trial findings (B-135, B-136, B-137). They are recorded
+                  under *"Deferred work"* with what each still owes, and that
+                  record is the whole of their status — it is not a queue.
                   The UI inventory further down is **analysis on file, not a
                   plan**: it was written when a UI rebuild looked like the next
                   work package, and it is kept because throwing away a survey of
@@ -31,7 +40,8 @@ Next step:        **The owner sets it. Nothing here proposes one.**
                   Ordinary session start still applies (plan §7.1): fetch, read
                   this file, `gh pr list`, address red CI before new work.
 Merge policy: ASK
-Blocked on user: **yes — the direction.** Nothing technical blocks. The two
+Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
+                 see *"Phase 13: the chat product"*). Nothing technical blocks. The two
                  owner tasks that once gated WP12.2 (the GitHub-OIDC app
                  registration with its two federated credentials, and the `dev`
                  environment holding `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
@@ -54,7 +64,14 @@ Blocked on user: **yes — the direction.** Nothing technical blocks. The two
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-25 by Claude Code (**session-end handoff, state only.** Phase 12
+Last updated: 2026-08-25 by Claude Code (**WP13.1a — the organization's database,
+              D-045.** Revision 0031, two routes, the Admin control, and the
+              member-facing picker's replacement. D-022 is untouched: a thread is
+              still stamped with the source it used. Found on the way — the
+              models-vs-migrations drift guard had stopped comparing foreign keys
+              on `organizations` and `data_sources`, silently, because the new FK
+              made a cycle it could not sort; `use_alter` restores it. Next is
+              WP13.1b, the shell. Previously: **session-end handoff, state only.** Phase 12
               stopped after WP12.2 (D-043); the next direction is the owner's and is not
               set here. Dev is deployed, current at `fa7ace3` and answering questions;
               `main` is ahead of it by #118 and two migrations. This session merged #108
@@ -67,6 +84,119 @@ Last updated: 2026-08-25 by Claude Code (**session-end handoff, state only.** Ph
               class it belongs to is now the first line of the operational-debt list)
 
 ---
+
+## Phase 13: the chat product — WP13.1a, the organization's database (D-045)
+
+**The owner set this direction on 2026-08-25.** Today a member signs in, picks an
+organization, clicks **Ask**, picks a dataset, and lands on a conversation. That
+is a database tool. The product being built is a chat product: a member opens the
+app and starts talking to their data, and the database is something an Admin
+configures once. Visual target is Claude web — a collapsible left sidebar, chats
+listed in it, new chat at the top, the person's name and settings bottom-left,
+light mode the default and dark still supported.
+
+**The work package is split in two, backend first**, because "members never pick"
+depends on there being an organization-level choice to pick *from*:
+
+* **WP13.1a — this PR.** The org-level active data source, its two routes, the
+  Admin control on the data-sources screen, and D-045.
+* **WP13.1b — next.** The shell: sidebar with new chat / rename / archive /
+  collapse, chat as the app's home, admin pages behind settings, a settings page
+  with honest placeholders, light default with a theme toggle.
+
+Explicitly **not** in either: system instructions, tone, model selection, and the
+answer-card polish (B-046/047/048).
+
+### What 13.1a changed
+
+Revision **0031** adds `organizations.active_data_source_id`, nullable,
+`ON DELETE SET NULL`. `create_conversation` stamps it onto a new thread when the
+caller names none, and `resolve_data_source` consults it before its existing
+rules.
+
+**D-022 is untouched, and that is the point of stamping rather than resolving.**
+A conversation still records the database it is about, so a follow-up still
+reaches the same source as the question it follows — and an Admin changing the
+organization's choice tomorrow does not silently re-point threads whose answers
+are already on screen. `test_a_later_change_does_not_repoint_a_thread_that_already_exists`
+is that property, held rather than assumed.
+
+**The refusals are kept, not replaced.** With no choice made, an organization
+resolves a single registered source and refuses when there is more than one,
+exactly as it did yesterday. An Admin naming the database is not a tie-break —
+it is the person deciding that WP7.2c's refusal asked for, and clearing the
+choice brings the refusal back verbatim, candidates and all.
+
+### Two things worth reading before the next change
+
+**The drift guard had gone blind, and the migration is what revealed it.**
+`data_sources.org_id` already points at `organizations`, so the new foreign key
+makes a cycle; SQLAlchemy could not sort the two tables and warned that it would
+**exclude every foreign key on both from comparison**. `compare_metadata` would
+have gone on passing over a constraint it was no longer looking at — a guard
+green on something it cannot see, which is the class CLAUDE.md opens with, this
+time in the guard rather than the feature. Naming the constraint and marking it
+`use_alter=True` breaks the cycle for sorting and restores the comparison. The
+warning is gone; that is the check, not the silence.
+
+**Both reachability proofs were run against the defect first**, and there are two
+because there are two paths. Removing the stamp from `create_conversation` turns
+`test_a_conversation_is_stamped_with_the_organizations_choice` red on the
+**conversation the API returns** — not on a service return value, which is
+B-133's lesson applied rather than cited.
+
+**The second proof exists because the first one was not enough, and that is the
+interesting half.** With the picker still on the conversations screen, the browser
+*always* sent a `data_source_id`, so the stamp was reachable through the API and
+**not through the product** — built, tested and never reached, on the branch that
+cites the class in its own migration. So the picker now disappears once the
+organization has chosen, the screen sends nothing, and
+`sends no data source at all, so the API stamps the thread` asserts the POST body
+is `{}`. Restoring the one-source preselect turns it red. This is the owner's
+*"members never pick"* and it belongs to 13.1a rather than to the shell.
+
+The picker is **kept, unchanged, for an organization that has not chosen** —
+including its refusal to guess between several sources.
+
+### Evidence
+
+* `tests/runs` 95 passed, `tests/orgs` 24 passed, `tests/agent` + `tests/db` +
+  `tests/datasources` + `test_response_schemas` all passed. `make test.web` 168.
+* **`make evals` 20/20** against the migrated local database. Not a formality:
+  D-044's field removal broke three producers of a schema and the evals runner
+  was one of them, failing 20/20 and found separately from the other two. The
+  sweep here found `ops/evals/runner.py`, `apps/api/src/dataagent/ops/trial.py`
+  and `scripts/agent_smoke.py` all calling `create_conversation`, and all three
+  are safe — nothing was removed from a signature this time, a field was added
+  with a default — but the sweep was done rather than reasoned about, and the
+  cheapest producer was then actually run.
+* `make lint.api`, `make typecheck.api` (pyright, 0 errors), `make lint.web`,
+  `make typecheck.web` green.
+* Migration up **and** down exercised by `tests/db/test_migrations.py`; applied
+  to the local platform database, which is now at **0031**.
+* **The role matrix caught what a directory-by-directory local run missed.**
+  `test_every_org_route_is_covered` failed in CI on both new routes: every
+  org-scoped route must carry a probe, and mine had none. It is the
+  schema-correspondence check B-110 is still owed elsewhere, working — a new
+  route cannot quietly enter the surface without someone stating who may reach
+  it. Both are probed now, the snapshot is regenerated, and its diff is **two
+  added entries and no change to any existing route's permissions**. The
+  observed matrix is `GET` allow/allow/allow and `PUT` admin-only with 403 for
+  the other two — the API refusing a Reader, watched rather than asserted.
+  **The process lesson is mine**: I ran the suites split by directory to dodge
+  the known `conftest` collision and never ran `tests/auth` at all.
+* **Served, not merely written.** After `rm -rf /app/.next` and a restart of both
+  `api` and `web`: the running API's OpenAPI carries `GET` and `PUT
+  /v1/orgs/{org_id}/active-data-source`; the container compiled the change into
+  three chunks and each was fetched by name and grepped — the data-sources
+  control, the conversations screen's replacement text, and the api-client's new
+  URL. CLAUDE.md's recipe, in the form that survives lazy chunks.
+
+**What is not verified here: the Entra-authenticated browser round trip.** The
+local stack runs `AUTH_MODE=entra`, so no token can be minted from a shell, and
+`/dev/token` is 404 by design. The routes are exercised over real HTTP against a
+real database by the API suite — a real app and real RLS, not a mock — so what is
+left for a person is the sign-in path and what the screen looks like.
 
 ## Dev answers questions, 2026-08-25 — and B-119 did not reproduce
 
@@ -238,12 +368,14 @@ deletes on 2026-08-25.
   process race on the same temp path. Green on Linux CI. Not filed — it has not
   been shown to affect a single-writer path, and that is worth confirming before
   anyone calls it cosmetic.
-* **Known pytest path collision**: running `tests/runs` and `tests/agent` in one
-  invocation fails collection with
-  `ImportError: cannot import name 'Tenant' from 'conftest'` — the two directories
-  are not packages and `conftest` resolves to whichever was imported first. Each
-  passes alone, and CI collects the whole tree without hitting it. Not filed;
-  worth knowing before anyone reports it as a regression.
+* **Known pytest path collision**: running two of `tests/runs`, `tests/agent` and
+  `tests/orgs` in one invocation fails collection with
+  `ImportError: cannot import name 'Tenant' from 'conftest'` (or `'Api'`) — the
+  directories are not packages and `conftest` resolves to whichever was imported
+  first. **Three directories now, not two**: `tests/orgs` + `tests/runs` hit it on
+  2026-08-25 during WP13.1a, which is the same defect and a second pair. Each
+  passes alone, and CI collects the whole tree without hitting it. Still not
+  filed; worth knowing before anyone reports it as a regression.
 
 ### Deployed (`rg-dataagent-dev`, southeastasia)
 
@@ -452,10 +584,15 @@ without rereading plan §6.
 
 **Read this as a survey, not a queue.** It was written when a trial loop and a UI
 rebuild looked like the next two work packages. Phase 12 has since stopped after
-WP12.2 and **the direction is the owner's to set** — see the header. The trial
-loop below did ship; the UI section is an inventory of what the backend already
-has, kept because throwing away a survey would be losing work rather than
-avoiding a commitment. Neither section commits anyone to anything.
+WP12.2. The trial loop below did ship; the UI section is an inventory of what the
+backend already has, kept because throwing away a survey would be losing work
+rather than avoiding a commitment.
+
+**The owner set the direction on 2026-08-25 and it is the UI rebuild** — see
+*"Phase 13: the chat product"* above. That does not promote this section to a
+plan: the plan is up there, and this remains the inventory it always was, with
+one entry now marked wrong. Read it for what the backend has, not for what to
+build.
 
 ### (a) An engine trial loop — repeatable, not remembered
 
@@ -540,7 +677,14 @@ management, system instructions, tone selection, model selection.
   platform rules and customer text. Read D-029 and D-032 first.
 * **No tone control.** Nothing in the composer takes a style parameter.
 * **No per-conversation model override** — the role map is deployment-wide.
-* **No chat rename.** Archive exists; the title is derived, not editable.
+* ~~**No chat rename.**~~ **Wrong when written, and corrected 2026-08-25.**
+  `PATCH /v1/orgs/{org}/conversations/{id}` exists, `api.renameConversation`
+  exists, and the conversations screen already renames inline — WP11.2a shipped
+  it and this line was never updated. It cost the 13.1 planning session a wrong
+  inventory: the sidebar's rename was scoped as new work when it is a port.
+  **The lesson is the survey's, not the feature's** — an inventory of what exists
+  goes stale the moment something ships, and this one was read as current three
+  weeks later. Check the client before believing a gap.
 * **No persistent shell.** Conversations are a screen, not a sidebar, and the layout
   is the Phase 7 skeleton with Phase 11 polish on top.
 

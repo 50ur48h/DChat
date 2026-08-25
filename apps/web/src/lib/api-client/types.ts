@@ -26,6 +26,18 @@ export interface Me {
   memberships: Membership[];
 }
 
+/**
+ * The database an organization asks its questions of (D-045).
+ *
+ * Both fields are null together when no Admin has chosen yet — not an error, and
+ * the state every organization was in before revision 0031. The name travels
+ * with the id because every screen that shows this shows it to a person.
+ */
+export interface ActiveDataSource {
+  data_source_id: string | null;
+  data_source_name: string | null;
+}
+
 export interface Member {
   user_id: string;
   email: string | null;
@@ -580,6 +592,14 @@ export function isDataSource(value: unknown): value is DataSource {
     typeof value.tls_mode === "string" &&
     typeof value.readonly_verified === "boolean" &&
     isNullableString(value.last_verified_at)
+  );
+}
+
+export function isActiveDataSource(value: unknown): value is ActiveDataSource {
+  return (
+    isRecord(value) &&
+    isNullableString(value.data_source_id) &&
+    isNullableString(value.data_source_name)
   );
 }
 

@@ -85,6 +85,8 @@ PROBES: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
         "/v1/orgs/{org_id}/recovery-grants/{grant_id}/revoke",
         {},
     ),
+    ("GET", "/v1/orgs/{org_id}/active-data-source", None),
+    ("PUT", "/v1/orgs/{org_id}/active-data-source", {"data_source_id": None}),
     ("GET", "/v1/orgs/{org_id}/data-sources", None),
     (
         "POST",
@@ -660,6 +662,12 @@ async def test_the_snapshot_says_what_the_architecture_says(matrix_app: Matrix) 
         "GET /v1/orgs/{org_id}/members",
         "GET /v1/orgs/{org_id}/data-sources",
         "GET /v1/orgs/{org_id}/data-sources/{data_source_id}",
+        # D-045. Readable by any member on purpose: the chat screen has to
+        # know whether asking is possible before it offers a composer, and a
+        # Reader who cannot read this gets a control that fails for a reason
+        # the screen cannot explain. It discloses the *name* of a database
+        # every member already queries — no host, no account, no credential.
+        "GET /v1/orgs/{org_id}/active-data-source",
         # "Ask questions / view own conversations & traces" is the one line of
         # 6.2's table that grants a Reader anything, so a Reader who cannot ask
         # is a broken product rather than a tightened one.
@@ -716,6 +724,11 @@ async def test_the_snapshot_says_what_the_architecture_says(matrix_app: Matrix) 
         "PATCH /v1/orgs/{org_id}/data-sources/{data_source_id}",
         "DELETE /v1/orgs/{org_id}/data-sources/{data_source_id}",
         "POST /v1/orgs/{org_id}/data-sources/{data_source_id}/test",
+        # D-045. Choosing the database an entire organization answers from
+        # is org-shaping, and getting it wrong points every member at the
+        # wrong data — so it sits with managing data sources, not with
+        # asking questions.
+        "PUT /v1/orgs/{org_id}/active-data-source",
     ):
         assert recorded[admin_only]["admin"] == "allow"
         assert recorded[admin_only]["contributor"].startswith("deny")

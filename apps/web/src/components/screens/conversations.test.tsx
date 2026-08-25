@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Conversations } from "./conversations";
@@ -45,13 +45,23 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/** Routes on the URL, because this screen fetches two things at once. */
-function routeFetch(sources: unknown[], conversations: unknown[] = []) {
+/** Nothing chosen — the state every organization is in until an Admin picks. */
+const NOTHING_CHOSEN = { data_source_id: null, data_source_name: null };
+
+/** Routes on the URL, because this screen fetches three things at once. */
+function routeFetch(
+  sources: unknown[],
+  conversations: unknown[] = [],
+  chosen: unknown = NOTHING_CHOSEN,
+) {
   const calls: { url: string; init: RequestInit }[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn((url: string, init: RequestInit = {}) => {
       calls.push({ url, init });
+      // Checked before `/data-sources`, though the two do not actually collide:
+      // the active route is `active-data-source`, singular and hyphenated.
+      if (url.includes("/active-data-source")) return Promise.resolve(json(chosen));
       if (url.includes("/data-sources")) return Promise.resolve(json(sources));
       if (init.method === "POST") return Promise.resolve(json({ ...CREATED }));
       return Promise.resolve(json(conversations));
@@ -214,9 +224,14 @@ describe("putting a thread away", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn((url: string) => {
+        if (url.includes("/active-data-source")) {
+          return Promise.resolve(json(NOTHING_CHOSEN));
+        }
         if (url.includes("/data-sources")) {
           return Promise.resolve(json([PIZZA_PG]));
         }
+        // Only the conversation list is left hanging, so `release` below
+        // resolves the one call this test is actually about.
         return new Promise<Response>((resolve) => {
           release = resolve;
         });
@@ -230,5 +245,56 @@ describe("putting a thread away", () => {
     expect(screen.queryByText(/Nothing yet/)).not.toBeInTheDocument();
     release?.(json([]));
     expect(await screen.findByText(/Nothing yet/)).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // The organization has chosen, so a member does not (D-045)
+  // -------------------------------------------------------------------------
+
+  const CHOSEN = { data_source_id: "d1", data_source_name: "Pizza (PostgreSQL)" };
+
+  it("offers no picker once the organization has chosen, and still names the database", async () => {
+    routeFetch([PIZZA_PG, PIZZA_MSSQL], [], CHOSEN);
+
+    render(<Conversations orgId="o1" />);
+
+    expect(await screen.findByText("Pizza (PostgreSQL)")).toBeInTheDocument();
+    // Two sources registered — today's screen would force a choice. The Admin
+    // has already made it, so there is nothing here to decide.
+    expect(screen.queryByLabelText("Database")).not.toBeInTheDocument();
+    expect(screen.queryByText(/more than one database/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start" })).toBeEnabled();
+  });
+
+  it("sends no data source at all, so the API stamps the thread", async () => {
+    /**
+     * **The browser-path reachability proof for D-045.** The API test proves the
+     * stamp works when a caller sends nothing; this proves the screen a person
+     * actually uses *is* that caller. Sending the same id from here would reach
+     * the same database and leave the stamp exercised only by tests — built,
+     * tested and never reached, which is the defect this project produces most.
+     */
+    const calls = routeFetch([PIZZA_PG], [], CHOSEN);
+
+    render(<Conversations orgId="o1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Start" }));
+
+    await vi.waitFor(() =>
+      expect(calls.some((call) => call.init.method === "POST")).toBe(true),
+    );
+    const created = calls.find((call) => call.init.method === "POST");
+    expect(JSON.parse(String(created?.init.body ?? "{}"))).toEqual({});
+  });
+
+  it("still makes a member choose when the organization has not", async () => {
+    // D-045 fills a blank; it does not remove the refusal. With two sources and
+    // no organization choice, nothing guesses — exactly as before.
+    routeFetch([PIZZA_PG, PIZZA_MSSQL], []);
+
+    render(<Conversations orgId="o1" />);
+
+    expect(await screen.findByLabelText("Database")).toBeInTheDocument();
+    expect(screen.getByText(/more than one database/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start" })).toBeDisabled();
   });
 });

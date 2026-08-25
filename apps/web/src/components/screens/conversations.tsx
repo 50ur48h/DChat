@@ -33,7 +33,13 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Row, Stack } from "@/components/ui/page";
-import { ApiError, createApi, type Conversation, type DataSource } from "@/lib/api-client";
+import {
+  ApiError,
+  createApi,
+  type ActiveDataSource,
+  type Conversation,
+  type DataSource,
+} from "@/lib/api-client";
 import { useSession } from "@/lib/auth/session";
 
 import styles from "./conversations.module.css";
@@ -58,6 +64,10 @@ export function Conversations({ orgId }: { orgId: string }) {
   //: of the list stays usable.
   const [busy, setBusy] = useState<string | null>(null);
   const [sources, setSources] = useState<DataSource[] | null>(null);
+  //: The organization's own choice (D-045). When it holds one, there is no
+  //: picker at all: an Admin has already decided, and asking every member to
+  //: confirm it on every thread is the flow this work package exists to end.
+  const [active, setActive] = useState<ActiveDataSource | null>(null);
   const [chosen, setChosen] = useState("");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,29 +76,41 @@ export function Conversations({ orgId }: { orgId: string }) {
   const api = useMemo(() => createApi(session.getToken), [session.getToken]);
 
   useEffect(() => {
-    // Guarded so a slow response cannot write into an unmounted screen.
-    let active = true;
+    // Guarded so a slow response cannot write into an unmounted screen. Named
+    // `alive`, because `active` is now the organization's chosen data source.
+    let alive = true;
     void (async () => {
       try {
-        const [threads, registered] = await Promise.all([
+        const [threads, registered, chosenSource] = await Promise.all([
           api.conversations(orgId, { archived: showArchived }),
           api.dataSources(orgId),
+          api.activeDataSource(orgId),
         ]);
-        if (!active) return;
+        if (!alive) return;
         setConversations(threads);
         setSources(registered);
+        setActive(chosenSource);
         // Preselected only when there is nothing to choose between. With
         // several, the empty value stands and the button stays disabled —
         // choosing the first would be exactly the guess the API declines.
-        if (registered.length === 1 && registered[0]) setChosen(registered[0].id);
+        //
+        // Skipped entirely once the organization has chosen (D-045): the screen
+        // sends **no** source then, so the thread is stamped by the API. Sending
+        // the same id from here would reach the same database and leave the
+        // stamp unexercised on the one path a person actually takes — built,
+        // tested, and never reached, which is the defect this project produces
+        // most.
+        if (!chosenSource.data_source_id && registered.length === 1 && registered[0]) {
+          setChosen(registered[0].id);
+        }
       } catch (cause) {
-        if (active) {
+        if (alive) {
           setError(cause instanceof ApiError ? cause.message : "This page could not be loaded.");
         }
       }
     })();
     return () => {
-      active = false;
+      alive = false;
     };
   }, [api, orgId, showArchived]);
 
@@ -170,6 +192,23 @@ export function Conversations({ orgId }: { orgId: string }) {
             </Link>{" "}
             screen.
           </p>
+        ) : active?.data_source_id ? (
+          /* The organization has chosen (D-045), so there is nothing to pick.
+             The database is still *named*, because a person is entitled to know
+             what their answer will be drawn from — what is removed is the
+             decision, not the fact. `start()` sends no source and the API stamps
+             the thread with the organization's, so the conversation records it
+             exactly as it would have if a picker had chosen it. */
+          <>
+            <p className={styles.note}>
+              Answered from <strong>{active.data_source_name}</strong>.
+            </p>
+            <Row>
+              <Button variant="primary" disabled={starting} onClick={() => void start()}>
+                {starting ? "Starting…" : "Start"}
+              </Button>
+            </Row>
+          </>
         ) : (
           <>
             <div className={styles.field}>

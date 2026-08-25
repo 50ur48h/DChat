@@ -44,6 +44,7 @@ from sqlalchemy import text
 from dataagent.agent.runner import execute_run
 from dataagent.config import Settings
 from dataagent.datasources import service as datasources
+from dataagent.orgs import service as orgs_service
 from dataagent.runs import service as runs
 from dataagent.tenancy.session import app_session
 
@@ -101,7 +102,22 @@ async def resolve_data_source(org_id: uuid.UUID) -> uuid.UUID:
     wrong produces a confident, well-cited answer about the wrong company's
     data. The refusal names the choices, because "pick one" is useful advice
     only to a reader told what there is to pick from.
+
+    **The organization's own choice comes first (D-045), and it is not a
+    tie-break.** An Admin naming the database this organization asks questions of
+    is a person deciding, which is exactly what the refusals below exist to
+    demand — the platform still never guesses. When no Admin has chosen, both
+    refusals stand word for word, and every organization from before revision
+    0031 reaches them exactly as it did.
+
+    Conversations created after D-045 are stamped at creation, so this path is
+    the one for threads that predate the choice — and for any caller that reaches
+    a run without one.
     """
+    chosen = await orgs_service.active_data_source(org_id)
+    if chosen.data_source_id is not None:
+        return chosen.data_source_id
+
     sources = await datasources.list_data_sources(org_id)
     if not sources:
         raise AmbiguousDataSourceError(

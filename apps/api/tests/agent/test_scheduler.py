@@ -42,6 +42,7 @@ from dataagent.config import Settings
 from dataagent.datasources import service as datasources
 from dataagent.llm.fake import FakeLLM
 from dataagent.main import create_app
+from dataagent.orgs import service as orgs_service
 from dataagent.runs import routes as routes_module
 from dataagent.runs import service as runs
 from llm_fixture import build_settings
@@ -125,6 +126,52 @@ async def test_no_source_at_all_says_what_to_do_about_it(context: ToolContext) -
 
     with pytest.raises(AmbiguousDataSourceError, match="No data source is registered"):
         await resolve_data_source(context.org_id)
+
+
+async def test_the_organizations_own_choice_ends_the_ambiguity(context: ToolContext) -> None:
+    """An Admin choosing is a person deciding, which is what the refusal demanded.
+
+    Two sources registered is the case `resolve_data_source` refuses on, and it
+    still refuses when nobody has chosen — the test above holds that. What D-045
+    adds is not a tie-break: the platform still never picks. It is a record of an
+    Admin having picked, and the refusal's own advice was to go and pick.
+    """
+    assert context.actor_user_id is not None
+    assert context.data_source_id is not None
+    await _register_a_second_source(context)
+
+    # Precondition, stated rather than assumed: without a choice this refuses.
+    with pytest.raises(AmbiguousDataSourceError):
+        await resolve_data_source(context.org_id)
+
+    await orgs_service.set_active_data_source(
+        org_id=context.org_id,
+        actor_user_id=context.actor_user_id,
+        data_source_id=context.data_source_id,
+    )
+
+    assert await resolve_data_source(context.org_id) == context.data_source_id
+
+
+async def test_clearing_the_choice_brings_the_refusal_back(context: ToolContext) -> None:
+    """The refusal is kept, not replaced. Un-choosing restores it exactly."""
+    assert context.actor_user_id is not None
+    assert context.data_source_id is not None
+    await _register_a_second_source(context)
+    await orgs_service.set_active_data_source(
+        org_id=context.org_id,
+        actor_user_id=context.actor_user_id,
+        data_source_id=context.data_source_id,
+    )
+    assert await resolve_data_source(context.org_id) == context.data_source_id
+
+    await orgs_service.set_active_data_source(
+        org_id=context.org_id, actor_user_id=context.actor_user_id, data_source_id=None
+    )
+
+    with pytest.raises(AmbiguousDataSourceError) as raised:
+        await resolve_data_source(context.org_id)
+    assert set(raised.value.candidates) == {"Customer", "Second warehouse"}
 
 
 async def test_an_ambiguous_source_ends_the_run_with_an_answer_not_a_silence(

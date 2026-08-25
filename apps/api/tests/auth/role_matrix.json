@@ -24,6 +24,11 @@
     "contributor": "deny(403)",
     "reader": "deny(403)"
   },
+  "GET /v1/orgs/{org_id}/active-data-source": {
+    "admin": "allow",
+    "contributor": "allow",
+    "reader": "allow"
+  },
   "GET /v1/orgs/{org_id}/catalog/search": {
     "admin": "allow",
     "contributor": "allow",
@@ -235,6 +240,11 @@
     "reader": "deny(403)"
   },
   "POST /v1/orgs/{org_id}/recovery-grants/{grant_id}/revoke": {
+    "admin": "allow",
+    "contributor": "deny(403)",
+    "reader": "deny(403)"
+  },
+  "PUT /v1/orgs/{org_id}/active-data-source": {
     "admin": "allow",
     "contributor": "deny(403)",
     "reader": "deny(403)"
