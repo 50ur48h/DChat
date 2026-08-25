@@ -1,59 +1,54 @@
 # STATUS — data-agent build
 
-Current position: **Phases 0-11 are done and signed off. Phase 12 STOPS AFTER
-                  WP12.2 (D-043).** WP12.3 and WP12.4 are **deferred, not
-                  cancelled** — see *"Deferred: what WP12.3 and WP12.4 still owe"*
-                  below. **There is no `v1.0.0` tag and there will not be one
+Current position: **Phases 0-11 done and signed off. Phase 12 STOPPED AFTER
+                  WP12.2 (D-043)** — WP12.3 and WP12.4 are deferred, not
+                  cancelled. **There is no `v1.0.0` tag and there will not be one
                   until WP12.4 resumes.**
-                  **Dev is deployed and reachable**, running the image built from
-                  **942e93c** (#106) — which predates the model configuration, so
-                  **it still cannot answer a question**. A person can sign in,
-                  create users, send invitations and register a data source.
-                  Everything that fixes the question path is merged to `main`
-                  (#108, #110, #111, #112) and **not deployed**, because the
-                  deploy is blocked by **B-131** — one command for a person, in
-                  *"What the next session must do first"*.
-                  D-041 still holds: `dev` only, no prod. D-042 amended WP12.4's
-                  gate for a dev that holds no data; D-043 defers that gate.
-Next step:        **Not WP12.3.** The next two work packages, in order:
-                  **(a) an engine trial loop** — point the product at unfamiliar
-                  datasets, run probe questions, find where schema understanding
-                  breaks, repeatably. The owner's F&B trial found five real
-                  defects this way and the method is currently in their head.
-                  **(b) a UI rebuild** — persistent chats with a sidebar, chat
-                  creation and management, system instructions, tone and model
-                  selection; target feel Claude/ChatGPT web.
-                  Both are specified under *"The next work, in order"* below,
-                  with the backend inventory for (b).
-                  Before either: **unblock the deploy (B-131)**, which is two `az`
-                  commands and a re-dispatch, so that what is merged is what is
-                  running.
+                  **Dev is deployed, current and answering questions.** Both
+                  container apps run the image built from `fa7ace3`; `/healthz`
+                  reports `{"status":"ok", ..., "missing_settings":[]}`; the
+                  identity self-check passes, so Key Vault write/delete and Blob
+                  write/read are proven by the pipeline rather than by a person.
+                  The owner asked two questions against a customer-style F&B
+                  database through the browser and both were correct.
+                  **`main` is ahead of dev**: everything merged after `fa7ace3`
+                  — #118 included, which carries migrations 0029 and 0030 — is
+                  not deployed. See *"Deploying what is on main"* below before
+                  dispatching.
+Next step:        **The owner sets it. Nothing here proposes one.**
+                  Phase 12 ended at WP12.2 and the next direction is the owner's
+                  to decide; they will bring it to the next session.
+                  **The next session must not open WP12.3, WP12.4, or the trial
+                  findings (B-135, B-136, B-137) unless the owner says so.** They
+                  are recorded under *"Deferred work"* with what each still owes,
+                  and that record is the whole of their status — it is not a
+                  queue and must not be read as one.
+                  The UI inventory further down is **analysis on file, not a
+                  plan**: it was written when a UI rebuild looked like the next
+                  work package, and it is kept because throwing away a survey of
+                  what the backend already has would be losing work rather than
+                  avoiding a commitment. It commits to nothing.
+                  Ordinary session start still applies (plan §7.1): fetch, read
+                  this file, `gh pr list`, address red CI before new work.
 Merge policy: ASK
-Blocked on user: **yes, on one thing, and it is two commands.** **B-131** — a role
-                 assignment created by hand on 2026-08-24 to work around B-125 now
-                 collides with the one `roles.bicep` creates, so every deploy fails
-                 in the `roles` module with `RoleAssignmentExists`. Azure's
-                 uniqueness is on the (scope, principal, role) triple, not the
-                 assignment name, so the template cannot adopt or overwrite it.
-                 The commands are in *"What the next session must do first"*. It
-                 needs a person because it briefly removes the identity's ability
-                 to write secrets, between the delete and the redeploy.
+Blocked on user: **yes — the direction.** Nothing technical blocks. The two
+                 owner tasks that once gated WP12.2 (the GitHub-OIDC app
+                 registration with its two federated credentials, and the `dev`
+                 environment holding `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
+                 `AZURE_SUBSCRIPTION_ID`, `POSTGRES_ADMIN_PASSWORD`) were done on
+                 2026-08-23 and are recorded because a second environment needs
+                 both again.
                  Not blocking, and still true: an **Anthropic key** would close
-                 **B-029 (P1)** and with it the Phase 6 gate. The **OpenAI key** is
-                 a repository secret (owner, 2026-08-17), so `nightly-evals.yml`
+                 **B-029 (P1)** and with it the Phase 6 gate. The **OpenAI key**
+                 is a repository secret (owner, 2026-08-17), so `nightly-evals.yml`
                  can run — keep its token cap tight; the local live run spent
                  **223k tokens** for twenty questions.
-                 The two WP12.2 setup tasks that used to sit here — the GitHub-OIDC
-                 app registration with its two federated credentials, and the `dev`
-                 environment holding `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
-                 `AZURE_SUBSCRIPTION_ID`, `POSTGRES_ADMIN_PASSWORD` — were done on
-                 2026-08-23. Recorded because a second environment needs both again.
-Last updated: 2026-08-25 by Claude Code (**session-end handoff.** Phase 12 stops after
-              WP12.2 per **D-043**; WP12.3 and WP12.4 deferred with their remaining scope
-              written out below. Eleven PRs this session, every one of them a real defect
-              found by walking rather than by CI: B-120, B-123, B-124, B-125, B-126, B-127,
-              B-128, B-130. Dev is one person-command from serving the current build —
-              **B-131**. The next work is the engine trial loop, then the UI rebuild)
+Last updated: 2026-08-25 by Claude Code (**session-end handoff, state only.** Phase 12
+              stopped after WP12.2 (D-043); the next direction is the owner's and is not
+              set here. Dev is deployed, current at `fa7ace3` and answering questions;
+              `main` is ahead of it by #118 and two migrations. This session merged #108
+              through #118 — B-120, B-123..B-128, B-130..B-134 and D-042..D-044 — and the
+              engine trial loop found B-134 through B-138. Nothing is in progress)
 
 ---
 
@@ -105,6 +100,168 @@ to ask: **B-100's defect, one field over**, fixed the way B-100 was — a column
 (revision 0029), carried on `RunView` and `RunOut`, rendered as *"could not
 answer"*. It is a fifth instance of the class CLAUDE.md enumerates, whose count of
 four is now stale.
+
+---
+
+# SESSION-END HANDOFF — 2026-08-25 (state only)
+
+**This records where things are. It sets no direction** — that is the owner's,
+and they will bring it to the next session. Everything below is fact or a
+deferral with its remaining scope written out. Nothing here is a queue.
+
+Supersedes the 2026-08-25 handoff further down, which was written before Phase 12
+stopped and still reads as a plan.
+
+## Deploying what is on main
+
+Dev runs `fa7ace3`. `main` is ahead by **#118**, which carries revisions **0029**
+and **0030**. `deploy.yml` migrates *before* it rolls the apps, so the ordering is
+right — but between the migration and the revision swap the **old** image is still
+serving, and it selects an `answered` column that 0030 drops. The window is the
+length of a revision swap, and the previous revision was going away regardless.
+Not a blocker; the one sharp edge in the change.
+
+The deploy runs: preflight → role-id check → `what-if` → infra → vault seed →
+build → migration job → migrate + grant app login → roll → smoke → identity
+self-check.
+
+## Deferred work — what each still owes
+
+| item | owes |
+|---|---|
+| **WP12.3** | OpenTelemetry is **not wired at all** — no `opentelemetry` import in `apps/api`; `APPLICATIONINSIGHTS_CONNECTION_STRING` is set on both containers and declared in `PLATFORM_ENV` as belonging to an exporter that does not exist. Plus `quotas/` (**B-025**): `usage_ledger` has held every call since Phase 6 and nothing reads it; architecture 8.3 wants per-org daily/monthly token and query quotas at run start and at each LLM call, soft warn at 80%, hard stop at 100%, treating `cost_usd IS NULL` as *unknown* and never as free. Plus alerts on failure rate, run latency and the `degraded` health state. |
+| **WP12.4** | `docs/hardening-v1.md` does not exist. ASVS-lite checklist, dependency audit, rate limits, managed-identity review. Restore drill — restore the Postgres backup to a fresh server and run the migration check and `rls_proof` against it, recording that it restored an **empty schema** (D-042). Quota hard-stop proven in dev by seeding `usage_ledger` directly (D-042 amendment 1). Nightly evals against dev is **dropped**, not owed (D-042 amendment 2). `v1.0.0` tagged from dev. |
+| **B-135** (P2) | The trial report must carry the organization's semantic state — `definitions_available`, `applied_definitions`, and how many accepted definitions the org has — or its results are misread, as they were on first reading. And an answer no definition governs should say so (B-085's open half, from the reader's end). |
+| **B-136** (P2) | `round(double precision, integer)` does not exist in PostgreSQL. Decide between dialect trivia in the SQL prompt and a **repair hint on the error** — the loop already re-plans on a failed statement, and this failure is diagnosable with one known remedy (`round(x::numeric, 2)`). |
+| **B-137** (P3) | A rounding rule for derived figures in composed prose, and the decision about *which* figures: a count must not be rounded, a currency should be, a ratio depends on what it is a ratio of. |
+
+Also deferred and filed: **B-128**'s open half (nothing exercises a `run:` block
+before a dispatch), **B-132**'s open half (the `docker` job runs main-only, so its
+failures are invisible to the PR that causes them), **B-138** (an uncited
+assertion in prose), and **B-125**'s stale-assignment note, now closed by the
+deletes on 2026-08-25.
+
+## Open P1s — three, and what each blocks
+
+| id | one line | blocks |
+|----|----------|--------|
+| **B-029** | The LLM abstraction has never run against a second provider. | The **Phase 6 gate**, still open. Needs an Anthropic key — an owner decision, not a code task. |
+| **B-060** | The same question, paraphrased, picks a different source and answers two orders of magnitude apart; four defensible readings span a factor of **538**. | Trust in any answer over an ambiguous schema. Diagnosed, deliberately unfixed. |
+| **B-119** | The model invented a platform constraint and refused half a question the data could answer. **Did not reproduce on 2026-08-25** with the prompt path byte-identical — intermittent, not fixed. | Honest refusals. A fabricated refusal is worse than a wrong answer because it looks like integrity. Also sets the bar for any trial: one clean run proves nothing. |
+
+## Operational debt, in one place
+
+* **CI takes 30+ minutes, and `coverage` is a required check gated on the slowest
+  job.** `coverage` needs `[api, mssql]`, so it starts only after `api` finishes —
+  roughly thirteen minutes in — which means every PR's mergeability rests on a
+  second, late runner acquisition. One such acquisition already failed: on #107 the
+  job queued fifteen minutes, was reaped with **zero steps and no log**, and blocked
+  a merge where everything else was green. Re-running fixed it. **The owner declined
+  to change this for now** (2026-08-25) — the fix is either dropping a required
+  check or splitting the `api` job, and both are larger than the flake. B-132's
+  deferred half is gated on the same question.
+* **No quotas on a publicly reachable deployment** (**B-025**). The only spend
+  control is `LLM_RUN_COST_LIMIT_USD=1.00`, which is **per run** — n runs cost n
+  dollars. The Azure budget alert warns; it does not stop.
+* **No retention sweep** (**B-021**). `result_artifacts.expires_at` is written on
+  every row and read by nothing. In Azure the `expire-artifacts` lifecycle rule
+  deletes the **blobs**, so the files are covered and the **rows** are not.
+  Locally neither is.
+* **No usage-ledger sweep** (**B-026**). One row per LLM call, kept forever.
+* **B-029 leaves the Phase 6 gate open.**
+* **B-014**: 14 of 17 refs in the local `ops/.secrets/secrets.json` are orphaned —
+  their organization no longer exists.
+* **B-007**: every CI action still targets the Node 20 runtime and is forced onto
+  24. A warning today, a broken pipeline when the shim is removed.
+* **B-129**: `storage.bicep` creates a `documents` container nothing uses, outside
+  the retention rule and with no tenant-prefix convention behind it.
+
+## State: what runs where, and what data is where
+
+### Local (this clone, Windows host)
+
+* `make up` brings up **platform-pg**, **seed-pizza-pg**, **seed-fnb-pg**, **api**,
+  **web**. SQL Server on demand: `make up.mssql`.
+* **Migration level: `0030`.** The local platform database was behind twice this
+  session and both failures looked like product bugs — `column "answered" does not
+  exist` killed the first trial run, and `column "outcome_state" does not exist`
+  failed all twenty evals. `make migrate` after pulling a branch with a new
+  revision.
+* Data: the **pizza demo** from `make seed`; the **F&B sample** from `.SampleData/`
+  via `make seed.fnb SQLITE=…`. `.SampleData/` is gitignored as a directory.
+* Two organizations exist. **Demo** (`92ba0ac2-…`) holds both seed sources
+  registered at **compose** hostnames, so anything reaching them must run *inside*
+  the api container. **evals** (`5eb716b6-…`) holds one source at `localhost:6543`
+  — the host's address, for the harness — and one active semantic definition.
+  **Demo has zero semantic definitions**, which is B-135.
+* `make evals` needs `EVALS_ORG_ID`; `ops/evals/provision.py` prints one.
+  Currently 20/20.
+* `make trial` runs on the host, so against a compose-hostname source it must be
+  invoked in the container:
+  `docker exec dataagent-api-1 python -m dataagent.ops.trial --org … --user … --source … --probes /tmp/probes.json`.
+* **Known Windows-only flake**:
+  `tests/secrets/test_local_provider.py::test_concurrent_writes_do_not_lose_entries`
+  fails under full-suite load with `PermissionError [WinError 5]` on `os.replace`,
+  and passes 3/3 alone. The temp file is named per **process** (`os.getpid()`)
+  while the provider does its I/O in a worker **thread**, so writers inside one
+  process race on the same temp path. Green on Linux CI. Not filed — it has not
+  been shown to affect a single-writer path, and that is worth confirming before
+  anyone calls it cosmetic.
+* **Known pytest path collision**: running `tests/runs` and `tests/agent` in one
+  invocation fails collection with
+  `ImportError: cannot import name 'Tenant' from 'conftest'` — the two directories
+  are not packages and `conftest` resolves to whichever was imported first. Each
+  passes alone, and CI collects the whole tree without hitting it. Not filed;
+  worth knowing before anyone reports it as a regression.
+
+### Deployed (`rg-dataagent-dev`, southeastasia)
+
+* **Web**: `https://ca-dataagent-web-dev.redhill-410ea877.southeastasia.azurecontainerapps.io`
+* **API**: `https://ca-dataagent-api-dev.redhill-410ea877.southeastasia.azurecontainerapps.io`
+* Both serve the image built from **`fa7ace3`**. **Migration level: `0028`** —
+  0029 and 0030 are on `main` and not deployed.
+* Resources: `cae-dataagent-dev`, `crdataagentdevv4ilto`, `psql-dataagent-dev`
+  (private endpoint, no public access), `kv-dataagent-dev-v4ilto`,
+  `stdataagentdevv4ilto`, `id-dataagent-dev`, `log-dataagent-dev`,
+  `appi-dataagent-dev`, `vnet-dataagent-dev`, and the jobs
+  `cj-dataagent-migrate-dev` and `cj-dataagent-selfcheck-dev`.
+* The vault holds **exactly one** role assignment for the app identity — Key Vault
+  Secrets Officer, created by the template under its own deterministic name. The
+  hand-made one and the stale Secrets User one were deleted on 2026-08-25, which
+  closed B-125 and B-131.
+* **Dev holds no fixtures and no seed database**, deliberately: *dev exists to
+  prove the deployment path, not to host a demo* (owner, 2026-08-24; D-042).
+* **The standing rule: no customer database credential in dev without a separate
+  decision.** One customer-style database exists —
+  `pg-fnb-demo-sk.postgres.database.azure.com`, in a **separate resource group with
+  no relationship to the app's infrastructure**, created by the owner for a trial
+  and holding the F&B sample behind a `fnb_readonly` login. Its credential was
+  registered through the UI **by the owner**, not by this pipeline, and it is
+  theirs to delete. Nothing in this repository stores it.
+
+## From this session, not written down anywhere else
+
+* **The engine trial exists and has run once**: `dataagent.ops.trial`, `make
+  trial`, `ops/trials/probes.example.json`. Fifteen runs, 112 model calls,
+  **$2.03**, five probes, four disagreements. `MINIMUM_REPEATS = 3` is enforced,
+  not defaulted — verified refused on the live path, not only in tests.
+* **The trial's first catch was its own operator.** *"Ayam Penyet Set … 0.00 units
+  sold"* read as B-059 returning; the Demo org has zero definitions, so it was
+  correct behaviour. B-135 exists because the report did not carry that context.
+* **The trial ran against the local `seed-fnb-pg`**, not the Azure instance. Same
+  sample, different database. Running it against the deployed source would need it
+  to run as a Container Apps job — the identity self-check's argument.
+* **Six deploy attempts failed before one landed**, each on something no check in
+  the repository could see: an ID-qualified OIDC subject, a fabricated Key Vault
+  role GUID (**B-130**), a `${${$name}}` runtime expansion (**B-128**), a role
+  assignment made by hand colliding with the template's (**B-131**), and the model
+  configuration never reaching the container (**B-126**).
+* **`what-if` has now been wrong twice** — the nested-deployment short-circuit, and
+  a role assignment it listed as creatable without resolving the role id it named.
+* **A guard is only trusted after it is seen to fail.** Every check added this
+  session was run against the defect first: `check_env.sh`'s check 9, the workflow
+  lint, `check_role_definitions.sh`, the logging guard, the card's badge, the
+  scripted-shape check.
 
 ---
 
@@ -260,7 +417,14 @@ without rereading plan §6.
 * **`v1.0.0` tagged from dev.** Not done. Nothing in the repository should claim a
   v1 until it is.
 
-## The next work, in order
+## Analysis on file, not a plan (written 2026-08-25, before the direction was reopened)
+
+**Read this as a survey, not a queue.** It was written when a trial loop and a UI
+rebuild looked like the next two work packages. Phase 12 has since stopped after
+WP12.2 and **the direction is the owner's to set** — see the header. The trial
+loop below did ship; the UI section is an inventory of what the backend already
+has, kept because throwing away a survey would be losing work rather than
+avoiding a commitment. Neither section commits anyone to anything.
 
 ### (a) An engine trial loop — repeatable, not remembered
 
