@@ -4,6 +4,58 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-048 — the working state shows the run, and never a script
+Date: 2026-08-25 · Phase: 13 · PR: this one
+Context: the owner supplied a design for the thinking/working state — an
+expandable agent trace with a shimmering status word, steps appearing with a
+spinner and settling to checks, collapsing to *"Thought for N seconds"*. The
+reference implementation drives it from a hard-coded `STAGES = [800, 600, 1800,
+2600, 1600]` and a fixed list of rows: a sequence that looks like work and is a
+timer. This product already streams the real thing — `agent_events`, append-only,
+architecture 10.3 — and the owner's own framing was that it "shouldn't be a fake
+spinner".
+Options: (a) port the reference as given, with the scripted timings, and swap in
+real data later; (b) port only the *look*, and drive every row from the event
+stream that already exists; (c) a hybrid — real events, but hold each row for a
+minimum time so the sequence "reads" better.
+Decision: **(b)**, and **(c) is explicitly refused**. A minimum display time is
+the same lie as a scripted one, told more carefully: it makes the interface's
+account of the work disagree with the work. This product's entire claim is that
+its account of itself is checkable — the trace is append-only *precisely* so it
+can be shown as a record rather than a story (`trace.tsx` has said so since
+WP8.3) — and a progress display that runs ahead of what happened would be the
+most convincing lie the interface is capable of telling. So: every row is one
+durable event, in the order it was written, with the wording the trace already
+maps type names to. If the stream stops, the display stops.
+**The duration is held to the same standard.** *"Thought for N seconds"* comes
+from the run's `started_at` and `finished_at`, falling back to the first and last
+event timestamps. When neither is knowable the word is `Thought` with no number,
+because a rounded-up guess is a fabricated measurement and this is a product that
+refuses those elsewhere.
+Consequences: `docs/design.md` gains *The working state* as a binding pattern,
+written **before** the code, including the rule above and the bound on motion —
+a shimmer, a fade-up and a grid-rows transition, all off under
+`prefers-reduced-motion`, and the trace fully readable with every one of them
+disabled. `Trace` is rewritten rather than replaced, so both call sites and every
+import keep working; its rows stopped being badges and became words with colour,
+which is rule 4 applied one level down.
+**One defect this produced, caught before it shipped, and worth the entry on its
+own.** The status word was first wrapped in `role="status"` with
+`display: contents` — and the result was a button with **no accessible name at
+all**: the text was trapped inside the live region, so a screen reader announced
+"button" and nothing else. It was found by an e2e locator that could not match
+the button by name, which is the only reason it was found. The label is a plain
+child of the button now and `aria-live` does the announcing without removing the
+text from the name computation. **A live region belongs beside an interactive
+control, not inside one**, and `display: contents` is not safe on anything whose
+text has a job.
+The pattern is deliberately **not** applied to operations that cannot report
+progress. A catalog refresh, a column profile and a connection test are single
+requests that return once; giving them steps would mean writing the steps in the
+client, which is the thing this entry refuses. Those get an indeterminate
+shimmer and their real result. Document ingestion is the honest second home, and
+which other states get the treatment is the owner's pick from `C-states`.
+
 ## D-047 — warm paper, a serif answer, and chrome that outranks nothing
 Date: 2026-08-25 · Phase: 13 · PR: this one
 Context: WP13.1b shipped the chat product against the design system as written —

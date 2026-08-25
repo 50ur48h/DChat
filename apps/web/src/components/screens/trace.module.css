@@ -1,85 +1,244 @@
 /*
- * The trace sits in the answer's working strip beside the Evidence disclosure
- * (D-047), so its toggle is styled to match that summary rather than to look
- * like a button. It stays a real `<button>` because it has to open itself while
- * a run is live, which `<details>` cannot be told to do.
+ * The working state (docs/design.md, *The working state*).
+ *
+ * Motion is the one place this design uses it, and it is bounded: a shimmer on
+ * the status word, a fade-up per row, and a grid-rows transition on the
+ * expander. **All of it is off under `prefers-reduced-motion`, and the trace is
+ * completely readable with it off** — motion may say *this is happening now*,
+ * and may never be the only thing that says it. The spinner has a check beside
+ * every finished row, and the status word changes from `Thinking` to
+ * `Thought for N seconds` whether or not anything moves.
  */
+
 .trace {
   display: flex;
   flex-direction: column;
-  gap: var(--s3);
 }
 
+/* The header. Sits in the answer's working strip beside the Evidence summary,
+   so it matches that summary rather than looking like a button. 40px, because
+   on touch the strip is the only route in — quiet is the fill, not the size. */
 .toggle {
   align-self: flex-start;
-  /* 40px like the summary beside it: on touch the strip is the only route in.
-     Quiet is the fill, not the size. */
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
   min-height: 40px;
-  height: auto;
+  margin-left: calc(-1 * var(--s3));
   padding: 0 var(--s3);
   border: 0;
-  background: transparent;
   border-radius: var(--radius-md);
-  font-size: 12px;
-  font-weight: 600;
+  background: transparent;
   color: var(--ink-muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 140ms ease;
 }
 
 .toggle:hover {
   background: var(--inset);
-  color: var(--ink);
 }
 
-.latest {
-  color: var(--fg-muted);
-  font-size: 13px;
-  line-height: 20px;
+.mark {
+  flex: 0 0 auto;
+  fill: var(--ink-subtle);
 }
 
+.markLive {
+  composes: mark;
+  fill: var(--ink-muted);
+}
+
+/*
+ * The status word while the run is going.
+ *
+ * A gradient clipped to the text and slid across it. It degrades safely: with
+ * the animation off the word still sits at its starting colour and reads
+ * normally, which is why the fallback `color` is set before the clip.
+ */
+.working {
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--ink-muted);
+  background-image: linear-gradient(
+    90deg,
+    var(--ink-subtle) 35%,
+    var(--ink) 50%,
+    var(--ink-subtle) 65%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 1.4s linear infinite;
+}
+
+.settled {
+  white-space: nowrap;
+  font-weight: 500;
+  color: var(--ink-muted);
+  animation: fade-in 350ms ease-out both;
+}
+
+.chev {
+  flex: 0 0 auto;
+  color: var(--ink-subtle);
+  transition: transform 300ms ease;
+}
+
+.chevOpen {
+  composes: chev;
+  transform: rotate(180deg);
+}
+
+/* A single grid row going 0fr → 1fr, which animates a height nothing has to
+   measure. */
+.expander {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 400ms cubic-bezier(0.23, 1, 0.32, 1),
+    opacity 400ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.expanderOpen {
+  composes: expander;
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.expanderClip {
+  overflow: hidden;
+}
+
+/* The hairline runs down the left of the steps, drawn by the list's own border
+   so it is exactly as tall as the steps are and needs no measuring. */
 .steps {
+  list-style: none;
+  margin: var(--s1) 0 0 5px;
+  padding: var(--s1) 0 var(--s1) var(--s4);
+  border-left: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
-  margin: 0;
-  padding: var(--space-4);
-  list-style: none;
-  border-radius: var(--radius-md);
-  background: var(--surface-sunken);
-  /* A long investigation should not push the composer off the screen. */
-  max-height: 420px;
-  overflow-y: auto;
+  gap: var(--s1);
 }
 
 .step {
   display: flex;
-  gap: var(--space-3);
-  align-items: baseline;
-}
-
-.seq {
-  color: var(--fg-subtle);
-  font-size: 12px;
+  align-items: center;
+  gap: var(--s2);
+  min-height: 28px;
+  font-size: 12.5px;
   line-height: 20px;
-  /* Numbers line up, so the timeline reads as a sequence. */
-  font-variant-numeric: tabular-nums;
-  min-width: 2ch;
-  text-align: right;
+  animation: fade-up 320ms cubic-bezier(0.23, 1, 0.32, 1) both;
 }
 
-.body {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  align-items: baseline;
-  min-width: 0;
+.tick {
+  flex: 0 0 auto;
+  color: var(--ink-subtle);
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--line-strong);
+  border-top-color: var(--ink-muted);
+  animation: spin 700ms linear infinite;
+}
+
+.word {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.wordOk {
+  composes: word;
+  color: var(--ok);
+}
+
+.wordWarn {
+  composes: word;
+  color: var(--warn);
+}
+
+.wordError {
+  composes: word;
+  color: var(--danger);
 }
 
 .detail {
-  margin: 0;
-  color: var(--fg-muted);
-  font-size: 13px;
-  line-height: 20px;
-  /* A summary or a finding can be long; it wraps rather than widening the card. */
-  overflow-wrap: anywhere;
-  max-width: 68ch;
+  min-width: 0;
+  color: var(--ink-subtle);
+  font-size: 11.5px;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/*
+ * With motion off, the shimmer's clipped gradient would leave the word
+ * transparent — invisible rather than merely still. The fill is put back
+ * explicitly, which is the whole reason this block names more than
+ * `animation: none`.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .working {
+    background-image: none;
+    -webkit-text-fill-color: currentcolor;
+    color: var(--ink);
+  }
+
+  .working,
+  .settled,
+  .step,
+  .spinner,
+  .chev,
+  .chevOpen,
+  .expander,
+  .expanderOpen {
+    animation: none;
+    transition: none;
+  }
+
+  .spinner {
+    border-top-color: var(--ink);
+  }
 }

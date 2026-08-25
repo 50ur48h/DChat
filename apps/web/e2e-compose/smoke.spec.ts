@@ -303,7 +303,7 @@ test("the stack answers a question asked in a browser", async ({ page }) => {
   });
 
   await test.step("open the trace", async () => {
-    await page.getByRole("button", { name: /how this was worked out/ }).click();
+    await page.getByRole("button", { name: /Thought(\s+for\s+\d+\s+\w+)?$/ }).first().click();
 
     await expect(page.getByText("Read the catalog")).toBeVisible();
     await expect(page.getByText("Wrote a query")).toBeVisible();
@@ -335,7 +335,7 @@ test("the stack answers a question asked in a browser", async ({ page }) => {
     // product as broken when it is not — the failure mode a smoke can least
     // afford, because the next person to see it red will believe it.
     await expect(page.getByText("Evidence", { exact: true })).toHaveCount(2, { timeout: 60_000 });
-    await expect(page.getByRole("button", { name: /how this was worked out/ })).toHaveCount(2);
+    await expect(page.getByRole("button", { name: /Thought(\s+for\s+\d+\s+\w+)?$/ })).toHaveCount(2);
   });
 
   await test.step("a reload replays all of it from durable rows", async () => {

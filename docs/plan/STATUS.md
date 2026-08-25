@@ -1,7 +1,7 @@
 # STATUS — data-agent build
 
-Current position: **Phase 13 — the chat product. WP13.2 in review; WP13.1a
-                  (#121) and WP13.1b (#122) merged.**
+Current position: **Phase 13 — the chat product. WP13.3 in review; WP13.1a
+                  (#121), WP13.1b (#122) and WP13.2 (#123) merged.**
                   Phases 0-11 done and signed off. **Phase 12 STOPPED AFTER
                   WP12.2 (D-043)** — WP12.3 and WP12.4 are deferred, not
                   cancelled. **There is no `v1.0.0` tag and there will not be one
@@ -67,7 +67,15 @@ Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-25 by Claude Code (**WP13.2 — the design the owner chose,
+Last updated: 2026-08-25 by Claude Code (**WP13.3 — the working state, D-048.**
+              The thinking state ported to CSS Modules and driven by the real event
+              stream: no scripted timings, and no minimum display time either, because
+              that is the same lie told more carefully. Found and fixed on the way: a
+              `role="status"` with `display: contents` left the toggle with **no
+              accessible name at all**, caught only by an e2e locator. Six other
+              loading/empty/transition states are surveyed and mocked as **B-142**,
+              awaiting the owner's pick. Previously: **WP13.2 — the design the owner
+              chose,
               D-047.** `design.md` rewritten first, then the code: warm paper, layered
               depth, a terracotta accent, and a serif for the agent's own words. The
               sidebar is fixed full height, the identity block cannot overlap, and the
@@ -103,6 +111,71 @@ Last updated: 2026-08-25 by Claude Code (**WP13.2 — the design the owner chose
               class it belongs to is now the first line of the operational-debt list)
 
 ---
+
+## WP13.3 — the working state, from real events (D-048)
+
+The owner supplied a design for the thinking state: an expandable trace, a
+shimmering status word, steps arriving with a spinner and settling to checks,
+collapsing to *"Thought for N seconds"* and staying expandable. Ported to CSS
+Modules — the reference was Tailwind — and **driven entirely by the event stream
+that already exists**.
+
+**The reference implementation was a timer.** `STAGES = [800, 600, 1800, 2600,
+1600]` and a fixed list of rows: a sequence that looks like work. The owner's own
+framing was that it "shouldn't be a fake spinner", and D-048 records the rule
+that follows — every row is one durable `agent_events` row, in the order it was
+written, and **a minimum display time is refused too**, because it is the same
+lie told more carefully. If the stream stops, the display stops.
+
+**The duration is held to the same standard.** *"Thought for N seconds"* comes
+from the run's `started_at`/`finished_at`, falling back to the first and last
+event timestamps; when neither is knowable it says `Thought` with no number,
+because a rounded-up guess is a fabricated measurement.
+
+### The defect this produced, caught before it shipped
+
+The status word was first wrapped in `role="status"` with `display: contents`,
+and the result was a button with **no accessible name at all** — the text was
+trapped inside the live region, so a screen reader would announce "button" and
+nothing else. **It was found by an e2e locator that could not match the button by
+name**, and by nothing else: it renders perfectly, reads perfectly, and passes
+every visual check. The label is a plain child now and `aria-live` does the
+announcing.
+
+Two rules worth carrying forward: **a live region belongs beside an interactive
+control, not inside one**, and `display: contents` is not safe on anything whose
+text has a job.
+
+It also cost an hour of misattribution first. The test failed three times out of
+three in isolation, but at a *different* line — the sign-in card, which is
+B-140's signature — so it read as the host flake. What settled it was a control:
+the same isolation on an untouched test passed 3/3. The sign-in failures were
+Playwright restarting the worker after the real failure, exactly the cascade
+B-140 describes.
+
+### The other states are surveyed, mocked and not built (B-142)
+
+Six of them, drawn in `C-states` for the owner to pick from: skeleton rows for
+the seven screens that say *"Loading…"*; empty states with presence and one
+action; an indeterminate shimmer for one-shot operations; document ingestion as
+the working state's honest second home; the send-to-thread transition; and the
+existing `Checking…`/`Sending…`.
+
+**The line that decides which get the working state is whether real progress
+exists.** Catalog refresh, column profiling and connection tests are single
+requests that return once — a step list there would have to be written in the
+client, which is what D-048 refuses. Document ingestion has `status`,
+`chunk_count` and `embedded_count`, so it can be drawn from real numbers.
+
+### Evidence
+
+* `make test.web` **178 passed**; `make lint.web`, `make typecheck.web` green.
+* **`make test.web.smoke` green from a clean stack.**
+* `make test.web.e2e` 14/16, both failures `getByLabel('Ask a question')` — the
+  B-140 sign-in flake, and nothing design-related.
+* The trace test, which is what caught the accessible-name defect, passes **3/3**
+  in isolation after the fix.
+* No Python changed.
 
 ## WP13.2 — the design the owner chose (D-047)
 

@@ -34,8 +34,6 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { Badge, type Tone } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { createApi, type RunEvent } from "@/lib/api-client";
 import { useSession } from "@/lib/auth/session";
 
@@ -65,16 +63,21 @@ const STEP_WORDS: Record<string, string> = {
   error: "Something went wrong",
 };
 
-/** Which events are worth colouring, and why — never colour for interest. */
-const TONES: Record<string, Tone> = {
-  sql_rejected: "peach",
-  budget_warning: "peach",
-  budget_exhausted: "peach",
-  capability_checked: "lilac",
-  finding_added: "mint",
-  query_executed: "mint",
-  run_finished: "mint",
-  error: "rose",
+/**
+ * Which events are worth colouring, and why — never colour for interest.
+ *
+ * Text colour rather than a badge: a row of badges made the trace read as a list
+ * of labels, and design.md's rule 4 puts the step word above its decoration. The
+ * word is always there, so colour is a second cue and never the only one.
+ */
+const TONE_CLASS: Record<string, string | undefined> = {
+  sql_rejected: styles.wordWarn,
+  budget_warning: styles.wordWarn,
+  budget_exhausted: styles.wordWarn,
+  finding_added: styles.wordOk,
+  query_executed: styles.wordOk,
+  run_finished: styles.wordOk,
+  error: styles.wordError,
 };
 
 function line(event: RunEvent): string {
@@ -188,16 +191,56 @@ function useTrace(orgId: string, runId: string | null): RunEvent[] {
 }
 
 
+/**
+ * How long the run took, in words, from something real.
+ *
+ * The run's own clock first; the first and last event otherwise. **If neither is
+ * knowable it says `Thought` with no number** rather than inventing one — a
+ * duration is a claim, and this component's whole premise is that it only
+ * repeats claims the platform already made.
+ */
+function tookFor(
+  events: RunEvent[],
+  startedAt: string | null | undefined,
+  finishedAt: string | null | undefined,
+): string {
+  const from = startedAt ?? events[0]?.ts;
+  const to = finishedAt ?? events.at(-1)?.ts;
+  if (!from || !to) return "Thought";
+
+  const ms = new Date(to).getTime() - new Date(from).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return "Thought";
+
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  if (seconds < 60) return `Thought for ${seconds} second${seconds === 1 ? "" : "s"}`;
+  const minutes = Math.round(seconds / 60);
+  return `Thought for ${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
+/**
+ * The working state (docs/design.md, *The working state*).
+ *
+ * **Every row here is one durable event, in the order it was written.** There is
+ * no scripted sequence, no minimum display time and no step that appears because
+ * somebody expected it to: if the stream stops, this stops. A progress display
+ * that runs ahead of the work is the most convincing lie an interface can tell,
+ * and this product's claim is that its account of itself is checkable.
+ */
 export function Trace({
   orgId,
   runId,
   live,
   defaultOpen = false,
+  startedAt,
+  finishedAt,
 }: {
   orgId: string;
   runId: string | null;
   live: boolean;
   defaultOpen?: boolean;
+  /** The run's own clock, for the settled word. Absent falls back to the events. */
+  startedAt?: string | null | undefined;
+  finishedAt?: string | null | undefined;
 }) {
   const events = useTrace(orgId, runId);
   // Open while the run is going and collapsed once it has finished — watching is
@@ -207,43 +250,102 @@ export function Trace({
   const [toggled, setToggled] = useState<boolean | null>(null);
   const open = toggled ?? (live || defaultOpen);
 
-  const latest = useMemo(() => events.at(-1), [events]);
   if (!runId || events.length === 0) return null;
 
   return (
     <div className={styles.trace}>
-      <Button
-        variant="ghost"
+      <button
+        type="button"
         aria-expanded={open}
         onClick={() => setToggled(!open)}
         className={styles.toggle}
       >
-        {open ? "Hide" : "Show"} how this was worked out ({events.length} step
-        {events.length === 1 ? "" : "s"})
-      </Button>
+        <svg
+          className={live ? styles.markLive : styles.mark}
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z" />
+        </svg>
+        {/*
+         * **The label is a plain child of the button, and that is deliberate.**
+         *
+         * It was first wrapped in a `role="status"` region with
+         * `display: contents`, and the result was a button with **no accessible
+         * name at all** — the text was trapped inside the live region and never
+         * reached the name computation, so a screen reader announced "button"
+         * and nothing else. Caught by an e2e locator that could not find it by
+         * name, which is the only reason it was found before shipping.
+         *
+         * `aria-live` here does the announcing without taking the text out of
+         * the name: the role is unchanged, so name-from-content still sees it.
+         */}
+        <span aria-live="polite" className={live ? styles.working : styles.settled}>
+          {live ? "Thinking" : tookFor(events, startedAt, finishedAt)}
+        </span>
+        <svg
+          className={open ? styles.chevOpen : styles.chev}
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
 
-      {!open && latest && (
-        <span className={styles.latest}>{STEP_WORDS[latest.type] ?? latest.type}</span>
-      )}
-
-      {open && (
-        <ol className={styles.steps}>
-          {events.map((event) => {
-            const detail = line(event);
-            return (
-              <li key={event.seq} className={styles.step}>
-                <span className={styles.seq}>{event.seq}</span>
-                <div className={styles.body}>
-                  <Badge tone={TONES[event.type] ?? "neutral"}>
+      {/* A grid whose single row goes 0fr → 1fr, which animates a height the
+          component does not have to measure. */}
+      <div className={open ? styles.expanderOpen : styles.expander}>
+        <div className={styles.expanderClip}>
+          <ol className={styles.steps}>
+            {events.map((event, index) => {
+              const detail = line(event);
+              // The last row carries the spinner only while the run is still
+              // going. Once it has settled every step finished, so every one
+              // of them gets a check.
+              const running = live && index === events.length - 1;
+              return (
+                <li
+                  key={event.seq}
+                  className={styles.step}
+                  style={{ animationDelay: `${Math.min(index, 6) * 60}ms` }}
+                >
+                  {running ? (
+                    <span className={styles.spinner} aria-hidden="true" />
+                  ) : (
+                    <svg
+                      className={styles.tick}
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M20 6L9 17l-5-5" />
+                    </svg>
+                  )}
+                  <span className={TONE_CLASS[event.type] ?? styles.word}>
                     {STEP_WORDS[event.type] ?? event.type}
-                  </Badge>
-                  {detail && <p className={styles.detail}>{detail}</p>}
-                </div>
-              </li>
-            );
-          })}
-        </ol>
-      )}
+                  </span>
+                  {detail && <span className={styles.detail}>{detail}</span>}
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      </div>
     </div>
   );
 }
