@@ -161,17 +161,24 @@ describe("<ConversationThread />", () => {
     );
   });
 
-  it("opens the query behind a citation", async () => {
+  it("shows the query behind a lone citation without a second click", async () => {
+    /**
+     * The product's central claim, made checkable rather than asserted: the
+     * answer names a finding, the finding names an execution, and the execution
+     * opens into the statement that produced the number.
+     *
+     * **A finding with one citation shows it outright** (D-047). Having opened
+     * *Evidence*, being asked to open the evidence again is a click that buys
+     * nothing — so the toggle is still there, reading *Hide*, and the query is
+     * already on screen.
+     */
     routeFetch();
 
     render(<ConversationThread orgId="o1" conversationId="c1" />);
 
-    // The product's central claim, made checkable rather than asserted: the
-    // answer names a finding, the finding names an execution, and the execution
-    // opens into the statement that produced the number.
-    const toggle = await screen.findByRole("button", { name: /Show the query behind this/ });
-    fireEvent.click(toggle);
-
+    expect(
+      await screen.findByRole("button", { name: /Hide the query behind this/ }),
+    ).toBeInTheDocument();
     expect(await screen.findByText(/SELECT count\(\*\) AS "order_count"/)).toBeInTheDocument();
     expect(screen.getByText("6214")).toBeInTheDocument();
   });
@@ -761,8 +768,11 @@ describe("an answer keeps its evidence when the next question is asked (B-106)",
     // One per answer. Anchored on the count rather than on presence, because
     // presence passed against the broken screen — the newest answer always had
     // one.
+    // `the query behind this`, not `Show …`: a lone citation now starts open and
+    // its control reads *Hide* (D-047). Matching only "Show" would count zero
+    // and report the product as broken when it is not.
     expect(
-      await screen.findAllByRole("button", { name: /Show the query behind this/ }),
+      await screen.findAllByRole("button", { name: /the query behind this/ }),
     ).toHaveLength(2);
   });
 

@@ -1,7 +1,7 @@
 # STATUS — data-agent build
 
-Current position: **Phase 13 — the chat product. WP13.1b in review; WP13.1a
-                  merged (#121).**
+Current position: **Phase 13 — the chat product. WP13.2 in review; WP13.1a
+                  (#121) and WP13.1b (#122) merged.**
                   Phases 0-11 done and signed off. **Phase 12 STOPPED AFTER
                   WP12.2 (D-043)** — WP12.3 and WP12.4 are deferred, not
                   cancelled. **There is no `v1.0.0` tag and there will not be one
@@ -17,15 +17,15 @@ Current position: **Phase 13 — the chat product. WP13.1b in review; WP13.1a
                   — #118 included, which carries migrations 0029 and 0030 — is
                   not deployed. See *"Deploying what is on main"* below before
                   dispatching.
-Next step:        **The owner's.** WP13.1a and WP13.1b together deliver the chat
-                  product the owner asked for on 2026-08-25, and the pieces
-                  explicitly held back are **system instructions, tone, model
-                  selection and the answer-card polish (B-046/047/048)** — named
-                  as next by the owner, not opened by this session.
-                  **What the owner should judge first is the rendered UI**: light
-                  mode's appearance and whether this reads as a chat product are
-                  the two things no test here can answer. The manual script is in
-                  #122.
+Next step:        **The owner's.** WP13.1a, WP13.1b and WP13.2 together deliver
+                  the chat product asked for on 2026-08-25, in the design the
+                  owner chose from two mockups. The pieces explicitly held back
+                  are **system instructions, tone, model selection and the
+                  answer-card polish (B-046/047/048)** — named as next by the
+                  owner, not opened by this session.
+                  **What the owner should judge is the rendered result.** The
+                  approved mockup is the reference, and the manual script is in
+                  the WP13.2 PR.
                   Two findings are filed and not fixed: **B-140** (the browser
                   suite is flaky on the Windows host — proven on `main`, so trust
                   CI over a red local run) and **B-141** (no organization
@@ -67,7 +67,15 @@ Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-25 by Claude Code (**WP13.1b — the chat shell, D-046.** The
+Last updated: 2026-08-25 by Claude Code (**WP13.2 — the design the owner chose,
+              D-047.** `design.md` rewritten first, then the code: warm paper, layered
+              depth, a terracotta accent, and a serif for the agent's own words. The
+              sidebar is fixed full height, the identity block cannot overlap, and the
+              thread lost its page title and Back button. Evidence and the trace fold
+              away and reveal on hover, with four rules keeping that a de-emphasis
+              rather than a gate; a caveat never folds. The approved mockup's accent
+              failed AA on the Send button and was corrected rather than shipped.
+              Previously: **WP13.1b — the chat shell, D-046.** The
               product opens in a chat: a collapsing sidebar, chat as the home, admin
               screens behind Settings, light as the default with dark a choice. No
               Python at all — the run and trace machinery is reused, not rewritten.
@@ -95,6 +103,110 @@ Last updated: 2026-08-25 by Claude Code (**WP13.1b — the chat shell, D-046.** 
               class it belongs to is now the first line of the operational-debt list)
 
 ---
+
+## WP13.2 — the design the owner chose (D-047)
+
+WP13.1b shipped the chat product against `design.md` as written. The owner
+looked at it, said it looked weird, and — the important part — said they were not
+sure `design.md`'s direction was what they wanted. **That is a different problem
+from a screen being wrong**: the binding document was the thing in question, so
+restyling against it would have been building more of what was being doubted.
+
+So: two static HTML mockups, same screen and same content, one applying
+`design.md` properly and one taking a different aesthetic. The owner chose the
+alternative and refined it over four rounds. `design.md` was rewritten **before
+any code**, because a binding document that trails the screens is one nobody
+trusts.
+
+### What the design now is
+
+Warm paper instead of cool grey. **Depth that is layered rather than dropped** —
+a hairline *and* a wide faint shadow, because a shadow alone is what made the old
+cards look like they were hovering. One terracotta accent instead of indigo.
+A **serif for the words the agent produced** and a sans for every piece of chrome,
+which is the change that does the most work: it separates what the machine said
+from the interface around it. A longer spacing scale, actually used.
+
+**Rule 4 is new and will be cited most: the content outranks the chrome.** It
+exists because the owner's last two rounds were the same complaint twice — the
+attribution row and the evidence bars were heavier than the answer they belonged
+to. Attribution is a 12px caption now with no fill and nothing at badge weight,
+and a run's ending is a coloured **word** with a dot beside it rather than a pill.
+
+### Three structural fixes, owed under either direction
+
+* The sidebar is **fixed and full height**, with only its chat list scrolling.
+  Sticky left it in the flow, so a long thread could still scroll it away.
+* The identity block is a `grid-template-columns: 32px minmax(0, 1fr)`, so the
+  avatar and the address cannot overlap at any width or any address length.
+* The thread lost its **page title and Back button**. In a chat product the
+  thread is the panel and the rail is the way back.
+
+### The working is folded away, and hover is not a gate
+
+Evidence and the trace are a quiet strip at the foot of an answer, faint until
+the response is hovered. Four rules make that a de-emphasis rather than a lock,
+and all four are required: `opacity` rather than `display: none`, so the control
+keeps its place in the tab order and its voice in a screen reader;
+`:focus-within` for a keyboard; `@media (hover: none)` for touch; and `[open]` on
+the element itself rather than on an ancestor via `:has()`, so an opened panel
+can never sit beneath an invisible summary. Touch has no hover, so the summaries
+are full 40px targets — quiet is the fill, not the size.
+
+**A caveat is never folded**, and that exception is the point. A limitation
+changes what the answer *means*; hiding the qualification while showing the claim
+is the defect B-133 and D-044 exist about.
+
+### Four things worth reading before the next UI change
+
+**The palette moved by value, not by name.** `globals.css` redefines `--bg`,
+`--fg`, `--primary` and `--space-N` in place and adds the new names beside them.
+A dozen CSS Modules consume the old spellings, and repainting the product by
+changing values is a far smaller and safer change than editing every file to
+learn new ones. The old names are marked as aliases and new code should not use
+them.
+
+**The approved mockup had an accessibility failure and it was corrected rather
+than shipped.** White on the mockup's `#c15f3c` is **4.23:1** — under AA for the
+14px text on the Send button. `--clay` is `#b55231`, which is 4.98:1 and visually
+the same terracotta. Every accent pair was measured in both modes; the lowest is
+4.77:1.
+
+**The chart ramp is untouched, deliberately.** It was validated against the *card
+surface*, and `--surface` is still `#ffffff`, so the validation still holds and
+re-running it would be theatre. One consequence is recorded rather than left to
+be rediscovered: rule 3's "a chart with one series uses the primary" now yields
+clay, which resembles slot 2's orange — accepted, because the two cannot appear
+in the same chart.
+
+**`design.md` had two pieces of drift and both are fixed.** It listed `--text-*`
+as tokens and no such token has ever existed in `globals.css`; that table is now
+labelled a specification. It also spelled the font tokens `--sans`/`--serif`, and
+the CSS calls them `--font-sans`/`--font-serif`. A script now checks every token
+the doc names against what `globals.css` defines, and it reports none missing.
+
+### Evidence
+
+* `make test.web` **178 passed**; `make lint.web`, `make typecheck.web` green.
+* **`make test.web.smoke` green from a clean stack** — the whole product in a
+  browser, real Postgres, the scripted model, against the new design.
+* `make test.web.e2e`: 13–16 of 16 per run, failures moving between tests every
+  run and never repeating. That is **B-140**, the Windows host flake proven on
+  `main`; CI is Linux and green.
+* Served, not merely written: after `rm -rf /app/.next` and a restart, the
+  served CSS carries `--paper`, `--clay`, `--font-serif` and both theme blocks,
+  the old `#f7f8fa` / `#101828` / `#eaecf0` are gone from it entirely, and the
+  chart ramp is intact in both modes.
+* No Python changed.
+
+**The one real e2e trap this found**, worth remembering: a closed `<details>`
+keeps its contents out of the accessibility tree, so a `getByRole` query for a
+control inside one finds **nothing**. The smoke's B-106 assertions used to count
+citation buttons and would have gone red against a perfectly working product.
+They count the disclosures instead now.
+
+**Not verified: the rendered result.** Whether it looks right is the owner's, and
+the mockup they approved is the reference.
 
 ## WP13.1b — the chat shell (D-046)
 

@@ -1,31 +1,174 @@
+/*
+ * The thread (D-047).
+ *
+ * **One column.** `.page` is the only width in here: the context strip, every
+ * turn and the composer are all its direct children, so nothing can be wider
+ * than anything else. The column width is also the reading measure, because the
+ * answer fills it — see docs/design.md, *On measure*.
+ */
+.page {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: var(--s10) var(--s6) var(--s12);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s11);
+}
+
+@media (min-width: 900px) {
+  .page {
+    padding-left: var(--s7);
+    padding-right: var(--s7);
+  }
+}
+
+.contextStrip {
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 20px;
+  margin-bottom: calc(-1 * var(--s8));
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s1) var(--s4);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-muted);
+}
+
+.chipDot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--clay);
+}
+
+.chipWarn {
+  composes: chip;
+  background: var(--warn-soft);
+  border-color: var(--warn-soft);
+  color: var(--warn);
+}
+
 .thread {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--s11);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.fromUser,
-.fromAgent {
-  padding: var(--space-4);
-  border-radius: var(--radius-lg);
-  max-width: 68ch;
-}
-
-/* The asker's own words sit right and tinted; the agent's sit left on a plain
-   surface. Position carries the distinction as well as colour, so it survives
+/* The asker's own words sit right in a tinted bubble; the agent's fill the
+   column. Position carries the distinction as well as colour, so it survives
    for anyone who cannot see the tint. */
-.fromUser {
-  align-self: flex-end;
-  background: var(--primary-soft);
+.turnYou {
+  display: flex;
+  justify-content: flex-end;
 }
 
-.fromAgent {
-  align-self: flex-start;
-  background: var(--surface);
-  box-shadow: var(--shadow-sm);
+.bubble {
+  max-width: 78%;
+  margin: 0;
+  background: var(--clay-soft);
+  border: 1px solid var(--clay-line);
+  border-radius: var(--radius-xl) var(--radius-xl) var(--s2) var(--radius-xl);
+  padding: var(--s5) var(--s6);
+  white-space: pre-wrap;
+}
+
+.turnAgentRow {
+  display: block;
+}
+
+.turnAgent {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s7);
+}
+
+/* Attribution is a caption. Nothing here has a fill, a pill, or a weight that
+   competes with the sentence beneath it (docs/design.md, rule 4). */
+.attribution {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  flex-wrap: wrap;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ink-subtle);
+}
+
+.agentMark {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border-radius: 5px;
+  background: var(--ink);
+  color: var(--paper);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.stateOk,
+.stateNeutral,
+.stateFailed {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+}
+
+.stateOk {
+  color: var(--ok);
+}
+
+/* A refusal and a partial answer are correct outcomes, not errors: muted, with
+   the word carrying the meaning (D-044). */
+.stateNeutral {
+  color: var(--ink-muted);
+}
+
+.stateFailed {
+  color: var(--danger);
+}
+
+.stateDot {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-full);
+  background: currentcolor;
+}
+
+.sep {
+  color: var(--line-strong);
+}
+
+.meta {
+  color: var(--ink-subtle);
+}
+
+/* The one place a serif is used: the words the agent itself produced. */
+.answerText {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 19px;
+  line-height: 32px;
+  letter-spacing: -0.003em;
+  color: var(--ink);
+  white-space: pre-wrap;
 }
 
 .messageText {
@@ -33,12 +176,110 @@
   white-space: pre-wrap;
 }
 
-.timestamp {
-  display: block;
-  margin-top: var(--space-2);
-  color: var(--fg-muted);
+/* --- The working ------------------------------------------------------------
+   Faint until the response is hovered, the way message actions behave in Claude
+   and ChatGPT — but hover is never the only way in. `opacity` rather than
+   `display: none` or `visibility: hidden`, so the control keeps its place in
+   the tab order and its voice in a screen reader the whole time it is faint,
+   and three other rules reveal it: `:focus-within` for a keyboard, `hover:
+   none` for touch, and `[open]` on the element itself — not on an ancestor via
+   `:has()` — so an opened panel can never sit beneath an invisible summary.
+   -------------------------------------------------------------------------- */
+.working {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+
+.working > * {
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.turnAgent:hover .working > *,
+.turnAgent:focus-within .working > *,
+.working > [open] {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .working > * {
+    opacity: 1;
+  }
+}
+
+.disclosure {
+  border-radius: var(--radius-md);
+}
+
+.disclosure[open] {
+  flex: 1 0 100%;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--lift);
+  overflow: hidden;
+}
+
+.summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  /* 40px, because `hover: none` above makes this strip the only route in on
+     touch, and design.md's target minimum applies to it like anything else.
+     Quiet is the fill, not the size. */
+  min-height: 40px;
+  padding: 0 var(--s3);
+  border-radius: var(--radius-md);
   font-size: 12px;
-  line-height: 16px;
+  font-weight: 600;
+  color: var(--ink-muted);
+  transition:
+    background 140ms ease,
+    color 140ms ease;
+}
+
+.summary::-webkit-details-marker {
+  display: none;
+}
+
+.summary:hover {
+  background: var(--inset);
+  color: var(--ink);
+}
+
+.disclosure[open] .summary {
+  background: var(--inset);
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+}
+
+.summaryLabel {
+  white-space: nowrap;
+}
+
+.summaryMeta {
+  color: var(--ink-subtle);
+  font-weight: 500;
+}
+
+.chev {
+  color: var(--ink-subtle);
+  font-size: 9px;
+  transition: transform 140ms ease;
+}
+
+.disclosure[open] .chev {
+  transform: rotate(90deg);
+}
+
+.disclosureBody {
+  padding: var(--s6) var(--s5) var(--s5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s5);
 }
 
 .step {
@@ -151,6 +392,33 @@
   padding-right: 0;
 }
 
+.composerWrap {
+  position: sticky;
+  bottom: 0;
+  padding: var(--s8) 0 var(--s6);
+  /* Fades the thread out behind the composer rather than cutting it off. */
+  background: linear-gradient(to bottom, rgb(0 0 0 / 0%), var(--paper) 30%);
+}
+
+.composerBox {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--lift-md);
+  padding: var(--s6) var(--s6) var(--s5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  transition:
+    box-shadow 140ms ease,
+    border-color 140ms ease;
+}
+
+.composerBox:focus-within {
+  box-shadow: var(--lift-lg);
+  border-color: var(--clay);
+}
+
 .composerLabel {
   display: block;
   margin-bottom: var(--space-2);
@@ -162,22 +430,26 @@
   text-transform: uppercase;
 }
 
+/* The box carries the border and the focus state, so the field inside it is
+   bare. Dropping its outline is only allowed because `.composerBox:focus-within`
+   above is a visible change — never remove one without a replacement. */
 .composer {
   width: 100%;
-  margin-bottom: var(--space-4);
-  padding: var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--fg);
+  border: 0;
+  background: transparent;
+  color: var(--ink);
   font: inherit;
-  resize: vertical;
+  line-height: 25px;
+  resize: none;
+  min-height: 56px;
 }
 
 .composer:focus-visible {
-  border-color: var(--primary);
-  outline: 3px solid var(--focus-ring);
-  outline-offset: 0;
+  outline: none;
+}
+
+.composer::placeholder {
+  color: var(--ink-subtle);
 }
 
 .composer:disabled {

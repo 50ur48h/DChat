@@ -3,23 +3,35 @@
 Binding for all UI, the way `architecture.md` is binding for the system. If a
 screen needs something not defined here, add it here first, in the same PR.
 
+**Rewritten 2026-08-25 (D-047).** The previous direction — cool greys, borderless
+cards floating on `#f7f8fa`, an indigo primary — was reviewed against two static
+mockups and replaced. What follows is the direction that was chosen. The
+accessibility rules and the chart ramp survived the change unaltered, and the
+sections that say so say why.
+
 ## The feel
 
-Simple, modern, soft. Light backgrounds, generous space, rounded cards that lift
-off the page with a soft shadow rather than a border. One friendly primary
-colour; soft pastel accents carry meaning, never decoration. Closer to a modern
-fintech app than to an enterprise console.
+Warm paper, layered depth, and an answer that is the calmest thing on the screen.
+Nothing is pure white or neutral grey: the page is warm off-white, surfaces sit
+on it in tints of the same warmth, and depth comes from a hairline *and* a wide
+faint shadow rather than from a shadow alone. One terracotta accent. A serif for
+the machine's own words and a sans for every piece of chrome around them.
 
-**Deliberately not:** dense grey tables, hairline borders everywhere, information
-crammed to the edges, or a UI that signals "internal tool".
+Closer to a considered reading application than to a dashboard.
 
-Three rules that decide most arguments:
+**Deliberately not:** cool grey, dense tables, borders everywhere, or an
+interface whose chrome is louder than its content.
+
+Four rules that decide most arguments:
 
 1. **Space is the layout.** Reach for spacing before borders, and for a border
    only when spacing cannot express the grouping.
-2. **Colour means something.** Grey is the default; a hue is a claim that this
-   thing has a state or a category. Never colour for interest.
+2. **Colour means something.** Warm grey is the default; a hue is a claim that
+   this thing has a state or a category. Never colour for interest.
 3. **One primary action per view.** Everything else is quieter.
+4. **The content outranks the chrome.** An answer's attribution, its evidence
+   controls and its trace must all be visually lighter than the sentence they
+   belong to. If a label competes with the thing it labels, the label is wrong.
 
 ## Tokens
 
@@ -30,37 +42,69 @@ token, never a raw hex value — a colour that appears in a component file is a 
 
 | Token | Light | Purpose |
 |---|---|---|
-| `--bg` | `#f7f8fa` | page background — never pure white, so cards can lift off it |
-| `--surface` | `#ffffff` | cards, inputs, menus |
-| `--surface-sunken` | `#f1f3f7` | wells, table headers, empty states |
-| `--fg` | `#101828` | primary text |
-| `--fg-muted` | `#667085` | secondary text, labels |
-| `--fg-subtle` | `#98a2b3` | placeholders, disabled |
-| `--border` | `#eaecf0` | hairlines, used sparingly |
-| `--primary` | `#5b5bd6` | the one friendly primary — indigo/violet |
-| `--primary-hover` | `#4a4ac4` | |
-| `--primary-soft` | `#eeeefc` | primary-tinted fills |
-| `--focus-ring` | `#c7c7f5` | 3px outline on focus-visible |
+| `--paper` | `#faf9f5` | page background — warm off-white |
+| `--rail` | `#f2f0e9` | the sidebar, a shade deeper than the page |
+| `--surface` | `#ffffff` | cards, panels, inputs, menus |
+| `--inset` | `#f6f4ee` | panel headers, wells, table headers, nested fills |
+| `--ink` | `#23211d` | primary text |
+| `--ink-muted` | `#6b6760` | secondary text, labels |
+| `--ink-subtle` | `#6f6a61` | captions, placeholders, the quietest chrome |
+| `--line` | `#e6e2d8` | hairlines |
+| `--line-strong` | `#d8d3c6` | the one border that should be noticed (the composer) |
 
-**Pastel accents** — for categories, roles and status. Each is a `-soft`
-background with a readable `-strong` foreground; never use `-soft` for text.
+`--ink-subtle` is only a shade lighter than `--ink-muted` on purpose. It is a
+*role* rather than a step down in contrast: both meet AA, because this system has
+no tier of text that is allowed to be hard to read.
+
+**The accent.** One hue, two jobs, and they are not interchangeable.
+
+| Token | Light | Purpose |
+|---|---|---|
+| `--clay` | `#b55231` | fills that carry white text — the primary button, the agent's mark |
+| `--clay-hover` | `#9d4529` | the same, hovered |
+| `--clay-deep` | `#9a4526` | the accent as **text** on paper — quiet buttons, links |
+| `--clay-soft` | `#f7ece6` | tinted fills: the question bubble |
+| `--clay-line` | `#efdfd5` | the border on a `--clay-soft` fill |
+| `--on-clay` | `#ffffff` | text on `--clay` |
+| `--focus-ring` | `#e0b6a3` | 3px outline on `:focus-visible` |
+
+**`--clay` is `#b55231` and not the brighter `#c15f3c` for one measurable
+reason**: white on `#c15f3c` is 4.23:1, which fails AA for the 14px text on the
+Send button. `#b55231` is 4.98:1 and is visually the same terracotta. A brighter
+accent may be used for a fill that carries no text — it must not become
+`--clay`.
+
+**Accents.** Still five pairs, re-tuned warm. Each is a `-soft` background with
+a readable `-strong` foreground; never use `-soft` for text.
 
 | Token pair | Hue | Used for |
 |---|---|---|
-| `--accent-mint-soft` / `-strong` | green | success, healthy, admin |
+| `--accent-mint-soft` / `-strong` | green | answered, healthy, verified, high confidence, admin |
 | `--accent-sky-soft` / `-strong` | blue | informational, contributor |
 | `--accent-lilac-soft` / `-strong` | violet | neutral category, reader |
-| `--accent-peach-soft` / `-strong` | amber | warning, pending |
+| `--accent-peach-soft` / `-strong` | amber | a caveat, pending, a partial answer |
 | `--accent-rose-soft` / `-strong` | red | error, denied, destructive |
 
 Semantic aliases (`--ok`, `--warn`, `--danger`) point at the `-strong` values so
 status code never names a hue directly.
 
-**Chart series** — a separate, fixed-order categorical ramp, `--chart-cat-1`
-through `--chart-cat-8`. It exists because rule 2 cuts both ways: the pastels
-above *mean* something — success, information, warning, error — so painting a
-category with them makes a rose bar read as a failure. A hue that means two
-things means neither.
+**Five rather than two, and the reason is the admin screens.** A thread only ever
+uses mint and peach, and it would be tempting to shrink the set to those. Roles
+and data-source statuses on the members, sources and definitions screens are
+*categories* that must stay distinguishable, and the chart ramp cannot serve them
+— its hues mean "series 1, series 2", which is a different claim. Every
+`-strong` is AA on its own `-soft` and on `--paper`, in both modes.
+
+A refusal is **not** an error and gets no red: `could not answer` is a correct
+outcome and is rendered in `--ink-muted` with the word doing the work (D-044).
+Red is reserved for a run that *failed* and for destructive confirmation.
+
+**Chart series** — unchanged, and unchanged deliberately.
+
+The eight-slot categorical ramp and its four rules are exactly as they were. It
+was validated against the **card surface**, and `--surface` is still `#ffffff` in
+light — so the validation still holds and re-running it would be theatre. Slots,
+values, dark column and rules all stand:
 
 | Slot | Hue | Light | Dark |
 |---|---|---|---|
@@ -73,60 +117,97 @@ things means neither.
 | 7 | blue | `#2a78d6` | `#3987e5` |
 | 8 | red | `#e34948` | `#e66767` |
 
-Four rules, none of them taste:
-
 1. **Fixed order, never cycled.** Slot 8 is the cap the server enforces
    (`charts.MAX_SERIES`); a ninth series would repeat slot 1, and two series
    wearing one colour is a chart that lies. Past eight the honest answer is a
    filter, a facet, or the table.
 2. **Colour follows the entity, not its rank.** A filter that removes a series
    must not repaint the survivors.
-3. **A chart with one series uses `--primary`**, not slot 1 — the categorical
-   range applies only where colour carries a split. Colour for a lone series
-   would be decoration, which rule 2 above forbids.
+3. **A chart with one series uses `--clay`**, not slot 1 — the categorical range
+   applies only where colour carries a split.
 4. **Validated as a set, not chosen.** Both columns pass lightness band, chroma
    floor, colour-vision separation on adjacent pairs and normal-vision
-   separation, against the card surface in their own mode. Light slots 3, 4 and
-   5 fall below 3:1 contrast on white; the legend and the always-available
-   result table are what relieve that, so a chart must never carry identity by
-   colour alone. Re-run the check before changing any value here.
+   separation, against the card surface in their own mode. Light slots 3, 4 and 5
+   fall below 3:1 contrast on white; the legend and the always-available result
+   table are what relieve that, so a chart must never carry identity by colour
+   alone. Re-run the check before changing any value here.
 
-The dark column is the same eight hues stepped for the dark surface, not a
-second palette. Slot 1 is a shade below `--primary` there, because the dark
-primary sits just outside the lightness band the set was validated in.
+**One known adjacency, accepted.** Rule 3 now points at `--clay` (`#b55231`),
+which sits near slot 2's orange. They cannot appear in the same chart — rule 3
+applies only when there is no split, and slot 2 only exists when there is — so
+this is a resemblance between two charts rather than a collision inside one.
+Noted so nobody re-derives it as a bug.
 
 ### Spacing
 
-A 4px scale: `--space-1` 4px · `-2` 8px · `-3` 12px · `-4` 16px · `-5` 24px ·
-`-6` 32px · `-7` 48px · `-8` 64px. Nothing between steps.
+A 4px scale, longer than the previous one because generous spacing is most of
+what makes this direction work:
 
-Card padding is `--space-5`; card-to-card gap `--space-4`; section gap
-`--space-7`. Page gutter `--space-5`, growing to `--space-7` above 768px.
+`--s1` 4 · `--s2` 8 · `--s3` 12 · `--s4` 16 · `--s5` 20 · `--s6` 24 ·
+`--s7` 32 · `--s8` 40 · `--s9` 48 · `--s10` 64 · `--s11` 80 · `--s12` 96
+
+Nothing between steps. Defaults: panel padding `--s5`–`--s7`; between turns in a
+thread `--s11`; between the parts of one answer `--s7`; page gutter `--s6`,
+growing to `--s7` above 900px.
 
 ### Radius and shadow
 
-`--radius-sm` 8px (inputs, badges) · `--radius-md` 12px (buttons) ·
-`--radius-lg` 16px (cards) · `--radius-full` 999px (pills, avatars).
+`--radius-sm` 8px (badges, code) · `--radius-md` 12px (buttons, rows) · `--radius-lg` 18px
+(panels) · `--radius-xl` 22px (the composer, the question bubble, an opened evidence
+panel) · `--radius-full` 999px.
 
-`--shadow-sm` for resting cards, `--shadow-md` on hover/raised, `--shadow-none`
-when a card sits inside another surface. Shadows are soft and low-contrast:
-large blur, small offset, never a hard drop.
+**Depth is layered, not dropped.** Every raised surface carries a 1px `--line`
+*and* a shadow. The border does the near work and the shadow does the far work;
+a shadow alone reads as floating, which is the previous direction's look.
+
+`--lift` resting · `--lift-md` hovered, or a surface that should feel closer ·
+`--lift-lg` the composer in focus and an opened evidence panel.
 
 ### Typography
 
-System font stack — no webfont, because downloading one at build time makes
-`docker build` depend on a third-party CDN (settled in WP0.3).
+System stacks only — no webfont, because downloading one at build time makes
+`docker build` depend on a third-party CDN (settled in WP0.3, and re-confirmed by
+the owner on 2026-08-25 for the serif below).
 
-| Token | Size / line-height / weight | Use |
+- `--font-sans` — `ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, …`
+- `--font-serif` — `"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, …`
+- `--font-mono` — `ui-monospace, SFMono-Regular, Menlo, Consolas, …`
+
+**The serif has exactly one job: the words the agent itself produced.** An
+answer's prose is set in `--font-serif`; everything else on the screen — labels,
+buttons, badges, table cells, the question you typed, the evidence, the trace —
+is `--font-sans`. The split is what separates *what the machine said* from the
+interface around it, and it stops being useful the moment it is decorative.
+A serif heading, a serif label or a serif empty-state is a bug.
+
+**The serif is a system stack and therefore varies.** Windows resolves it to
+Palatino Linotype, macOS to Iowan Old Style. That is accepted: a webfont is the
+alternative and it costs a build-time network dependency. Revisit only with
+evidence from a real screen, and as a DECISIONS entry.
+
+**These are a specification, not CSS variables.** The previous version of this
+table listed them as `--text-*` tokens, and no such token has ever existed in
+`globals.css` — components have always written the numbers. Corrected here rather
+than inventing seven tokens nothing would consume.
+
+| Role | Size / line-height / weight | Use |
 |---|---|---|
-| `--text-display` | 32 / 40 / 600 | page title, one per view |
-| `--text-title` | 20 / 28 / 600 | card and section titles |
-| `--text-body` | 15 / 24 / 400 | default |
-| `--text-small` | 13 / 20 / 400 | secondary detail |
-| `--text-label` | 12 / 16 / 600, `0.04em`, uppercase | field labels, card eyebrows |
+| answer | 19 / 32 / 400, `--font-serif` | an answer's own prose |
+| display | 28 / 36 / 600 | page title, one per view |
+| title | 18 / 26 / 600 | card and section titles |
+| body | 15 / 24 / 400 | default |
+| small | 13 / 20 / 400 | secondary detail |
+| caption | 12 / 18 / 400 | attribution, the quietest chrome |
+| label | 11 / 16 / 700, `0.07em`, uppercase | field labels, panel eyebrows |
 
-Long-form text caps at ~68 characters. Numbers in tables use
-`font-variant-numeric: tabular-nums` so columns align.
+Numbers in tables use `font-variant-numeric: tabular-nums`.
+
+**On measure.** A thread's column width *is* its reading measure, because the
+composer, the answer and the evidence all share one width (see **The thread**
+below). At the answer size the column tops out around 936px before a line passes
+~95 characters. That is long by convention and acceptable *here*, where an answer
+is a sentence or two; it would be the wrong call for a screen that renders
+paragraphs. A screen that does should cap its prose and accept the ragged edge.
 
 ## Components
 
@@ -134,53 +215,113 @@ Primitives live in `apps/web/src/components/ui/`, one file each, styled with a
 co-located CSS Module. They are the only place a token is consumed for layout
 chrome; feature components compose them.
 
-- **Card** — `--surface`, `--radius-lg`, `--shadow-sm`, padding `--space-5`. No
-  border by default. `tone="sunken"` for nested surfaces.
-- **Button** — `primary` (filled), `secondary` (surface + hairline), `ghost`
-  (transparent), `danger` (rose). Height 40px, radius `--radius-md`, padding
-  `0 --space-4`, weight 600. Disabled drops to 50% opacity and keeps its size.
-- **Input** — height 40px, `--surface`, 1px `--border`, radius `--radius-sm`.
-  Focus swaps the border to `--primary` and adds a 3px `--focus-ring`. A label
-  is `--text-label`; an error message is `--danger` at `--text-small`.
-- **Badge** — pill, `-soft` background with `-strong` text, `--text-small`,
-  padding `--space-1 --space-3`. Roles and statuses use it and nothing else.
-- **PageHeader** — display title, optional muted subtitle, optional right slot
-  for the single primary action.
+- **Card** — `--surface`, `--radius-lg`, 1px `--line`, `--lift`, padding `--s5`.
+  A border **and** a shadow; see *Radius and shadow*. `tone="sunken"` swaps the
+  fill to `--inset` and drops the shadow for a surface nested inside another.
+- **Button** — `primary` (clay fill, white text), `secondary` (surface + `--line`),
+  `ghost` (transparent), `danger` (red). Height 40px, radius `--radius-md`, weight 600.
+  Disabled drops to 50% opacity and keeps its size.
+- **Input** — height 40px, `--surface`, 1px `--line`, radius `--radius-sm`. Focus
+  swaps the border to `--clay` and adds the 3px `--focus-ring`.
+- **Badge** — pill, a `-soft` fill with its `-strong` text, at the small size.
+  **Used sparingly.** A badge is for a state a reader must not miss, or for a
+  category on an admin screen. It is not for attribution — see below.
+- **PageHeader** — display title, optional muted subtitle, optional right slot.
+  **Not used inside a thread**; see *The thread*.
 
-### The shell (WP13.1b)
+### The shell
 
 Every screen inside an organization renders inside `components/shell/`.
 
-- **AppShell** — a flex row: the rail, then the page. The page gets
-  `min-width: 0` so wide content (a result table, a SQL block) scrolls inside its
-  own container instead of pushing the rail off screen. Below 768px the two stack
-  and the rail gives its height back.
-- **Sidebar** — `--surface-sunken`, 260px, sticky full height, collapsing to a
-  60px icon rail. The one hairline in the design that earns its place is its
-  right edge, because the two surfaces are close in value. New chat at the top,
-  chats in the middle, the person and Settings at the bottom. Row controls
-  (rename, archive) appear on `:hover` **and** `:focus-within` — hover alone
-  would make them unreachable without a pointer.
+- **AppShell** — the rail, then the page. The page gets `min-width: 0` so wide
+  content scrolls inside its own container instead of pushing the rail off
+  screen. Below 768px the two stack.
+- **Sidebar** — `--rail`, 272px, **fixed and full height**. It is not part of the
+  page's scroll: `position: fixed`, `100dvh`, a flex column whose head, New chat
+  and footer are `flex: 0 0 auto`, and whose chat list is the only region with
+  `overflow-y: auto`. Nothing the page does can scroll the rail away.
+  - Row controls (rename, archive) appear on `:hover` **and** `:focus-within`.
+  - The current chat is marked by weight, elevation **and** a 3px clay rule —
+    never by colour alone.
   - The collapsed/expanded choice persists per browser via `lib/persisted.ts`.
-- **Destructive wording is the true word.** The control that puts a chat away
-  says **Archive**, and its confirmation says the chat can be brought back,
-  because that is what happens (D-039). A trash icon that quietly archived would
-  be a control whose word does not match its action — the same defect as a badge
-  reading *answered* on a refusal. There is no delete in this product; if one is
-  ever added it needs a DECISIONS entry, not an icon.
-- **Unbuilt sections are shown as unbuilt.** A section that is planned and not
-  built carries a `Coming soon` badge and prose, and **no controls at all** — not
-  a disabled select, not a dead toggle. A control that looks operable and does
-  nothing is a promise the product does not keep.
+- **Identity block** — bottom-left: a 32px avatar and the person's address in a
+  `grid-template-columns: 32px minmax(0, 1fr)` with the address truncating. A
+  grid, not a flex row with a margin, because the two must not be able to overlap
+  at any width or any address length.
+
+### The thread
+
+- **One column.** The context strip, the question, the answer, the evidence and
+  the composer are all the same width — every one a direct child of the same
+  container. A left gutter for an avatar is what broke this before: it inset the
+  prose while the composer stayed full width, and the mismatch was visible.
+- **No page title and no Back button inside a thread.** The thread *is* the
+  panel and the rail is the way back. A `PageHeader` here is a leftover from when
+  a conversation was a standalone page.
+- **Question** — a `--clay-soft` bubble with a `--clay-line` border, aligned
+  right, max 78% of the column.
+- **Answer** — an attribution line, the prose, then whatever qualifies it.
+
+### Attribution, and the rule it exists to enforce
+
+The line above an answer is a **caption**: the caption size, `--ink-subtle`, a
+single row, an 18px agent mark. It carries the run's ending and its grounding.
+
+**Nothing in it may be badge-sized.** This is rule 4 made concrete: an
+`answered` pill in `--ok-soft` above a 19px sentence draws the eye to the label
+instead of the answer. The state is set in `--ok` text with a 5px dot beside
+it — the **word** carries the meaning and the dot is a second cue, so a refusal
+still reads as a refusal with colour ignored.
+
+### The working, and how it is revealed
+
+Everything that explains an answer — the method, the query, the rows it returned,
+the steps taken — lives in `<details>` disclosures in a quiet strip at the foot
+of the answer. `<details>`, so it works with no JavaScript and keyboards get it
+free. Closed, they are two 40px text actions in a row; opened, the one you opened
+becomes a full-width panel beneath (`flex: 1 0 100%`).
+
+The strip is **faint until the response is hovered**, the way message actions
+behave in Claude and ChatGPT. Four rules make that a de-emphasis rather than a
+gate, and all four are required:
+
+1. `opacity`, never `display: none` or `visibility: hidden` — the control keeps
+   its place in the tab order and its voice in a screen reader while it is faint.
+2. `:focus-within` on the response reveals it, so a keyboard user sees it before
+   they reach it.
+3. `@media (hover: none)` shows it always, because on touch there is no hover and
+   this strip is the only route in.
+4. `[open]` on the element itself — not on an ancestor via `:has()` — so an
+   opened panel can never sit beneath an invisible summary.
+
+Because rule 3 makes this the only touch affordance, the summaries are **40px
+tall** like any other target. Quiet is the fill, not the size.
+
+**A caveat is not working-out and is never folded away.** A limitation changes
+what the answer *means*; a reader who opens nothing must still see it. Hiding the
+qualification while showing the claim is the defect this product exists to avoid
+(B-133, D-044). Caveats render in the open, in `--warn-soft`, above the strip.
+
+**The accepted cost**, recorded so it is not rediscovered as a surprise: a
+first-time reader may not notice that evidence exists. That is the price of a
+focused answer, and the cheap retreat if it proves wrong is a resting opacity
+around 40% rather than 0.
 
 ## Accessibility, non-negotiable
 
+Unchanged in force, and the figures below are measured against the new palette
+rather than carried over.
+
 - Every interactive element has a visible `:focus-visible` ring; never
   `outline: none` without a replacement.
-- Body and muted text meet WCAG AA on their backgrounds (`--fg-muted` on
-  `--surface` is 4.6:1). Pastel `-soft` fills are backgrounds only.
-- Colour never carries meaning alone — a status badge has a word in it.
-- Targets are at least 40×40px.
+- Body and muted text meet WCAG AA. On `--paper`: `--ink` 15.3:1, `--ink-muted`
+  5.3:1, `--ink-subtle` 5.1:1, `--clay-deep` 6.1:1, `--ok` 5.9:1, `--warn`
+  5.1:1. White on `--clay` is 4.98:1. Every accent `-strong` is at least 4.7:1
+  on its own `-soft` fill.
+- `-soft` fills are backgrounds only. Never text.
+- Colour never carries meaning alone — a status has a word, the current chat has
+  weight and elevation, a chart has a legend and a table.
+- Targets are at least 40×40px, including a control that is visually faint.
 - `prefers-reduced-motion` disables transitions.
 
 ## Dark mode
@@ -191,10 +332,16 @@ is no `prefers-color-scheme` rule anywhere in `globals.css`, deliberately, so
 there is exactly one route into the dark values and no combination of media
 query and attribute that could disagree.
 
-Surfaces lift instead of darkening (`--bg` `#0e1014`, `--surface` `#171a21`), and
-pastels lose saturation rather than gaining it. Both roots also set
-`color-scheme`, so the browser paints its own furniture — scrollbars, form
-controls, the canvas behind the page — to match.
+Dark is the same warmth, inverted — not a cool grey theme with the colours
+swapped. `--paper` `#171614`, `--rail` `#1d1b18`, `--surface` `#201e1b`,
+`--inset` `#26231f`; `--ink` `#f2efe8`, `--ink-muted` `#a8a299`, `--ink-subtle`
+`#948e84`; `--line` `#33302b`. The accent lightens rather than saturates:
+`--clay` `#d98b66` with `--on-clay` `#171614`. Measured on `--paper`: `--ink`
+15.8:1, `--ink-muted` 7.1:1, `--ink-subtle` 5.6:1, `--clay` 6.8:1, `--ok`
+8.5:1, `--warn` 9.2:1.
+
+Both roots set `color-scheme`, so the browser paints its own furniture —
+scrollbars, form controls, the canvas behind the page — to match.
 
 The attribute is written by `lib/theme.tsx` and, before first paint, by a small
 inline script in `app/layout.tsx`. **That script is the one place this app
@@ -214,4 +361,5 @@ saves, and B-004 already chose CSS Modules over Tailwind for this codebase.
 **Adding any UI library — Radix, MUI, shadcn, Chakra — requires a DECISIONS entry
 first.** Complex behaviour that genuinely warrants one (a combobox, a date
 picker, a focus-trapped dialog) is the honest trigger; wanting a nicer button
-is not.
+is not. Note that the disclosure pattern above is a native `<details>` and needed
+no library at all.
