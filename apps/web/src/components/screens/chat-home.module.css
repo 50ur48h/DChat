@@ -1,0 +1,102 @@
+/*
+ * The empty chat. Space is the layout here more than anywhere else in the
+ * product: one question, centred, with nothing else competing for attention.
+ */
+
+.home {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: var(--space-5);
+}
+
+.middle {
+  width: 100%;
+  max-width: 680px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.greeting {
+  font-size: 32px;
+  line-height: 40px;
+  font-weight: 600;
+  color: var(--fg);
+  text-align: center;
+}
+
+.source {
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 20px;
+  text-align: center;
+}
+
+.composer {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.composer:focus-within {
+  box-shadow: var(--shadow-md);
+}
+
+.input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 24px;
+  resize: vertical;
+  min-height: 72px;
+}
+
+/* The card carries the focus ring, so the textarea inside it does not draw a
+   second one — but only because `.composer:focus-within` above is a visible
+   change. Never remove an outline without a replacement (design.md). */
+.input:focus-visible {
+  outline: none;
+}
+
+.input::placeholder {
+  color: var(--fg-subtle);
+}
+
+.input:disabled {
+  opacity: 0.5;
+}
+
+.composerActions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.error {
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 20px;
+  text-align: center;
+}
+
+@media (max-width: 768px) {
+  .home {
+    /* The rail sits above the page at this width, so a full viewport height
+       here would push the composer off the bottom of the screen. */
+    min-height: auto;
+    padding: var(--space-5) var(--space-4);
+  }
+
+  .greeting {
+    font-size: 24px;
+    line-height: 32px;
+  }
+}

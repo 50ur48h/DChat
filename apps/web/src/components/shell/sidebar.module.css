@@ -1,0 +1,265 @@
+/*
+ * The chat rail. Tokens only — a raw hex here is a bug (docs/design.md).
+ *
+ * The rail sits on `--surface-sunken` so the conversation beside it, on
+ * `--bg` with cards lifting off it, reads as the thing you are looking at.
+ * Space does the separating; there is one hairline, where the rail meets the
+ * page, and it earns its place because the two surfaces are close in value.
+ */
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  width: 260px;
+  flex: 0 0 260px;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  background: var(--surface-sunken);
+  border-right: 1px solid var(--border);
+  padding: var(--space-4);
+  gap: var(--space-3);
+}
+
+.railCollapsed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 60px;
+  flex: 0 0 60px;
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  background: var(--surface-sunken);
+  border-right: 1px solid var(--border);
+  padding: var(--space-4) var(--space-2);
+  gap: var(--space-2);
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-height: 40px;
+}
+
+.org {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 40x40 minimum target, per design.md's accessibility rules. */
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: inherit;
+  font-size: 16px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.iconButton:hover {
+  background: var(--surface);
+  color: var(--fg);
+}
+
+.newChat {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 40px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--fg);
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+}
+
+.newChat:hover {
+  box-shadow: var(--shadow-md);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  overflow-y: auto;
+  flex: 1 1 auto;
+  margin: 0 calc(-1 * var(--space-2));
+  padding: 0 var(--space-2);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  border-radius: var(--radius-md);
+  min-height: 40px;
+  padding: 0 var(--space-2);
+}
+
+.item:hover {
+  background: var(--surface);
+}
+
+.itemCurrent {
+  background: var(--primary-soft);
+}
+
+.itemLink {
+  flex: 1 1 auto;
+  color: var(--fg);
+  text-decoration: none;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: var(--space-2) 0;
+}
+
+/* Revealed on hover or keyboard focus — never on hover alone, or the controls
+   would be unreachable without a pointer. */
+.itemActions {
+  display: none;
+  gap: var(--space-1);
+}
+
+.item:hover .itemActions,
+.item:focus-within .itemActions {
+  display: flex;
+}
+
+.itemAction {
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.itemAction:hover {
+  color: var(--fg);
+  background: var(--surface-sunken);
+}
+
+.renameInput {
+  width: 100%;
+  height: 32px;
+  border: 1px solid var(--primary);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 14px;
+  padding: 0 var(--space-2);
+}
+
+.confirm {
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  box-shadow: var(--shadow-sm);
+}
+
+.confirmText {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--fg-muted);
+  margin-bottom: var(--space-3);
+}
+
+.confirmActions {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.muted {
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 20px;
+  padding: var(--space-2);
+}
+
+.error {
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 20px;
+  padding: var(--space-2);
+}
+
+.foot {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
+}
+
+.footLink {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 40px;
+  justify-content: center;
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+}
+
+.footLink:hover {
+  background: var(--surface);
+}
+
+.person {
+  color: var(--fg);
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.footHint {
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+/* Stacked above the page below the breakpoint (see app-shell.module.css), so
+   the rail must give its height back and stop being sticky — a 100vh sticky
+   block on top of the page would leave nothing else on screen. */
+@media (max-width: 768px) {
+  .rail,
+  .railCollapsed {
+    width: 100%;
+    flex: 0 0 auto;
+    height: auto;
+    max-height: 50vh;
+    position: static;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .railCollapsed {
+    flex-direction: row;
+    align-items: center;
+  }
+}

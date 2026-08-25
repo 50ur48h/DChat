@@ -1,0 +1,27 @@
+/*
+ * Rail plus page. The rail is `position: sticky` in its own module, so the
+ * page scrolls under a rail that stays put.
+ */
+
+.shell {
+  display: flex;
+  align-items: flex-start;
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.main {
+  flex: 1 1 auto;
+  /* `min-width: 0` so a wide child — a result table, a long SQL block — scrolls
+     inside its own container instead of stretching the flex item and pushing
+     the rail off the screen. */
+  min-width: 0;
+}
+
+/* Below the breakpoint the rail would take half the width, so it goes above
+   the page rather than beside it and gives its height back. */
+@media (max-width: 768px) {
+  .shell {
+    flex-direction: column;
+  }
+}

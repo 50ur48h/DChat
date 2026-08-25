@@ -83,7 +83,73 @@ export interface StubApi {
  */
 export const STUB_PORT = 4111;
 
+/**
+ * One server per worker process, shared by every spec file in it.
+ *
+ * **Two files each starting their own on a fixed port is the failure this
+ * module's header already warned about**, and WP13.1b walked straight into it:
+ * adding `shell.spec.ts` beside `conversation.spec.ts` meant the first file's
+ * `close()` raced the second file's `listen()`, the browser's keep-alive
+ * connections kept the port from freeing promptly, and the loser showed up as a
+ * page that never signed in — **in a different test on every run**, which is
+ * what made it read as flakiness rather than as a bug.
+ *
+ * So `startStubApi` hands back the running instance if there is one, and
+ * `close()` only really closes when the last holder has let go. Every caller
+ * keeps its existing `beforeAll`/`afterAll` and none of them has to know.
+ */
+let shared: Promise<StubApi> | null = null;
+
 export async function startStubApi(port: number = STUB_PORT): Promise<StubApi> {
+  shared ??= bindStubApi(port).then((api) => ({
+    ...api,
+    calls: api.calls,
+    /**
+     * Deliberately does not close.
+     *
+     * Reference counting was tried and does not help: spec files run one after
+     * another, so the first file's `afterAll` fires *before* the second file's
+     * `beforeAll` and the count reaches zero between them — which is the same
+     * unbind/rebind race by a longer route. The server instead lives as long as
+     * the worker process, and the operating system reclaims the port when that
+     * exits. Nothing leaks beyond the run.
+     */
+    close: async () => {},
+  }));
+  return shared;
+}
+
+/**
+ * Bind, retrying briefly on a port that has not been released yet.
+ *
+ * **Playwright restarts a worker after a test fails**, and the replacement can
+ * reach `listen` while the previous process's socket is still in `TIME_WAIT`.
+ * Without this, one genuine failure turns into a cascade of unrelated ones in
+ * the next file — which is precisely the "nowhere near the cause" symptom this
+ * module's header warns about.
+ */
+async function bindWithRetry(server: Server, port: number): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onError = (error: NodeJS.ErrnoException) => reject(error);
+        server.once("error", onError);
+        server.listen(port, "127.0.0.1", () => {
+          server.removeListener("error", onError);
+          resolve();
+        });
+      });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "EADDRINUSE" || Date.now() > deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+}
+
+async function bindStubApi(port: number): Promise<StubApi> {
   let asked = false;
   let runPolls = 0;
   const calls: string[] = [];
@@ -311,6 +377,59 @@ data: ${body}
       return;
     }
 
+    // The database this organization answers from (D-045). The chat home and
+    // Settings both read it; without it they would report a failure instead of
+    // a composer.
+    if (url.includes("/active-data-source")) {
+      send(200, {
+        data_source_id: "66666666-6666-6666-6666-666666666666",
+        data_source_name: "Demo",
+      });
+      return;
+    }
+
+    /**
+     * The **list**, which the sidebar reads — an array, not the single object
+     * the catch-all below returns.
+     *
+     * Matched before it and anchored on the end of the path, because
+     * `/conversations` is a prefix of `/conversations/{id}` and the looser test
+     * would answer both with the wrong shape. `api.conversations()` validates
+     * `every(isConversation)`, so the wrong shape is an error banner in the rail
+     * rather than a silent oddity.
+     */
+    if (/\/conversations(\?|$)/.test(url)) {
+      // Starting a chat posts to the same path the list is read from, and answers
+      // with the one conversation it made — not with a list. Without this the
+      // new-chat flow parses an array as a conversation and fails its guard.
+      if (method === "POST") {
+        send(201, {
+          id: CONVERSATION,
+          title: null,
+          created_at: "2026-08-15T09:00:00Z",
+          message_count: 0,
+          last_run_id: null,
+          data_source_id: "66666666-6666-6666-6666-666666666666",
+          data_source_name: "Demo",
+          archived_at: null,
+        });
+        return;
+      }
+      send(200, [
+        {
+          id: CONVERSATION,
+          title: QUESTION,
+          created_at: "2026-08-15T09:00:00Z",
+          message_count: asked ? 1 : 0,
+          last_run_id: asked ? RUN : null,
+          data_source_id: "66666666-6666-6666-6666-666666666666",
+          data_source_name: "Demo",
+          archived_at: null,
+        },
+      ]);
+      return;
+    }
+
     if (url.includes("/conversations")) {
       send(200, {
         id: CONVERSATION,
@@ -332,7 +451,7 @@ data: ${body}
     send(404, { detail: `stub has no route for ${url}` });
   });
 
-  await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
+  await bindWithRetry(server, port);
   const address = server.address();
   if (address === null || typeof address === "string") {
     throw new Error("the stub API did not bind a port");

@@ -82,51 +82,69 @@
   --font-sans:
     ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0e1014;
-    --surface: #171a21;
-    --surface-sunken: #1e222b;
-    --fg: #f2f4f7;
-    --fg-muted: #98a2b3;
-    --fg-subtle: #667085;
-    --border: #262b35;
+/*
+ * **Dark is opt-in, not inherited from the operating system** (D-046).
+ *
+ * This block used to be `@media (prefers-color-scheme: dark)`, which made the
+ * OS the decision-maker and meant a person on a dark desktop had never seen the
+ * light design at all — the one this product is actually designed in, and the
+ * one `docs/design.md` describes. Light is the default now and the only way into
+ * dark is an explicit choice, stored per browser and re-applied before first
+ * paint by the script in `layout.tsx`.
+ *
+ * The selector is the attribute alone, so there is exactly one route into these
+ * values and no combination of media query and attribute that could disagree.
+ */
+[data-theme="dark"] {
+  --bg: #0e1014;
+  --surface: #171a21;
+  --surface-sunken: #1e222b;
+  --fg: #f2f4f7;
+  --fg-muted: #98a2b3;
+  --fg-subtle: #667085;
+  --border: #262b35;
 
-    --primary: #8b8bf0;
-    --primary-hover: #a0a0f5;
-    --primary-soft: #23233a;
-    --on-primary: #0e1014;
-    --focus-ring: #4a4a8f;
+  --primary: #8b8bf0;
+  --primary-hover: #a0a0f5;
+  --primary-soft: #23233a;
+  --on-primary: #0e1014;
+  --focus-ring: #4a4a8f;
 
-    /* The same eight hues stepped for the dark surface, not a second palette.
-       Slot 1 is a shade below `--primary` here: the dark primary sits just
-       outside the lightness band these were validated in. */
-    --chart-cat-1: #7a7ae6;
-    --chart-cat-2: #d95926;
-    --chart-cat-3: #199e70;
-    --chart-cat-4: #c98500;
-    --chart-cat-5: #d55181;
-    --chart-cat-6: #008300;
-    --chart-cat-7: #3987e5;
-    --chart-cat-8: #e66767;
+  /* The same eight hues stepped for the dark surface, not a second palette.
+     Slot 1 is a shade below `--primary` here: the dark primary sits just
+     outside the lightness band these were validated in. */
+  --chart-cat-1: #7a7ae6;
+  --chart-cat-2: #d95926;
+  --chart-cat-3: #199e70;
+  --chart-cat-4: #c98500;
+  --chart-cat-5: #d55181;
+  --chart-cat-6: #008300;
+  --chart-cat-7: #3987e5;
+  --chart-cat-8: #e66767;
 
-    /* Pastels lose saturation in the dark rather than gaining it */
-    --accent-mint-soft: #12261e;
-    --accent-mint-strong: #6ee7b7;
-    --accent-sky-soft: #12203a;
-    --accent-sky-strong: #93c5fd;
-    --accent-lilac-soft: #23233a;
-    --accent-lilac-strong: #c4b5fd;
-    --accent-peach-soft: #2b2013;
-    --accent-peach-strong: #fcd34d;
-    --accent-rose-soft: #2e1618;
-    --accent-rose-strong: #fca5a5;
+  /* Pastels lose saturation in the dark rather than gaining it */
+  --accent-mint-soft: #12261e;
+  --accent-mint-strong: #6ee7b7;
+  --accent-sky-soft: #12203a;
+  --accent-sky-strong: #93c5fd;
+  --accent-lilac-soft: #23233a;
+  --accent-lilac-strong: #c4b5fd;
+  --accent-peach-soft: #2b2013;
+  --accent-peach-strong: #fcd34d;
+  --accent-rose-soft: #2e1618;
+  --accent-rose-strong: #fca5a5;
 
-    --shadow-sm: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 24%);
-    --shadow-md: 0 2px 4px rgb(0 0 0 / 32%), 0 12px 28px rgb(0 0 0 / 36%);
-  }
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 24%);
+  --shadow-md: 0 2px 4px rgb(0 0 0 / 32%), 0 12px 28px rgb(0 0 0 / 36%);
+
+  /* Tells the browser to paint its own furniture — scrollbars, form controls,
+     the canvas behind the page — in dark. Without it a dark page keeps a
+     white scrollbar and a light date picker. */
+  color-scheme: dark;
 }
 
 * {

@@ -1,0 +1,48 @@
+.facts {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-4);
+}
+
+.facts dt {
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.facts dd {
+  margin: 0;
+  color: var(--fg);
+  font-size: 14px;
+  line-height: 24px;
+}
+
+.note {
+  display: block;
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.muted {
+  color: var(--fg-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.error {
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+@media (max-width: 768px) {
+  .facts {
+    grid-template-columns: 1fr;
+    gap: var(--space-1) 0;
+  }
+}
