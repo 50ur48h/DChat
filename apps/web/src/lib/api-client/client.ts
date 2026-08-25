@@ -13,6 +13,7 @@ import {
   isAccepted202,
   isCardHit,
   isCatalog,
+  isActiveDataSource,
   isConversation,
   isConversationMessage,
   isDataSource,
@@ -36,6 +37,7 @@ import {
   type Accepted202,
   type CardHit,
   type Catalog,
+  type ActiveDataSource,
   type Conversation,
   type ConversationMessage,
   type DataSource,
@@ -166,6 +168,15 @@ export interface Api {
   changeRole(orgId: string, userId: string, role: string): Promise<void>;
   removeMember(orgId: string, userId: string): Promise<void>;
   dataSources(orgId: string): Promise<DataSource[]>;
+  /**
+   * The database this organization asks questions of (D-045).
+   *
+   * Readable by any member — the chat screen has to know whether asking is
+   * possible before it offers a composer. Setting it is Admin-only and the API
+   * refuses anyone else, whatever the browser believes.
+   */
+  activeDataSource(orgId: string): Promise<ActiveDataSource>;
+  setActiveDataSource(orgId: string, dataSourceId: string | null): Promise<ActiveDataSource>;
   registerDataSource(orgId: string, source: NewDataSource): Promise<DataSource>;
   rotateCredentials(
     orgId: string,
@@ -398,6 +409,25 @@ export function createApi(getToken: () => Promise<string | null>): Api {
         throw new ApiError("The API's data sources response did not match the expected shape", 200);
       }
       return payload;
+    },
+    async activeDataSource(orgId) {
+      return narrow(
+        await call(`/v1/orgs/${orgId}/active-data-source`),
+        isActiveDataSource,
+        "active data source",
+      );
+    },
+    // A PUT, mirroring the API: null is a real value here, meaning "no choice",
+    // and a PATCH of a partial body could not tell that from a field left out.
+    async setActiveDataSource(orgId, dataSourceId) {
+      return narrow(
+        await call(`/v1/orgs/${orgId}/active-data-source`, {
+          method: "PUT",
+          body: { data_source_id: dataSourceId },
+        }),
+        isActiveDataSource,
+        "active data source",
+      );
     },
     // The credential travels in a POST body and nowhere else — never a query
     // string, which would put it in browser history, in a referrer header, and

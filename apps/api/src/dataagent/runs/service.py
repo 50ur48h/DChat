@@ -60,6 +60,7 @@ from dataagent.db.models import (
     DataSource,
     Finding,
     Message,
+    Organization,
     QueryExecution,
     ResultArtifact,
 )
@@ -361,7 +362,26 @@ async def create_conversation(
     title: str | None = None,
     data_source_id: uuid.UUID | None = None,
 ) -> ConversationView:
+    """Start a thread, stamped with the database it will be about.
+
+    **The stamp is what keeps D-022 whole while D-045 moves the choice.** A
+    caller that names no source gets the organization's active one written onto
+    the row *here*, at creation, rather than resolved at each run — so the thread
+    still records the source it used, which was D-022's whole point, and an Admin
+    who changes the organization's choice tomorrow does not silently re-point
+    conversations that already ran. Two answers in one thread cannot come from
+    two databases.
+
+    A caller that *does* name a source still gets it, unchanged. Nothing here
+    overrides an explicit choice; this fills a blank.
+    """
     async with org_session(org_id) as session:
+        if data_source_id is None:
+            data_source_id = (
+                await session.execute(
+                    select(Organization.active_data_source_id).where(Organization.id == org_id)
+                )
+            ).scalar_one_or_none()
         source = await _named_data_source(session, data_source_id)
         row = Conversation(
             org_id=org_id, user_id=user_id, title=title, data_source_id=data_source_id

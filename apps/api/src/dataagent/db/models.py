@@ -201,6 +201,33 @@ class Organization(Base):
     settings: Mapped[dict[str, object]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
+    #: The database this organization asks questions of, chosen once by an Admin
+    #: (revision 0031, **D-045**). Null is not an error: it is every organization
+    #: from before that revision and every one whose Admin has not chosen yet,
+    #: and such an organization resolves and refuses exactly as it did before.
+    #:
+    #: ``ON DELETE SET NULL`` rather than a key in ``settings`` above, so that
+    #: removing a source degrades the pointer to "none named" — a state the
+    #: resolver already handles — instead of leaving an id that resolves to
+    #: nothing. It does **not** replace ``conversations.data_source_id``: a
+    #: thread still records the source it used (D-022), which is what keeps an
+    #: Admin's later change from re-pointing conversations that already ran.
+    #:
+    #: ``use_alter`` is not cosmetic. ``data_sources.org_id`` points back here, so
+    #: this pair is a cycle, and without it SQLAlchemy cannot sort the two tables
+    #: — it warns and then **excludes every foreign key on both from
+    #: comparison**, which would have left `test_models_and_migrations_do_not_drift`
+    #: silently blind to the constraint this column exists for. Naming the
+    #: constraint and emitting it as a separate ALTER breaks the cycle for
+    #: sorting; the migration already creates it that way.
+    active_data_source_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey(
+            "data_sources.id",
+            ondelete="SET NULL",
+            name="fk_organizations_active_data_source_id",
+            use_alter=True,
+        )
+    )
     created_at: Mapped[CreatedAt]
 
 

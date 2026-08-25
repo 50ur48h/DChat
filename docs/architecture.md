@@ -705,7 +705,14 @@ precisely the runs a user is watching (DECISIONS **D-020**).
 Full table catalog (key columns only):
 
 ```
-organizations(id, name, settings jsonb, created_at)
+organizations(id, name, settings jsonb, active_data_source_id, created_at)
+              -- active_data_source_id: revision 0031 (D-045). The database this
+              -- organization asks questions of, chosen once by an Admin so a
+              -- member never picks. Nullable and ON DELETE SET NULL; null means
+              -- no choice has been made, and such an organization resolves and
+              -- refuses exactly as it did before. It does NOT replace
+              -- conversations.data_source_id (D-022) — a thread is still
+              -- stamped with the source it used, at creation.
 users(id, external_subject uniq, email, name, created_at)
 org_memberships(org_id, user_id, role admin|contributor|reader, invited_by, PK(org_id,user_id))
 invitations(id, org_id, email, role, token_hash, expires_at, accepted_at)
@@ -807,9 +814,14 @@ PATCH /v1/orgs/{o}/catalog/columns/{c}       set policy allow|mask|deny [admin]
 POST /v1/orgs/{o}/documents                  upload → ingest job [contributor+]
 CRUD /v1/orgs/{o}/semantic-definitions       [contributor+]
 CRUD /v1/orgs/{o}/verified-queries           [contributor+]
+GET  /v1/orgs/{o}/active-data-source         the database this org asks about
+                                             (D-045)   [any member]
+PUT  /v1/orgs/{o}/active-data-source         body{data_source_id|null}  [admin]
 POST /v1/orgs/{o}/conversations              body{title?, data_source_id?}
                                              the database this thread is about,
-                                             optional (D-022)   [any]
+                                             optional (D-022). Omitted, it is
+                                             stamped from the org's active
+                                             source (D-045)   [any]
 POST /v1/orgs/{o}/conversations/{c}/messages body{content, idempotency_key}
                                              → 202 {run_id}   [any]
 GET  /v1/orgs/{o}/runs/{r}                   status + composed answer + findings

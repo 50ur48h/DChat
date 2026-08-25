@@ -2,6 +2,7 @@ export { ApiError, apiBaseUrl, fetchHealth, createApi } from "./client";
 export type { Api } from "./client";
 export {
   isAccepted,
+  isActiveDataSource,
   isAccepted202,
   isCardHit,
   isCatalog,
@@ -26,6 +27,7 @@ export {
   isSemanticDefinition,
   isTestResult,
   type Accepted,
+  type ActiveDataSource,
   type Accepted202,
   type CardHit,
   type Catalog,

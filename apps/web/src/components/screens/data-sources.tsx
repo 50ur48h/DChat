@@ -32,6 +32,7 @@ import { Input, Select } from "@/components/ui/input";
 import { Row, Stack } from "@/components/ui/page";
 import {
   createApi,
+  type ActiveDataSource,
   type DataSource,
   type ProfileResult,
   type RefreshResult,
@@ -141,6 +142,10 @@ export function DataSources({ orgId, role }: { orgId: string; role: string | nul
   const canRefresh = isAdmin || role === "contributor";
 
   const [sources, setSources] = useState<DataSource[] | null>(null);
+  //: Which database this organization answers questions from (D-045). `null` is
+  //: "not loaded yet"; a loaded value with a null id is "no Admin has chosen",
+  //: and the two are different claims — the second is worth telling a person.
+  const [active, setActive] = useState<ActiveDataSource | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, TestResult>>({});
   const [catalogNotes, setCatalogNotes] = useState<Record<string, string>>({});
@@ -150,22 +155,34 @@ export function DataSources({ orgId, role }: { orgId: string; role: string | nul
   const [newPassword, setNewPassword] = useState("");
 
   const load = useCallback(async () => {
-    setSources(await api.dataSources(orgId));
+    const [registered, chosen] = await Promise.all([
+      api.dataSources(orgId),
+      api.activeDataSource(orgId),
+    ]);
+    setSources(registered);
+    setActive(chosen);
   }, [api, orgId]);
 
   useEffect(() => {
-    // Guarded so a slow response cannot write into an unmounted screen.
-    let active = true;
+    // Guarded so a slow response cannot write into an unmounted screen. Named
+    // `alive` rather than `active`, which is now the chosen data source above —
+    // two things called `active` in one component is a bug waiting for a reader.
+    let alive = true;
     void (async () => {
       try {
-        const next = await api.dataSources(orgId);
-        if (active) setSources(next);
+        const [registered, chosen] = await Promise.all([
+          api.dataSources(orgId),
+          api.activeDataSource(orgId),
+        ]);
+        if (!alive) return;
+        setSources(registered);
+        setActive(chosen);
       } catch (cause) {
-        if (active) setError(cause instanceof Error ? cause.message : "Could not load");
+        if (alive) setError(cause instanceof Error ? cause.message : "Could not load");
       }
     })();
     return () => {
-      active = false;
+      alive = false;
     };
   }, [api, orgId]);
 
@@ -239,6 +256,15 @@ export function DataSources({ orgId, role }: { orgId: string; role: string | nul
       note(source, await api.profileCatalog(orgId, source.id));
     });
 
+  const choose = (source: DataSource | null) =>
+    run(async () => {
+      await api.setActiveDataSource(orgId, source?.id ?? null);
+    });
+
+  //: `null` while still loading, so nothing claims "no database is chosen"
+  //: before the answer has arrived.
+  const chosenId = active?.data_source_id ?? null;
+
   return (
     <Stack>
       <Card
@@ -249,6 +275,21 @@ export function DataSources({ orgId, role }: { orgId: string; role: string | nul
             : "The databases this organization can ask questions about. Only an Admin can add or change them."
         }
       >
+        {/* Which database answers questions, said once at the top rather than
+            inferred from a badge further down. A member cannot change it and
+            still needs to know what their answers are drawn from. */}
+        {active !== null &&
+          (chosenId === null ? (
+            <p className={styles.muted}>
+              {isAdmin
+                ? "No database is chosen yet, so questions have nowhere to go. Choose one below."
+                : "No database is chosen yet, so questions have nowhere to go. An Admin can choose one."}
+            </p>
+          ) : (
+            <p className={styles.muted}>
+              Questions are answered from <strong>{active.data_source_name}</strong>.
+            </p>
+          ))}
         {sources === null && !error && <p className={styles.muted}>Loading…</p>}
         {sources?.length === 0 && (
           <p className={styles.muted}>
@@ -279,6 +320,10 @@ export function DataSources({ orgId, role }: { orgId: string; role: string | nul
                     <Badge tone={source.tls_mode === "prefer" ? "peach" : "lilac"}>
                       TLS: {source.tls_mode}
                     </Badge>
+                    {/* A word, not a colour: design.md forbids colour carrying
+                        meaning alone, and this is the one badge here that says
+                        what the product will actually do. */}
+                    {source.id === chosenId && <Badge tone="mint">Answers questions</Badge>}
                   </Row>
                 </div>
 
@@ -324,6 +369,19 @@ export function DataSources({ orgId, role }: { orgId: string; role: string | nul
 
                 {isAdmin && (
                   <div className={styles.actions}>
+                    {/* The choice D-045 moved here. Offered only on a source
+                        that is not already the chosen one, so the control's
+                        word always matches what pressing it does — and the
+                        chosen source gets the honest opposite instead. */}
+                    {source.id === chosenId ? (
+                      <Button disabled={busy} onClick={() => choose(null)}>
+                        Stop answering from this
+                      </Button>
+                    ) : (
+                      <Button variant="primary" disabled={busy} onClick={() => choose(source)}>
+                        Answer questions from this
+                      </Button>
+                    )}
                     <Button disabled={busy} onClick={() => test(source)}>
                       Test connection
                     </Button>

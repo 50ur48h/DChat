@@ -4,6 +4,64 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-045 — an Admin chooses the database once; a member never picks
+Date: 2026-08-25 · Phase: 13 · PR: this one · Migration: 0031
+Context: today a member signs in, picks an organization, clicks **Ask**, picks a
+dataset, and only then lands on a conversation. That is a database tool's flow.
+The product being built is a chat product — a member opens it and starts talking
+to their data — and in that product the database is something an Admin configures
+once, not something every member chooses at the start of every thread. The owner
+set this direction on 2026-08-25; this entry records how it is done without
+losing what **D-022** bought.
+Options: (a) leave the choice on the conversation and hide the picker behind a
+default in the browser — refused, because a default the client invents is a guess
+with a nicer name, and D-022 exists to stop the platform guessing; (b) drop
+`conversations.data_source_id` and resolve the organization's source at each run
+— refused, because a thread would stop recording what its answers were drawn
+from, and an Admin changing the organization's database would silently re-point
+every conversation ever written, including ones whose answers are already on
+screen; (c) an **organization-level** choice, stamped onto the conversation when
+the thread is created; (d) infer it from the question, which is (a) with more
+steps and D-022 already refused it.
+Decision: **(c)**. Revision 0031 adds `organizations.active_data_source_id`,
+nullable, `REFERENCES data_sources(id) ON DELETE SET NULL` — deliberately the
+same shape D-022 chose one table over. `create_conversation` stamps it onto the
+new thread when the caller names no source, so **the conversation still records
+the database it is about** and D-022's reasoning is untouched: a follow-up
+question still reaches the same source as the question it follows, and two
+answers in one thread still cannot come from two databases. What moves is where
+a person makes the choice, not whether the platform records it.
+**A column, not a key in `organizations.settings`.** The JSONB column was already
+there and would have needed no migration — and no foreign key, so a deleted
+source would leave a plausible id behind for every reader to re-check
+defensively. `ON DELETE SET NULL` degrades the pointer to *none chosen*, which is
+a state the resolver already handles correctly, instead of to a dangling id,
+which is a state nothing handles.
+**The refusal is kept, not replaced.** `resolve_data_source` consults the
+organization's choice first and otherwise behaves exactly as it did: one
+registered source resolves, several refuse and name the candidates, none refuses
+and says what to do. An Admin naming the database is **not a tie-break** — it is
+the person deciding that WP7.2c's refusal asked for. When no Admin has chosen,
+every organization from before this revision reaches the same two refusals it
+reached yesterday.
+**The foreign key is not the tenant check**, and this is the sharper case of the
+warning D-022 wrote: a constraint check does not consult row-level security, so
+another organization's source id satisfies the database perfectly well, and here
+it would point *an entire organization* at another tenant's data — every question
+every member asks, answered confidently and with citations, from the wrong
+company's database. `orgs/service.set_active_data_source` looks the id up through
+the org session and answers 404, and a test registers a second organization's
+source and proves it.
+Consequences: `docs/architecture.md` 10.1 gains the column on `organizations` and
+10.2 gains `GET`/`PUT /v1/orgs/{org_id}/active-data-source`. The read is open to
+**any member** — the chat screen has to know whether asking is possible before it
+offers a composer, and it discloses only the name of a database every member
+already queries. The write is Admin-only and audited as
+`org.active_data_source_changed`. An explicit `data_source_id` on
+`POST …/conversations` still wins: this fills a blank, it does not override a
+caller who said what they meant. The member-facing picker this makes redundant is
+removed in the shell work package, not here.
+
 ## D-044 — a run has three endings, and the platform derives which
 Date: 2026-08-25 · Phase: 13 · PR: this one · Migration: 0030
 Context: WP7.2b's rule is *"a run that could not answer completes with

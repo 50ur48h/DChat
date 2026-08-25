@@ -19,7 +19,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dataagent.auth.principal import Principal
-from dataagent.db.models import AuditLog, Organization, OrgMembership, User
+from dataagent.db.models import AuditLog, DataSource, Organization, OrgMembership, User
 from dataagent.tenancy.session import app_session, org_session
 
 ROLE_ADMIN = "admin"
@@ -27,6 +27,16 @@ ROLE_ADMIN = "admin"
 
 class ConflictError(Exception):
     """A request that is well-formed but cannot be applied to the current state."""
+
+
+class NotFoundError(Exception):
+    """Named a row this organization cannot see — which reads the same as absent.
+
+    Its own class rather than an import from ``datasources`` or ``runs``, which
+    each define one for the same reason: the tenant boundary is what makes "not
+    found" the right answer, and a module that owns a boundary owns the word for
+    crossing it.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,3 +274,104 @@ async def remove_member(
             object_type="user",
             object_id=str(target_user_id),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveDataSource:
+    """Which database this organization asks questions of, and its name.
+
+    The name travels with the id because every screen that shows this shows it to
+    a person: *"Questions are answered from Pizza demo"* is readable and
+    ``a3f1…`` is not. Both are null together when no Admin has chosen yet.
+    """
+
+    data_source_id: uuid.UUID | None
+    data_source_name: str | None
+
+
+async def _active_data_source(session: AsyncSession, org: Organization) -> ActiveDataSource:
+    """Read the pointer and resolve its name on an already org-scoped session."""
+    if org.active_data_source_id is None:
+        return ActiveDataSource(data_source_id=None, data_source_name=None)
+    name = (
+        await session.execute(
+            select(DataSource.name).where(DataSource.id == org.active_data_source_id)
+        )
+    ).scalar_one_or_none()
+    # A source deleted between the two statements would land here. The FK's
+    # ON DELETE SET NULL means it cannot persist, so report what a reader can act
+    # on — nothing is chosen — rather than an id with no name behind it.
+    if name is None:
+        return ActiveDataSource(data_source_id=None, data_source_name=None)
+    return ActiveDataSource(data_source_id=org.active_data_source_id, data_source_name=name)
+
+
+async def active_data_source(org_id: uuid.UUID) -> ActiveDataSource:
+    """The organization's chosen database, readable by **any member**.
+
+    Not Admin-only, deliberately: the chat screen has to know whether asking is
+    possible at all, and a Reader who cannot see the answer to that gets a
+    composer that fails for reasons the screen cannot explain. This exposes the
+    name of a database the whole organization already queries — no host, no
+    account, no credential — so it tells a member nothing their own answers would
+    not.
+    """
+    async with org_session(org_id) as session:
+        org = (
+            (await session.execute(select(Organization).where(Organization.id == org_id)))
+            .scalars()
+            .one()
+        )
+        return await _active_data_source(session, org)
+
+
+async def set_active_data_source(
+    *, org_id: uuid.UUID, actor_user_id: uuid.UUID, data_source_id: uuid.UUID | None
+) -> ActiveDataSource:
+    """Choose the database this organization asks questions of. Admin only.
+
+    **The foreign key is not the tenant check.** A constraint check does not
+    consult row-level security, so another organization's source id would satisfy
+    the database perfectly well and quietly point this organization at somebody
+    else's data — the worst output this product can produce, and the only one
+    with nothing about it that looks wrong. The lookup below runs inside the org
+    session, so a source this organization does not own is simply not there, and
+    the caller is told "no such data source" rather than anything about what
+    exists elsewhere.
+
+    ``None`` clears the choice, which is a legitimate thing for an Admin to want
+    and returns the organization to resolving and refusing exactly as it did
+    before revision 0031.
+    """
+    async with org_session(org_id) as session:
+        org = (
+            (await session.execute(select(Organization).where(Organization.id == org_id)))
+            .scalars()
+            .one()
+        )
+
+        if data_source_id is not None:
+            owned = (
+                (await session.execute(select(DataSource).where(DataSource.id == data_source_id)))
+                .scalars()
+                .one_or_none()
+            )
+            if owned is None:
+                raise NotFoundError("No such data source")
+
+        previous = org.active_data_source_id
+        org.active_data_source_id = data_source_id
+        audit(
+            session,
+            org_id=org_id,
+            actor_user_id=actor_user_id,
+            action="org.active_data_source_changed",
+            object_type="data_source",
+            object_id=str(data_source_id) if data_source_id is not None else None,
+            details={
+                "from": str(previous) if previous is not None else None,
+                "to": str(data_source_id) if data_source_id is not None else None,
+            },
+        )
+        await session.flush()
+        return await _active_data_source(session, org)

@@ -53,6 +53,28 @@ class ChangeRoleIn(BaseModel):
     role: str = Field(description="admin | contributor | reader")
 
 
+class ActiveDataSourceOut(BaseModel):
+    """Which database this organization asks questions of.
+
+    Both fields null together means no Admin has chosen yet — not an error, and
+    the state every organization was in before revision 0031.
+    """
+
+    data_source_id: uuid.UUID | None
+    data_source_name: str | None
+
+
+class SetActiveDataSourceIn(BaseModel):
+    data_source_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "The data source to answer this organization's questions from, or "
+            "null to clear the choice and return to resolving a single "
+            "registered source and refusing when there is more than one."
+        ),
+    )
+
+
 class CreateInvitationIn(BaseModel):
     email: EmailStr
     role: str
@@ -197,6 +219,58 @@ class ArmedRecoveryOut(RecoveryGrantOut):
             "this product: it makes whoever holds it an Admin of this "
             "organization."
         )
+    )
+
+
+@router.get(
+    "/orgs/{org_id}/active-data-source",
+    response_model=ActiveDataSourceOut,
+    summary="The database this organization asks questions of",
+)
+async def get_active_data_source(
+    context: Annotated[RequestContext, Depends(require_member)],
+) -> ActiveDataSourceOut:
+    """Readable by any member, and that is deliberate (**D-045**).
+
+    The chat screen has to know whether asking is possible before it offers a
+    composer, and a Reader who cannot read this gets a control that fails for a
+    reason the screen is unable to explain. What it discloses is the *name* of a
+    database every member already queries — no host, no account, no credential —
+    so it tells a member nothing their own answers would not.
+    """
+    active = await service.active_data_source(context.org_id)
+    return ActiveDataSourceOut(
+        data_source_id=active.data_source_id, data_source_name=active.data_source_name
+    )
+
+
+@router.put(
+    "/orgs/{org_id}/active-data-source",
+    response_model=ActiveDataSourceOut,
+    summary="Choose the database this organization asks questions of",
+)
+async def set_active_data_source(
+    body: SetActiveDataSourceIn,
+    context: Annotated[RequestContext, Depends(require_admin)],
+) -> ActiveDataSourceOut:
+    """Admin only, and audited like every other org-shaping change.
+
+    A `PUT` because it sets one value to one state and setting it twice is
+    setting it once — and because null is a real value here, meaning *no choice*,
+    which a `PATCH` of a partial body could not distinguish from *field omitted*.
+    """
+    try:
+        active = await service.set_active_data_source(
+            org_id=context.org_id,
+            actor_user_id=context.user_id,
+            data_source_id=body.data_source_id,
+        )
+    except service.NotFoundError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="No such data source"
+        ) from error
+    return ActiveDataSourceOut(
+        data_source_id=active.data_source_id, data_source_name=active.data_source_name
     )
 
 
