@@ -1,0 +1,108 @@
+.pending {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--line-strong);
+  border-top-color: var(--ink-muted);
+  animation: pending-spin 700ms linear infinite;
+}
+
+/*
+ * The same clipped-gradient shimmer the working state uses, so every "something
+ * is happening" in the product reads the same way. The fallback colour is set
+ * before the clip, so the word survives the animation being switched off.
+ */
+.word {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-muted);
+  background-image: linear-gradient(
+    90deg,
+    var(--ink-subtle) 35%,
+    var(--ink) 50%,
+    var(--ink-subtle) 65%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: pending-shimmer 1.4s linear infinite;
+}
+
+.bar {
+  position: relative;
+  display: block;
+  height: 3px;
+  border-radius: var(--radius-full);
+  background: var(--inset);
+  overflow: hidden;
+}
+
+.bar::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 40%;
+  border-radius: var(--radius-full);
+  background: var(--clay);
+  animation: pending-slide 1.3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pending-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pending-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes pending-slide {
+  from {
+    left: -40%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+/*
+ * With motion off the clipped gradient would leave the word transparent —
+ * invisible rather than still — so the fill is put back explicitly. The bar
+ * keeps a resting fill for the same reason: it must still read as "in progress".
+ */
+@media (prefers-reduced-motion: reduce) {
+  .word {
+    background-image: none;
+    -webkit-text-fill-color: currentcolor;
+    color: var(--ink);
+    animation: none;
+  }
+
+  .spinner {
+    animation: none;
+    border-top-color: var(--ink);
+  }
+
+  .bar::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.35;
+  }
+}

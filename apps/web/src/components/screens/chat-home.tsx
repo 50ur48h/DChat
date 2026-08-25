@@ -32,6 +32,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { Pending } from "@/components/ui/pending";
 import { ApiError, createApi, type ActiveDataSource, type DataSource } from "@/lib/api-client";
 import { useSession } from "@/lib/auth/session";
 import { useOrgRole } from "@/lib/use-org-role";
@@ -173,6 +174,19 @@ export function ChatHome({ orgId }: { orgId: string }) {
                 : "No database is registered yet, so there is nothing to ask about. An Admin can add one."}
             </p>
           ))}
+
+        {/* **Your question, the moment you send it — and faint until it is
+            real** (D-049). The faintness is the honest part: the interface has
+            not been told the write succeeded, so it does not yet look like
+            something that was saved. If the send fails it disappears and the
+            error takes its place, rather than hardening into a message that was
+            never stored. */}
+        {sending && (
+          <div className={styles.sentTurn}>
+            <p className={styles.sentBubble}>{question.trim()}</p>
+            <Pending>Sending your question…</Pending>
+          </div>
+        )}
 
         <div className={styles.composer}>
           <textarea

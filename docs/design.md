@@ -307,6 +307,55 @@ first-time reader may not notice that evidence exists. That is the price of a
 focused answer, and the cheap retreat if it proves wrong is a resting opacity
 around 40% rather than 0.
 
+### Waiting, and having nothing to show
+
+Three patterns, and **which one applies is decided by what is actually knowable**
+— the same rule the working state is built on. Guessing at progress is the thing
+none of them may do.
+
+**Skeleton — when the shape is known and the content is not.** A list whose rows
+will arrive: the chat list, members, data sources, the catalog, definitions,
+documents. Rows of `--inset` with a slow shimmer, roughly as many as usually
+arrive, in the layout the real rows will occupy. It says *how much* is coming and
+stops the page jumping when it lands, and it claims nothing about progress, so it
+cannot be wrong.
+
+Never for something that is not a list, never for an unknown number of rows —
+three skeleton rows where one item arrives is a small lie about the shape of the
+answer. Prefer too few.
+
+**Pending — when even the shape is unknown.** A one-shot request that returns
+once: a catalog refresh, a column profile, a connection test. A shimmering word
+saying what is happening, optionally an indeterminate bar, and then **the real
+result sentence**. It must not be given steps: a step list for an operation that
+reports no steps has to be written in the client, which is what D-048 refuses.
+
+**Meter — only when there is a real number.** A proportion may be drawn only
+where two real counts exist. Document ingestion is the one place in this product
+that qualifies (`chunk_count`, `embedded_count`), and its half-done state already
+has honest words: *searchable by wording but not yet by meaning*. A meter with an
+invented denominator is a fabricated measurement.
+
+**Empty states carry presence and exactly one action.** A mark, a title saying
+what belongs here, a line of why, and the single thing to do about it — which is
+also where a Reader is told **who** can do it instead, rather than being shown a
+control the API would refuse (B-008). One muted sentence reads as a page that
+failed rather than a place nobody has filled yet.
+
+**An empty state is not a loading state**, and the two must never be the same
+element. `null` means *not asked yet*; `[]` means *there is nothing*. Rendering
+"Nothing yet" while a request is in flight tells a person something false about
+their own data, and this product has made that mistake before.
+
+### Showing something before the server has confirmed it
+
+A question is rendered the moment it is sent, **faint**, and only reaches full
+strength when the server has actually stored it (D-049). The faintness is the
+honest part: it is the interface saying *I have not been told this worked yet*.
+Anything shown optimistically must look provisional until it is not, and must
+disappear or turn into a stated error if the write fails — never quietly harden
+into something that looks saved.
+
 ### The working state
 
 While a run is going, the thread shows what the agent is **actually doing**, from

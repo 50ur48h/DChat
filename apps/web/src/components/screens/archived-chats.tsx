@@ -19,6 +19,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { SkeletonList } from "@/components/ui/skeleton";
 import { ApiError, createApi, type Conversation } from "@/lib/api-client";
 import { useSession } from "@/lib/auth/session";
 
@@ -81,9 +83,20 @@ export function ArchivedChats({ orgId }: { orgId: string }) {
       title="Archived chats"
       subtitle="Put away, not deleted — every answer and its trace is still here."
     >
-      {archived === null && !error && <p className={styles.muted}>Loading…</p>}
+      {archived === null && !error && <SkeletonList rows={2} label="Loading archived chats" />}
       {archived?.length === 0 && (
-        <p className={styles.muted}>Nothing archived. Chats you put away appear here.</p>
+        <EmptyState
+          icon={
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 7h18v3H3zM5 10v9h14v-9M10 14h4" />
+            </svg>
+          }
+          title="Nothing archived"
+          action={null}
+        >
+          Chats you put away appear here, with their answers and traces intact —
+          and you can bring any of them back.
+        </EmptyState>
       )}
       {error && <p className={styles.error}>{error}</p>}
 

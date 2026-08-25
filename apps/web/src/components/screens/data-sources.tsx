@@ -28,6 +28,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, type Tone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Pending } from "@/components/ui/pending";
+import { SkeletonList } from "@/components/ui/skeleton";
 import { Input, Select } from "@/components/ui/input";
 import { Row, Stack } from "@/components/ui/page";
 import {
@@ -186,9 +189,20 @@ export function DataSources({ orgId, role }: { orgId: string; role: string | nul
     };
   }, [api, orgId]);
 
-  const run = async (action: () => Promise<void>) => {
+  /**
+   * What is happening, and to which source, while a one-shot request is out.
+   *
+   * These operations report nothing while they run — they are single requests
+   * that return once — so what is shown is a word and an indeterminate bar, and
+   * then the API's own result sentence. Giving them steps would mean writing
+   * the steps here, which is what D-048 refuses.
+   */
+  const [pending, setPending] = useState<{ id: string; what: string } | null>(null);
+
+  const run = async (action: () => Promise<void>, doing?: { id: string; what: string }) => {
     setBusy(true);
     setError(null);
+    if (doing) setPending(doing);
     try {
       await action();
       await load();
@@ -198,6 +212,7 @@ export function DataSources({ orgId, role }: { orgId: string; role: string | nul
       setError(cause instanceof Error ? cause.message : "That did not work");
     } finally {
       setBusy(false);
+      setPending(null);
     }
   };
 
@@ -238,23 +253,32 @@ export function DataSources({ orgId, role }: { orgId: string; role: string | nul
   };
 
   const test = (source: DataSource) =>
-    void run(async () => {
-      const result = await api.testDataSource(orgId, source.id);
-      setResults((current) => ({ ...current, [source.id]: result }));
-    });
+    void run(
+      async () => {
+        const result = await api.testDataSource(orgId, source.id);
+        setResults((current) => ({ ...current, [source.id]: result }));
+      },
+      { id: source.id, what: "Connecting, and checking the login cannot write…" },
+    );
 
   const note = (source: DataSource, said: RefreshResult | ProfileResult) =>
     setCatalogNotes((current) => ({ ...current, [source.id]: said.detail }));
 
   const refresh = (source: DataSource) =>
-    void run(async () => {
-      note(source, await api.refreshCatalog(orgId, source.id));
-    });
+    void run(
+      async () => {
+        note(source, await api.refreshCatalog(orgId, source.id));
+      },
+      { id: source.id, what: "Reading the schema…" },
+    );
 
   const profileSource = (source: DataSource) =>
-    void run(async () => {
-      note(source, await api.profileCatalog(orgId, source.id));
-    });
+    void run(
+      async () => {
+        note(source, await api.profileCatalog(orgId, source.id));
+      },
+      { id: source.id, what: "Profiling the columns…" },
+    );
 
   const choose = (source: DataSource | null) =>
     run(async () => {
@@ -290,13 +314,24 @@ export function DataSources({ orgId, role }: { orgId: string; role: string | nul
               Questions are answered from <strong>{active.data_source_name}</strong>.
             </p>
           ))}
-        {sources === null && !error && <p className={styles.muted}>Loading…</p>}
+        {sources === null && !error && <SkeletonList rows={2} label="Loading data sources" />}
         {sources?.length === 0 && (
-          <p className={styles.muted}>
+          <EmptyState
+            icon={
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <ellipse cx="12" cy="6" rx="8" ry="3" />
+                <path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3" />
+              </svg>
+            }
+            title="No databases registered"
+            /* The Reader gets the sentence, not a control the API would refuse
+               (B-008). Never a disabled button: it looks operable and is not. */
+            action={isAdmin ? undefined : <span className={styles.muted}>An Admin can register one.</span>}
+          >
             {isAdmin
-              ? "None yet. Register one below — use a login that can only read."
-              : "None yet. An Admin can register one."}
-          </p>
+              ? "Register one below and this organization can start asking questions of it. Use a login that can only read."
+              : "Once one is registered, this organization can start asking questions of it."}
+          </EmptyState>
         )}
 
         {sources && sources.length > 0 && (
@@ -336,10 +371,15 @@ export function DataSources({ orgId, role }: { orgId: string; role: string | nul
                   <dd>{when(source.last_verified_at)}</dd>
                 </dl>
 
-                {results[source.id] && <Result result={results[source.id] as TestResult} />}
-
-                {catalogNotes[source.id] && (
-                  <p className={styles.muted}>{catalogNotes[source.id]}</p>
+                {pending?.id === source.id ? (
+                  <Pending bar>{pending.what}</Pending>
+                ) : (
+                  <>
+                    {results[source.id] && <Result result={results[source.id] as TestResult} />}
+                    {catalogNotes[source.id] && (
+                      <p className={styles.muted}>{catalogNotes[source.id]}</p>
+                    )}
+                  </>
                 )}
 
                 {(canRefresh || isAdmin) && (

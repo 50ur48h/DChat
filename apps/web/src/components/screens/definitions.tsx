@@ -60,6 +60,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Select } from "@/components/ui/input";
 import { Row, Stack } from "@/components/ui/page";
+import { SkeletonList } from "@/components/ui/skeleton";
 import {
   createApi,
   type DefinitionProposal,
@@ -574,7 +575,7 @@ export function Definitions({
         subtitle="What the database says these metrics mean. None of it constrains anything yet."
       >
         {proposals === null ? (
-          <p className={styles.empty}>Loading…</p>
+          <SkeletonList rows={3} label="Loading definitions" />
         ) : proposals.length === 0 ? (
           <p className={styles.empty}>Nothing waiting. Import a metric table to propose some.</p>
         ) : (
@@ -769,7 +770,7 @@ export function Definitions({
         subtitle="What the agent is told these metrics mean, and which of them the critic enforces."
       >
         {definitions === null ? (
-          <p className={styles.empty}>Loading…</p>
+          <SkeletonList rows={3} label="Loading definitions" />
         ) : definitions.length === 0 ? (
           <p className={styles.empty}>No definitions yet.</p>
         ) : (

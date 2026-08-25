@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Select } from "@/components/ui/input";
 import { Row, Stack } from "@/components/ui/page";
+import { SkeletonList } from "@/components/ui/skeleton";
 import { createApi, type CardHit, type Catalog, type CatalogColumn } from "@/lib/api-client";
 import { useSession } from "@/lib/auth/session";
 
@@ -232,7 +233,7 @@ export function CatalogBrowser({
             : undefined
         }
       >
-        {catalog === null && !error && <p className={styles.muted}>Loading…</p>}
+        {catalog === null && !error && <SkeletonList rows={4} label="Loading the catalog" />}
         {catalog && (
           <ul className={styles.tables}>
             {catalog.tables.map((table) => {

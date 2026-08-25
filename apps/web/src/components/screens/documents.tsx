@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Row, Stack } from "@/components/ui/page";
+import { SkeletonList } from "@/components/ui/skeleton";
 import { createApi, type KnowledgeDocument } from "@/lib/api-client";
 import { useSession } from "@/lib/auth/session";
 
@@ -65,6 +66,21 @@ export function indexingSummary(document: KnowledgeDocument): string {
     `${document.chunk_count} passages, ` +
     `${document.embedded_count} searchable by meaning so far`
   );
+}
+
+/**
+ * How far through indexing a document is, or `null` when there is no honest
+ * fraction to draw.
+ *
+ * **A meter needs two real numbers** (docs/design.md). Before any passage is
+ * stored the denominator does not exist, so there is nothing to draw and the
+ * words carry it instead — a bar at 0% would be claiming a total nobody knows.
+ * A failed document gets no meter either: it is not part-way anywhere, it has
+ * stopped.
+ */
+function indexedFraction(document: KnowledgeDocument): number | null {
+  if (document.status === "failed" || document.chunk_count === 0) return null;
+  return Math.min(1, document.embedded_count / document.chunk_count);
 }
 
 export function Documents({ orgId, role }: { orgId: string; role: string | null }) {
@@ -167,7 +183,7 @@ export function Documents({ orgId, role }: { orgId: string; role: string | null 
         subtitle="What this organization has written down. The agent reads these to learn what a term means here."
       >
         {documents === null ? (
-          <p className={styles.empty}>Loading…</p>
+          <SkeletonList rows={2} label="Loading documents" />
         ) : documents.length === 0 ? (
           <p className={styles.empty}>
             {canWrite
@@ -184,6 +200,24 @@ export function Documents({ orgId, role }: { orgId: string; role: string | null 
                     <p className={styles.meta}>
                       {indexingSummary(document)}
                     </p>
+                    {/* Drawn only from `chunk_count` and `embedded_count`, and
+                        only when both exist. The words above say the same thing
+                        and are what a reader with no colour or no meter gets. */}
+                    {indexedFraction(document) !== null && (
+                      <span
+                        className={styles.meter}
+                        role="progressbar"
+                        aria-valuemin={0}
+                        aria-valuemax={document.chunk_count}
+                        aria-valuenow={document.embedded_count}
+                        aria-label={`${document.title}: passages searchable by meaning`}
+                      >
+                        <span
+                          className={styles.meterFill}
+                          style={{ width: `${(indexedFraction(document) ?? 0) * 100}%` }}
+                        />
+                      </span>
+                    )}
                   </div>
                   <Row>
                     <Badge tone={STATUS_TONES[document.status] ?? "neutral"}>

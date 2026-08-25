@@ -1,0 +1,78 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  min-height: 40px;
+  padding: 0 var(--s2);
+}
+
+/*
+ * The shimmer is a gradient slid across `--inset`. Kept slow and low-contrast:
+ * a fast, bright skeleton reads as an error state.
+ */
+.line,
+.avatar {
+  border-radius: var(--radius-sm);
+  background-image: linear-gradient(90deg, var(--inset) 25%, var(--line) 37%, var(--inset) 63%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.6s linear infinite;
+}
+
+.lineLong {
+  composes: line;
+  height: 11px;
+  width: 72%;
+}
+
+.lineShort {
+  composes: line;
+  height: 11px;
+  width: 46%;
+}
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border-radius: var(--radius-full);
+}
+
+/* Visible to a screen reader, and to nothing else. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes skeleton-shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/*
+ * Still, and still legible as "something is coming": the shimmer is what says
+ * *loading*, so with it off the bars need to stay visible rather than vanish.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .line,
+  .lineLong,
+  .lineShort,
+  .avatar {
+    animation: none;
+    background-image: none;
+    background-color: var(--inset);
+  }
+}

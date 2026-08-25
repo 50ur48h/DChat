@@ -207,6 +207,54 @@ describe("<ChatHome />", () => {
     expect(screen.getByLabelText("Your question")).toBeEnabled();
   });
 
+  it("shows your question while it is sending, and takes it back if it fails", async () => {
+    /**
+     * **D-049.** Rendering the question immediately removes the blank moment
+     * between pressing Send and arriving in the thread — but anything shown
+     * before the server has confirmed it must look provisional, and must not
+     * harden into something that looks saved when the write did not happen.
+     */
+    // The ask is held open, so the in-flight state can actually be observed.
+    // Against a stub that resolves in a microtask it exists for less than a
+    // frame, and asserting it would be a race rather than a check.
+    let releaseAsk: ((value: Response) => void) | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        if (url.includes("/active-data-source")) return Promise.resolve(json(CHOSEN));
+        if (url.includes("/data-sources")) return Promise.resolve(json([SOURCE]));
+        if (url.includes("/messages")) {
+          return new Promise<Response>((resolve) => {
+            releaseAsk = resolve;
+          });
+        }
+        if (url.endsWith("/conversations")) return Promise.resolve(json(CREATED, 201));
+        return Promise.resolve(json({}));
+      }),
+    );
+
+    render(<ChatHome orgId="o1" />);
+
+    const box = await screen.findByLabelText("Your question");
+    fireEvent.change(box, { target: { value: "how many orders are there?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    // Shown at once, said to be in flight rather than done, and the words are
+    // the ones the person typed.
+    expect(await screen.findByText("Sending your question…")).toBeInTheDocument();
+    expect(screen.getAllByText("how many orders are there?").length).toBeGreaterThan(0);
+
+    await waitFor(() => expect(releaseAsk).toBeDefined());
+    releaseAsk?.(json({ detail: "the model is unavailable" }, 503));
+
+    // The send failed, so the provisional bubble goes and the reason takes its
+    // place. What must never happen is the question staying on screen looking
+    // stored when nothing stored it.
+    expect(await screen.findByText(/the model is unavailable/)).toBeInTheDocument();
+    expect(screen.queryByText("Sending your question…")).not.toBeInTheDocument();
+    expect(box).toHaveValue("how many orders are there?");
+  });
+
   it("says which of the two reasons it cannot ask: several databases", async () => {
     routeFetch({ chosen: NOTHING_CHOSEN, sources: [SOURCE, SECOND_SOURCE] });
 

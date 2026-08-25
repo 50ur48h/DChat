@@ -201,6 +201,15 @@
   gap: var(--space-2);
 }
 
+/* The rail is too narrow for a full empty state; a sentence with room around
+   it is the honest amount of presence at 272px. */
+.emptyRail {
+  color: var(--ink-muted);
+  font-size: 13px;
+  line-height: 20px;
+  padding: var(--s5) var(--s2);
+}
+
 .muted {
   color: var(--fg-muted);
   font-size: 13px;

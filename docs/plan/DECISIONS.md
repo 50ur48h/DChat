@@ -4,6 +4,59 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-049 — waiting, emptiness, and showing something before it is true
+Date: 2026-08-26 · Phase: 13 · PR: this one
+Context: sixteen places in the product either said `Loading…`, said `None yet.`,
+or said nothing at all while something was happening. The owner picked all six
+candidates from the `C-states` mockup. The interesting part is not that they were
+built — it is that **three different situations were being served by one muted
+sentence**, and they make different claims.
+Options: (a) one spinner everywhere, which is what most products do; (b) three
+patterns chosen by **what is actually knowable**; (c) skeletons everywhere,
+including for things that are not lists.
+Decision: **(b)**, and the choosing rule is the whole entry.
+
+* **Skeleton — the shape is known, the content is not.** A list whose rows will
+  arrive. It says *how much* is coming and stops the page jumping; it makes no
+  claim about progress, so unlike a spinner it cannot turn out to have been
+  wrong. Never for a non-list, and **prefer too few rows**: three skeletons
+  where one item arrives is a small lie about the shape of the answer, and the
+  page still jumps — upwards, which is worse, because the reader has started
+  reading.
+* **Pending — even the shape is unknown.** A one-shot request that returns once:
+  a catalog refresh, a column profile, a connection test. A shimmering word, an
+  optional indeterminate bar, then the API's own result sentence. **It must never
+  be given steps**, because an operation that reports no steps can only be given
+  invented ones, which is what D-048 refuses.
+* **Meter — there is a real number.** A proportion may be drawn only where two
+  real counts exist. Document ingestion is the one place in this product that
+  qualifies (`chunk_count`, `embedded_count`). Before any passage is stored the
+  denominator does not exist, so no bar is drawn at all — a bar at 0% claims a
+  total nobody knows.
+
+**Empty states carry presence and exactly one action**, and the action slot is
+also where a Reader is told *who* can act instead — never a disabled control,
+which looks operable and is not (B-008). And **an empty state is not a loading
+state**: `null` is *not asked yet*, `[]` is *there is nothing*, and rendering
+"Nothing yet" during a request tells somebody something false about their own
+data. This product has made that mistake before.
+
+**Showing a question before the server has stored it.** The chat home creates a
+thread, posts the question and navigates, and for that moment the screen showed
+nothing the person had typed. The question is now rendered immediately — and
+**faint**. The faintness is the honest part: it is the interface saying *I have
+not been told this worked yet*. If the write fails the bubble goes and the reason
+takes its place; it never quietly hardens into something that looks saved.
+Anything shown optimistically anywhere in this product owes the same two
+behaviours.
+Consequences: three primitives in `components/ui/` — `SkeletonList`,
+`EmptyState`, `Pending` — and `docs/design.md` gains *Waiting, and having nothing
+to show* plus *Showing something before the server has confirmed it*, both
+binding. A skeleton announces itself **once** through a single `role="status"`
+label, with the bars `aria-hidden`: eight anonymous boxes read out in sequence is
+worse than silence. Sixteen call sites changed and five existing tests moved from
+the old wording to the new.
+
 ## D-048 — the working state shows the run, and never a script
 Date: 2026-08-25 · Phase: 13 · PR: this one
 Context: the owner supplied a design for the thinking/working state — an
