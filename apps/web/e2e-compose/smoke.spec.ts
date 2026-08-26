@@ -279,7 +279,19 @@ test("the stack answers a question asked in a browser", async ({ page }) => {
     // real API rather than a stub of one. Generous, because this is where a real
     // agent run happens: catalog retrieval, a validated statement, an execution
     // against another database, a stored artifact and a dozen durable events.
-    await expect(page.getByText(SCRIPTED_ANSWER)).toBeVisible({ timeout: 120_000 });
+    // **Named, not searched for.** The answer text is on the page twice on
+    // purpose: once as the card, and once as the `finding_added` step in the
+    // trace — `runner._finish` records the answer message and then adds a
+    // finding whose statement *is* the answer. Which of the two the browser has
+    // when this line runs is a race between the conversation refetch and the
+    // event stream, so an unscoped `getByText` passes or fails on timing. It
+    // failed here for the first time on a PR that touched neither.
+    //
+    // A `.first()` would have papered over it and hidden a real duplicate, so
+    // the card is addressed by name instead.
+    await expect(page.getByTestId("answer-text")).toHaveText(SCRIPTED_ANSWER, {
+      timeout: 120_000,
+    });
     // `exact`, because the shell wraps the card in further elements and a
     // substring match now resolves to the badge and its ancestors alike. The
     // badge is the assertion; a `.first()` here would have hidden a real
@@ -328,7 +340,11 @@ test("the stack answers a question asked in a browser", async ({ page }) => {
     await page.getByLabel("Ask a question").fill("and how many were cancelled?");
     await page.getByRole("button", { name: "Send" }).click();
 
-    await expect(page.getByText(SCRIPTED_ANSWER)).toHaveCount(2, { timeout: 120_000 });
+    // Answer *cards*, not occurrences of the text. The trace carries the same
+    // sentence — see the assertion in "wait for the answer card" — so counting
+    // raw text counts each answer twice, and which of the two numbers is on the
+    // page depends on whether the event stream has caught up.
+    await expect(page.getByTestId("answer-text")).toHaveCount(2, { timeout: 120_000 });
     // **Counted on the disclosures, not on the citation buttons.** A closed
     // `<details>` keeps its contents out of the accessibility tree, so a role
     // query for the citation inside it finds nothing and would report the
@@ -366,7 +382,14 @@ test("the stack answers a question asked in a browser", async ({ page }) => {
 
     // **Both** answers, and both sets of evidence: a reload rebuilds the whole
     // thread from durable rows, not just the last thing said.
-    await expect(page.getByText(SCRIPTED_ANSWER)).toHaveCount(2, { timeout: 30_000 });
+    // **Where counting text was actually wrong, not merely lucky.** A reload
+    // rebuilds every run's trace from durable rows, so both traces carry the
+    // answer sentence again and this resolved to four. It passed for months
+    // because `toHaveCount` is satisfied the moment the number matches: the two
+    // cards render from the conversation fetch, the traces stream in after, and
+    // the assertion returned during the gap. Run locally, the traces won.
+    await expect(page.getByTestId("answer-text")).toHaveCount(2, { timeout: 30_000 });
+    await expect(page.getByTestId("answer-text").first()).toHaveText(SCRIPTED_ANSWER);
     await expect(page.getByText("Evidence", { exact: true })).toHaveCount(2);
   });
 });
