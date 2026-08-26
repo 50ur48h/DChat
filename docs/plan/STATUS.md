@@ -68,7 +68,15 @@ Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-26 by Claude Code (**Dev deployed to `19e8a55`, migration
+Last updated: 2026-08-26 by Claude Code (**The MiseQ swap: loaded and verified,
+              not yet cut over.** `miseq` and `miseq_readonly` exist beside the
+              untouched `fnb`/`fnb_readonly`; 29 of 29 table counts match the source
+              and the figures match the supplied context to the cent. The near-miss
+              worth reading: a Postgres role is server-wide, so loading with the
+              script's default name would have rewritten the password the deployed
+              app uses. Filed **B-143** — an `OPENAI_API_KEY` printed into a
+              transcript, deferred by the owner, not forgotten. Previously: **Dev
+              deployed to `19e8a55`, migration
               level `0031`** — one dispatch, no retries. Three revisions applied in a
               single hop and the ordering was checked rather than assumed: the running
               image predated all three, so 0030's `drop_column` removed something it
@@ -127,6 +135,61 @@ Last updated: 2026-08-26 by Claude Code (**Dev deployed to `19e8a55`, migration
               class it belongs to is now the first line of the operational-debt list)
 
 ---
+
+## The MiseQ swap, 2026-08-26 — loaded, verified, not yet cut over
+
+The owner supplied a replacement customer database. It is loaded onto the
+standalone server in `rg-fnb-demo` **beside** the old one, and the cut-over is
+theirs to make.
+
+**What exists now on `pg-fnb-demo-sk`:**
+
+| | old | new |
+|---|---|---|
+| database | `fnb` | `miseq` |
+| read-only login | `fnb_readonly` | `miseq_readonly` |
+| state | untouched, 35 objects in `public` | 29 tables, 785,445 rows |
+
+**The new role name is not cosmetic, and this is the near-miss worth keeping.**
+A Postgres role is **server-wide, not per-database**, and `load_sqlite.py` runs
+`ALTER ROLE … WITH LOGIN PASSWORD` when the role already exists. Loading with the
+script's default `fnb_readonly` would have rewritten the password of the login
+the **deployed app is registered with** — breaking the source the owner had
+explicitly asked to leave working until they confirmed the replacement. Caught by
+reading `grant_readonly_role` before running it rather than after.
+
+**Verified, and one probe re-run because it proved nothing.** The loader checks
+every table's count against the SQLite and exits non-zero on a mismatch: 29 of
+29. Then, as `miseq_readonly` over TLS: `fact_sale` 112,327 rows and real net
+sales `3625180.34`, both matching the supplied context document to the cent.
+`CREATE TABLE`, `UPDATE` and `DELETE` are refused on permissions — and the first
+`INSERT` probe was refused for *"column does not exist"*, which is not a
+permission check at all. It was re-run against a real column and refused with
+`permission denied for table fact_sale`. **A refusal for the wrong reason is not
+evidence**, and this one would have read as proof in a summary.
+
+**Deliberately not done.** The source's **7 views** are not created: the loader
+does not translate them and no hand-written `.views.sql` exists. The context
+document references them 14 times, so questions may want them; the owner's call
+was to skip until a question needs one, and to write the DDL into `.NewSampleData/`
+rather than into `ops/seed/` — which is where a previous hand-port put a
+customer's own literal strings into a public repository.
+
+**The admin password was reset** with `az postgres flexible-server update` at the
+owner's instruction, rather than dug out. It and the new read-only password live
+in `.env` and nowhere else — not here, not in a PR body.
+
+**Still open**: the owner registers the new source in the deployed app and
+confirms it answers. Only then does the old `fnb` database get dropped, and only
+then is the firewall narrowed — doing either during the test would make an
+infrastructure change look like a data problem.
+
+**The firewall is the one thing left that is plainly wrong.** The server carries
+a single rule, `0.0.0.0`–`255.255.255.255`: anything on the internet can reach a
+customer's data. It narrows to the owner's address plus Azure services once the
+swap is confirmed. Note the dev host's public address **changed mid-session**
+(171.79.38.47 → 103.168.16.2), so the rule has to be written from whatever it is
+on the day rather than from a value recorded here.
 
 ## WP13.4 — all six states (D-049, closes B-142)
 
