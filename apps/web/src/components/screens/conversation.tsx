@@ -599,7 +599,11 @@ function AnswerCard({
               gate caught from the other direction when the card rendered a
               citation and no words at all. The card is the assistant turn now, so
               there is one rendering of an answer and nothing to keep in step. */}
-          {words && <p className={styles.answerText}>{words}</p>}
+          {words && (
+            <p className={styles.answerText} data-testid="answer-text">
+              {words}
+            </p>
+          )}
           <AnswerChart chart={run.chart} />
           {/* **A caveat is never folded away.** It changes what the answer
               means, so a reader who opens nothing must still see it; hiding the

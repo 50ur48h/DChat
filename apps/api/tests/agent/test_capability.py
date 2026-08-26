@@ -477,5 +477,31 @@ async def test_the_planner_is_told_which_pairs_cannot_be_joined(
     await _execute(context, run_id)
 
     prompt = fake_llm.calls_for("sql")[0].prompt
-    assert "cannot be combined" in prompt
+    # The pair is named and the instruction is there. **What is asserted is the
+    # honest claim**: the catalog records no link, which is knowledge, rather
+    # than the database forbidding one, which would be a rule nobody wrote.
+    assert "records no link" in prompt
+    assert "not a prohibition" in prompt
     assert "products" in prompt
+
+
+def test_a_refusal_reports_what_is_known_and_never_a_rule() -> None:
+    """The sentence a person reads must not invent a prohibition.
+
+    On a customer database that declares no keys at all, the old wording was
+    false twice over: it said the database had no link where the link joins
+    112,327 of 112,327 rows, and it said the pair *cannot* be combined where the
+    truth is that this platform cannot verify the join. A refusal that reports a
+    rule the platform invented sounds like diligence, which is what makes it
+    worse than an ordinary wrong answer (B-133, B-119).
+    """
+    sentence = CapabilityGap(left="public.dim_outlet", right="public.fact_sale").sentence()
+
+    assert "public.dim_outlet" in sentence and "public.fact_sale" in sentence
+    # What it may say: the catalog's own knowledge, and the consequence.
+    assert "records no link" in sentence
+    assert "rather than a rule" in sentence
+    # What it may never say: that the database forbids it, or that no link
+    # exists in the data. Neither is knowable from a missing constraint.
+    for forbidden in ("prohibit", "cannot be combined", "has no link", "there is no foreign key"):
+        assert forbidden not in sentence, f"the refusal claims more than it knows: {forbidden!r}"
