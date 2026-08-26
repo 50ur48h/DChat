@@ -13,6 +13,16 @@ model is consulted, and no model can override it. Architecture 4.3 is explicit:
 *"the planner is told so as fact"* and *"the model cannot talk its way past this
 check."*
 
+**What that verdict is a fact *about* is the catalog, not the database.** The
+distinction had no consequence while every source declared its keys, and a
+customer database that declares none made it the whole story: `miseq` has zero
+foreign keys and joins `dim_outlet` to `fact_sale` across 112,327 of 112,327
+rows, so an empty graph meant refusing nearly every real question — while saying
+the database *prohibited* the join. It does not. The catalog prohibits nothing;
+it knows nothing, and every sentence produced here now says the second thing.
+The refusal itself is unchanged, and its reason is a consequence rather than a
+rule: an unverified join returns a cartesian product, not an error.
+
 **The required tables are the ones the proposed statement names.** Deciding up
 front which tables a question "needs" would mean inferring intent, and inferring
 it wrongly means refusing a question that was perfectly answerable — a false
@@ -117,13 +127,30 @@ class CapabilityGap:
         Names both tables, says what kind of thing is missing, and says what
         would unlock it — because "I cannot answer that" without a reason is
         indistinguishable from the product being broken.
+
+        **It says what is known, never what is forbidden.** The previous wording
+        was *"there is no foreign key or join table connecting the two, so they
+        cannot be combined in one query"*, and on a real customer database both
+        halves were false at once: `dim_outlet` and `fact_sale` join on
+        `outlet_key` across 112,327 of 112,327 rows, and the database simply
+        declares nothing about it. The catalog prohibits nothing; it knows
+        nothing. A refusal that reports a rule the platform invented is the
+        defect B-133 and B-119 are both about, and it is worse here than an
+        ordinary wrong answer because it sounds like diligence.
+
+        The *decision* is unchanged and so is its reason: a join this platform
+        cannot verify returns every row of one table against every row of the
+        other rather than an error, and a confident answer computed from a
+        cartesian product is indistinguishable from a real one.
         """
         return (
-            f"This database has {self.left} and {self.right}, but nothing linking "
-            f"them — there is no foreign key or join table connecting the two, so "
-            f"they cannot be combined in one query. Answering this needs a linking "
-            f"table (for example an order-items table joining the two), or a "
-            f"column on one that refers to the other."
+            f"This database has {self.left} and {self.right}, and the catalog "
+            f"records no link between them — it declares no foreign key joining "
+            f"the two. That is the limit of what is known here rather than a rule "
+            f"against it, and an unverified join would return every row of one "
+            f"against every row of the other, so it is not attempted. A declared "
+            f"foreign key, or a linking table (for example an order-items table "
+            f"joining the two), would make this answerable."
         )
 
 

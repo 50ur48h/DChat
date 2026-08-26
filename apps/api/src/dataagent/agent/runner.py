@@ -385,12 +385,22 @@ async def _investigate(
     )
     notes: list[str] = []
     if gaps:
+        # **What is known, not what is forbidden.** This used to say "cannot be
+        # combined — this database has no link between them", and both halves
+        # can be false at once: a database may join two tables perfectly while
+        # declaring nothing about it. The catalog prohibits nothing; it knows
+        # nothing. The instruction that follows is unchanged, because a join
+        # this platform cannot verify still returns every row against every row
+        # rather than an error — the reason to avoid it is the consequence, not
+        # a rule.
         notes.append(
-            "These tables cannot be combined in one query — this database has no "
-            "link between them: "
+            "The catalog records no link between these tables — no declared foreign "
+            "key joins them: "
             + "; ".join(f"{gap.left} and {gap.right}" for gap in gaps)
-            + ". Do not write a query joining any such pair; if the question needs "
-            "one, set answerable to false and say which link is missing."
+            + ". That is the limit of what is known here, not a prohibition. A join "
+            "that cannot be verified returns every row of one against every row of "
+            "the other rather than an error, so do not write one; if the question "
+            "needs it, set answerable to false and say which link is missing."
         )
     if chasms:
         # Deliberately phrased as an instruction rather than a prohibition
