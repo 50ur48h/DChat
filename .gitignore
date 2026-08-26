@@ -87,7 +87,17 @@ blob-report/
 # dictionary that came with it. `make seed.fnb` loads it into seed-fnb-pg.
 # The whole directory, not just the database — a dictionary names real tables,
 # outlets and suppliers, and this repository is public.
+#
+# **Matched by prefix, not by exact name.** `.NewSampleData/` arrived on
+# 2026-08-26 holding a customer's replacement database and was *not* ignored,
+# because the rule below named one directory exactly. It was caught before any
+# `git add`, but this session had run `git add -A` several times and the repo is
+# public — the gap between "a customer drops a folder in" and "it is committed"
+# is one careless command. Any directory whose name contains `SampleData` is
+# customer data by default now, whatever it is called.
 .SampleData/
+*SampleData/
+*SampleData*/
 
 # ---------------------------------------------------------------------------
 # Editors / OS
