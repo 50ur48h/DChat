@@ -7,17 +7,17 @@ Current position: **Phase 13 — the chat product. WP13.4 in review; WP13.1a
                   WP12.2 (D-043)** — WP12.3 and WP12.4 are deferred, not
                   cancelled. **There is no `v1.0.0` tag and there will not be one
                   until WP12.4 resumes.**
-                  **Dev is deployed, current and answering questions.** Both
-                  container apps run the image built from `fa7ace3`; `/healthz`
-                  reports `{"status":"ok", ..., "missing_settings":[]}`; the
-                  identity self-check passes, so Key Vault write/delete and Blob
-                  write/read are proven by the pipeline rather than by a person.
-                  The owner asked two questions against a customer-style F&B
-                  database through the browser and both were correct.
-                  **`main` is ahead of dev**: everything merged after `fa7ace3`
-                  — #118 included, which carries migrations 0029 and 0030 — is
-                  not deployed. See *"Deploying what is on main"* below before
-                  dispatching.
+                  **Dev is deployed and current at `19e8a55` (2026-08-26),
+                  migration level `0031`.** Both container apps run that image;
+                  `/healthz` reports `{"status":"ok", ..., "missing_settings":[]}`;
+                  the identity self-check passes, so Key Vault write/delete and
+                  Blob write/read are proven by the pipeline rather than by a
+                  person. The whole of Phase 13 — the chat product, the chosen
+                  design, the working state and the six states — is live.
+                  The deploy took one dispatch and needed no retry. See
+                  *"Dev is current"* below for why three revisions in one hop
+                  were safe, and for the warning that section used to carry and
+                  had wrong.
 Next step:        **The owner's.** WP13.1a, WP13.1b and WP13.2 together deliver
                   the chat product asked for on 2026-08-25, in the design the
                   owner chose from two mockups. The pieces explicitly held back
@@ -68,7 +68,14 @@ Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-26 by Claude Code (**WP13.4 — all six states, D-049,
+Last updated: 2026-08-26 by Claude Code (**Dev deployed to `19e8a55`, migration
+              level `0031`** — one dispatch, no retries. Three revisions applied in a
+              single hop and the ordering was checked rather than assumed: the running
+              image predated all three, so 0030's `drop_column` removed something it
+              had never referenced. **The warning this file carried about that was
+              wrong** and is corrected — a recorded hazard that is not real trains
+              people to skip the check that would catch one that is. Previously:
+              **WP13.4 — all six states, D-049,
               closing B-142.** Skeletons, empty states with one action, `Pending` for
               one-shot operations, a real ingestion meter, the optimistic question
               bubble and the shared shimmer. The rule that came out of it: which
@@ -632,18 +639,37 @@ deferral with its remaining scope written out. Nothing here is a queue.
 Supersedes the 2026-08-25 handoff further down, which was written before Phase 12
 stopped and still reads as a plan.
 
-## Deploying what is on main
+## Dev is current, 2026-08-26 — and the warning this section carried was wrong
 
-Dev runs `fa7ace3`. `main` is ahead by **#118**, which carries revisions **0029**
-and **0030**. `deploy.yml` migrates *before* it rolls the apps, so the ordering is
-right — but between the migration and the revision swap the **old** image is still
-serving, and it selects an `answered` column that 0030 drops. The window is the
-length of a revision swap, and the previous revision was going away regardless.
-Not a blocker; the one sharp edge in the change.
+**Deployed: `19e8a55`, migration level `0031`.** One dispatch, no retries, no
+failed steps. Every step green, in order: preflight → role-id check → `what-if` →
+infra → vault seed → build → migration job → migrate + grant app login → roll →
+smoke → identity self-check.
 
-The deploy runs: preflight → role-id check → `what-if` → infra → vault seed →
-build → migration job → migrate + grant app login → roll → smoke → identity
-self-check.
+**Three revisions applied in one hop — 0029, 0030 and 0031 — and the ordering
+question is settled rather than assumed.** `deploy.yml` migrates *before* it
+rolls, so between the migration and the revision swap the **old** image is still
+serving against the **new** schema. That window is only dangerous if the running
+code touches something a migration removes.
+
+**It did not, and the previous version of this section claimed it did.** It said
+the old image "selects an `answered` column that 0030 drops". That is false, and
+checking took one grep: `fa7ace3` predates 0029, so it never had the column.
+Every `answered` in that image is either prose in a comment or a field on the
+**in-memory** `FinalizeIn` / `RunOutcome` objects — which is B-133's whole story,
+one release earlier. No SQL in the deployed image referenced it.
+
+So the hop was safe for a reason worth writing down: **dev sat *before* all three
+revisions rather than between them.** 0029 and 0031 are additive, and additive
+columns cannot break an explicit `SELECT` list; 0030's drop targeted a column the
+running code had never heard of; and 0030's two CHECK constraints are satisfied
+by the NULLs an older writer leaves behind. **The danger case is the one this
+deploy did not have** — an image that sits mid-sequence, having learned a column
+that a later revision removes. That is worth re-checking, by this same grep,
+before every deploy that crosses a `drop_column`.
+
+**The correction matters more than the deploy.** A recorded hazard that is not
+real trains people to skip the check that would catch a real one.
 
 ## Deferred work — what each still owes
 
