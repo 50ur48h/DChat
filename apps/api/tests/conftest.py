@@ -378,6 +378,21 @@ def isolated_customer_database(database_url: URL) -> Iterator[CustomerDatabase]:
 
 
 @pytest.fixture
+def undeclared_customer_database(database_url: URL) -> Iterator[CustomerDatabase]:
+    """A customer database with no primary keys and no foreign keys.
+
+    The shape most customer databases actually arrive in — `miseq` declares
+    **zero** of either — and therefore the one the inference in D-050 exists
+    for. Separate from `isolated_customer_database` rather than replacing it:
+    that fixture's declared key is what proves discovery reads real constraints,
+    and this one's absence is what proves the product does something sensible
+    when there are none.
+    """
+    with _temporary_database(database_url) as url:
+        yield asyncio.run(customer_db.build_undeclared(url))
+
+
+@pytest.fixture
 def migrated_database(alembic_config: Config, temp_database: URL) -> URL:
     """A temp database at head: schema, RLS policies and the application role."""
     command.upgrade(alembic_config, "head")

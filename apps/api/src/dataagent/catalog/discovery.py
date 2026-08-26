@@ -34,12 +34,15 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dataagent.catalog import cards
+from dataagent.catalog.inference import InferredKey, infer_relationships
 from dataagent.connectors.base import ColumnInfo, Connector, ConnectorError, ForeignKey, TableRef
+from dataagent.connectors.introspection import POSTGRES, TSQL
 from dataagent.datasources import service as datasources
 from dataagent.db.models import (
     CatalogColumn,
@@ -135,10 +138,15 @@ class _Crawl:
     columns_by_table: dict[tuple[str, str], tuple[ColumnInfo, ...]]
     relationships: tuple[ForeignKey, ...]
     hashes: dict[tuple[str, str], str]
+    #: Joins the engine does not declare, measured rather than guessed (D-050).
+    #: Empty when the database declares its keys properly, which is the case
+    #: this costs nothing in.
+    inferred: tuple[InferredKey, ...] = ()
 
 
-async def _crawl(connector: Connector) -> _Crawl:
-    """Four catalog reads, and the hashes that make a refresh cheap."""
+async def _crawl(connector: Connector, *, dialect: str = POSTGRES) -> _Crawl:
+    """Four catalog reads, the hashes that make a refresh cheap, and — where the
+    database declares nothing — a measured look for the joins it does have."""
     schemas = await connector.list_schemas()
     tables = await connector.list_tables(schemas)
     columns = await connector.list_columns(schemas)
@@ -155,7 +163,23 @@ async def _crawl(connector: Connector) -> _Crawl:
         )
         for table in tables
     }
+    # **Only where there is something to find.** A database that declares its
+    # keys needs none of this, and the scans are not free — so inference runs
+    # when the engine offered nothing at all, which is the case that was
+    # refusing every real question (B-145).
+    inferred: tuple[InferredKey, ...] = ()
+    if not relationships and tables:
+        report = await infer_relationships(
+            connector,
+            tables,
+            columns_by_table,
+            declared=(),
+            dialect=dialect,
+        )
+        inferred = report.keys
+
     return _Crawl(
+        inferred=inferred,
         tables=tuple(tables),
         columns_by_table=columns_by_table,
         relationships=tuple(relationships),
@@ -231,7 +255,11 @@ async def _read_the_database(view: datasources.DataSourceView) -> _Crawl:
     """
     connector = await datasources.connector_for_view(view)
     try:
-        return await _crawl(connector)
+        # `pg`/`mssql` are how a data source names its engine; `postgres`/`tsql`
+        # are how `introspection` names a SQL dialect. Two vocabularies, and the
+        # constants are used rather than the strings so a rename cannot quietly
+        # send T-SQL to Postgres.
+        return await _crawl(connector, dialect=POSTGRES if view.engine == "pg" else TSQL)
     finally:
         await connector.aclose()
 
@@ -404,7 +432,32 @@ async def _write_catalog(
         for key in crawl.relationships
     )
 
-    return len(crawl.tables), columns_written, len(crawl.relationships)
+    # Inferred edges, each carrying the numbers that justify it. `kind` is what
+    # keeps them separable everywhere downstream: the capability check relies on
+    # them, and an answer that rests on one is entitled to say so.
+    session.add_all(
+        CatalogRelationship(
+            org_id=org_id,
+            snapshot_id=snapshot_id,
+            constraint_name=key.constraint_name,
+            from_schema=key.from_schema,
+            from_table=key.from_table,
+            from_columns=[key.from_column],
+            to_schema=key.to_schema,
+            to_table=key.to_table,
+            to_columns=[key.to_column],
+            kind="inferred",
+            confidence=Decimal(str(key.confidence)),
+            evidence=key.evidence,
+        )
+        for key in crawl.inferred
+    )
+
+    return (
+        len(crawl.tables),
+        columns_written,
+        len(crawl.relationships) + len(crawl.inferred),
+    )
 
 
 async def _record_failure(

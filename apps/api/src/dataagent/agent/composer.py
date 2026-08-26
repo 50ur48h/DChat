@@ -30,6 +30,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Final
 
+from dataagent.agent.capability import decode_inferred_joins
 from dataagent.agent.critic import CriticVerdict
 from dataagent.agent.state import ExecutionRef, ResearchState
 from dataagent.agent.tools.finalize import FinalizeIn
@@ -217,6 +218,32 @@ def limitations_for(
     be made to sound uncertain by a component that always finds something.
     """
     notes: list[str] = []
+
+    # **An answer that rests on a measured join says so** (D-050). A declared
+    # foreign key is the engine's promise about every row it will ever hold; an
+    # inferred edge is this platform's report about the rows that were there
+    # when it looked. Both are good enough to join on. Only the first is good
+    # enough to pass off as the database's own word, so the difference is put in
+    # front of the reader rather than kept in the catalog.
+    #
+    # Narrowed to the tables the run actually read: a caveat about a join nobody
+    # used is noise, and noise is how a reader learns to skip caveats.
+    read: set[str] = set()
+    for execution in state.executions:
+        read.update(table.split(".")[-1].lower() for table in execution.tables)
+    inferred_used = [
+        (left, right)
+        for left, right in decode_inferred_joins(state.capability.get("inferred"))
+        if left.lower() in read and right.lower() in read
+    ]
+    if inferred_used:
+        joins = "; ".join(f"{left} and {right}" for left, right in sorted(inferred_used))
+        notes.append(
+            f"This database does not declare how {joins} join. The link used here "
+            f"was measured rather than declared — every value matched when the "
+            f"catalog was built — so it reflects the data as it was then rather "
+            f"than a rule the database enforces."
+        )
 
     # **First, and ahead of the budget caveat** (D-034). This module used to take
     # warnings only, on the reasoning that a block either sent the run round

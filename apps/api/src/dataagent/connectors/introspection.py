@@ -38,14 +38,16 @@ put into a metadata statement.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 
 from dataagent.connectors.base import PolicyGrant, ValidatedQuery
 
 __all__ = [
     "READONLY_PROBE_TABLE",
+    "pg_column_stats",
     "pg_columns",
     "pg_foreign_keys",
+    "pg_orphan_count",
     "pg_ranges",
     "pg_readonly_evidence",
     "pg_row_estimates",
@@ -56,8 +58,10 @@ __all__ = [
     "pg_write_probe_sql",
     "quote_pg",
     "quote_tsql",
+    "tsql_column_stats",
     "tsql_columns",
     "tsql_foreign_keys",
+    "tsql_orphan_count",
     "tsql_ranges",
     "tsql_readonly_evidence",
     "tsql_row_estimates",
@@ -469,6 +473,135 @@ def quote_tsql(identifier: str) -> str:
     """A T-SQL delimited identifier. Brackets, and `]` doubled."""
     escaped = identifier.replace("]", "]]")
     return f"[{escaped}]"
+
+
+def _stats_projection(quote: Callable[[str], str], columns: Sequence[str]) -> str:
+    """`count(*)`, then a non-null count and a distinct count per column."""
+    pieces = ["count(*)"]
+    for column in columns:
+        name = quote(column)
+        pieces.append(f"count({name})")
+        pieces.append(f"count(DISTINCT {name})")
+    return ", ".join(pieces)
+
+
+def pg_column_stats(schema: str, table: str, columns: Sequence[str]) -> ValidatedQuery:
+    """Exact row, non-null and distinct counts for every column, in one scan.
+
+    Used by relationship inference (D-050), which cannot work from the
+    profiler's sample: that reads the *first* n rows and counts distinct values
+    within them, which is a floor rather than a fact. Uniqueness is a claim about
+    every row, so it takes a query that reads every row.
+
+    One statement per table rather than one per column, because the scan is the
+    cost and a wide aggregate pays it once.
+    """
+    relation = f"{quote_pg(schema)}.{quote_pg(table)}"
+    projection = _stats_projection(quote_pg, columns)
+    return ValidatedQuery(
+        _GRANT,
+        sql=f"SELECT {projection} FROM {relation}",  # noqa: S608 - quoted above
+        dialect=POSTGRES,
+    )
+
+
+def tsql_column_stats(schema: str, table: str, columns: Sequence[str]) -> ValidatedQuery:
+    """`pg_column_stats` for SQL Server."""
+    relation = f"{quote_tsql(schema)}.{quote_tsql(table)}"
+    projection = _stats_projection(quote_tsql, columns)
+    return ValidatedQuery(
+        _GRANT,
+        sql=f"SELECT {projection} FROM {relation}",  # noqa: S608 - quoted above
+        dialect=TSQL,
+    )
+
+
+def _orphan_sql(
+    quote: Callable[[str], str],
+    child_schema: str,
+    child_table: str,
+    child_column: str,
+    parent_schema: str,
+    parent_table: str,
+    parent_column: str,
+) -> str:
+    """How many of the child's **distinct** values the parent does not contain.
+
+    **`NOT EXISTS`, never `NOT IN`.** `NOT IN` against a subquery holding a
+    single null is false for every row, so a parent column with one null would
+    report perfect containment for a child that has none — inventing a key out
+    of a null. The two spellings look equivalent and are not.
+
+    **Distinct, not every row, and it is the same claim.** Every non-null child
+    value has a match exactly when every *distinct* non-null child value does.
+    The cost is not the same: `fact_sale_line.outlet_key` is 471,786 rows and
+    **five** distinct values, so the row form asked the parent 471,786 questions
+    to learn what five answered. That is why the first live run measured ten
+    candidates in four minutes and never reached the join it was built for.
+
+    The count returned is therefore of unmatched *values*, not unmatched rows —
+    which is what "is this column contained in that one" actually asks. The row
+    count stands behind it in the evidence as `child_non_null`.
+    """
+    child = f"{quote(child_schema)}.{quote(child_table)}"
+    parent = f"{quote(parent_schema)}.{quote(parent_table)}"
+    c_col, p_col = quote(child_column), quote(parent_column)
+    distinct = (
+        f"SELECT DISTINCT c.{c_col} AS v "  # noqa: S608 - every identifier quoted above
+        f"FROM {child} AS c WHERE c.{c_col} IS NOT NULL"
+    )
+    return (
+        f"SELECT count(*) FROM ({distinct}) AS s "  # noqa: S608 - every identifier quoted above
+        f"WHERE NOT EXISTS (SELECT 1 FROM {parent} AS p WHERE p.{p_col} = s.v)"
+    )
+
+
+def pg_orphan_count(
+    child_schema: str,
+    child_table: str,
+    child_column: str,
+    parent_schema: str,
+    parent_table: str,
+    parent_column: str,
+) -> ValidatedQuery:
+    """How many non-null child values the parent does not contain."""
+    return ValidatedQuery(
+        _GRANT,
+        sql=_orphan_sql(
+            quote_pg,
+            child_schema,
+            child_table,
+            child_column,
+            parent_schema,
+            parent_table,
+            parent_column,
+        ),
+        dialect=POSTGRES,
+    )
+
+
+def tsql_orphan_count(
+    child_schema: str,
+    child_table: str,
+    child_column: str,
+    parent_schema: str,
+    parent_table: str,
+    parent_column: str,
+) -> ValidatedQuery:
+    """`pg_orphan_count` for SQL Server."""
+    return ValidatedQuery(
+        _GRANT,
+        sql=_orphan_sql(
+            quote_tsql,
+            child_schema,
+            child_table,
+            child_column,
+            parent_schema,
+            parent_table,
+            parent_column,
+        ),
+        dialect=TSQL,
+    )
 
 
 def pg_sample(schema: str, table: str, columns: Sequence[str], limit: int) -> ValidatedQuery:

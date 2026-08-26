@@ -74,8 +74,9 @@ from __future__ import annotations
 
 import uuid
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from typing import cast
 
 from sqlalchemy import select
 
@@ -91,6 +92,8 @@ __all__ = [
     "CapabilityGap",
     "CapabilityVerdict",
     "JoinGraph",
+    "decode_inferred_joins",
+    "encode_inferred_joins",
     "load_join_graph",
 ]
 
@@ -250,6 +253,29 @@ class JoinGraph:
 
     edges: dict[str, frozenset[str]]
     parents: dict[str, frozenset[str]] = field(default_factory=dict[str, frozenset[str]])
+    #: Pairs joinable only because the platform measured the join rather than
+    #: being told about it (D-050). Unordered pairs, because what a reader is
+    #: owed is that *this join* was inferred, not which way the edge points.
+    #: Empty by default, so a hand-built graph claims nothing it was not given.
+    inferred: frozenset[frozenset[str]] = frozenset()
+
+    def inferred_joins(self, tables: Sequence[str]) -> tuple[tuple[str, str], ...]:
+        """Which of the joins among `tables` rest on a measurement.
+
+        **The point is that an answer can say so.** A declared foreign key is
+        the engine's promise about every row it will ever hold; an inferred edge
+        is this platform's report about the rows that were there when it looked.
+        Both are good enough to join on — the second is not good enough to pass
+        off as the first, and a reader who is told which one they got can weigh
+        the answer themselves.
+        """
+        wanted = {_bare(name) for name in tables}
+        found = [
+            tuple(sorted(pair))
+            for pair in self.inferred
+            if len(pair & wanted) == 2  # both ends are tables this answer used
+        ]
+        return tuple(sorted((left, right) for left, right in found))
 
     def _hop(self, here: str, there: str) -> str:
         """Which way this single edge is being walked.
@@ -415,6 +441,40 @@ def _bare(name: str) -> str:
     return name.strip().strip('"').split(".")[-1].lower()
 
 
+def encode_inferred_joins(pairs: Sequence[tuple[str, str]]) -> list[dict[str, str]]:
+    """The form `state.capability` carries an inferred join in.
+
+    **One codec, used by both ends, because this repository keeps shipping the
+    other thing.** B-109 was a colour channel the tool accepted and the schema
+    never carried; B-133 was a value written to a trace event and no column. Both
+    were a producer and a consumer agreeing in a developer's head and nowhere
+    else. `runner` calls this, `composer` calls `decode_inferred_joins`, and a
+    rename that breaks the pair breaks them together instead of silently
+    dropping every caveat.
+    """
+    return [{"left": left, "right": right} for left, right in pairs]
+
+
+def decode_inferred_joins(recorded: object) -> tuple[tuple[str, str], ...]:
+    """Read back what `encode_inferred_joins` wrote.
+
+    Tolerant of anything else, because `capability` is a plain dict that has been
+    round-tripped through the database: a run stored before this existed has no
+    such key, and that is a run with no caveat rather than an error.
+    """
+    if not isinstance(recorded, list):
+        return ()
+    out: list[tuple[str, str]] = []
+    for entry in cast(list[object], recorded):
+        if not isinstance(entry, dict):
+            continue
+        pair = cast(dict[str, object], entry)
+        left, right = pair.get("left"), pair.get("right")
+        if isinstance(left, str) and isinstance(right, str):
+            out.append((left, right))
+    return tuple(out)
+
+
 async def load_join_graph(org_id: uuid.UUID, data_source_id: uuid.UUID) -> JoinGraph:
     """The active catalog's join graph, including tables that join to nothing.
 
@@ -452,6 +512,7 @@ async def load_join_graph(org_id: uuid.UUID, data_source_id: uuid.UUID) -> JoinG
                     CatalogRelationship.from_table,
                     CatalogRelationship.to_table,
                     CatalogRelationship.confidence,
+                    CatalogRelationship.kind,
                 ).where(CatalogRelationship.snapshot_id == snapshot)
             )
         ).all()
@@ -462,14 +523,21 @@ async def load_join_graph(org_id: uuid.UUID, data_source_id: uuid.UUID) -> JoinG
     # refused the constraint, which is exactly why the direction means something
     # (D-026): child→parent narrows, parent→child fans out.
     parents: dict[str, set[str]] = {}
-    for from_table, to_table, confidence in rows:
+    # Which pairs are joinable only because this platform *measured* the join
+    # rather than being told about it (D-050). Kept as a set of unordered pairs
+    # because a reader is owed the fact for the pair, not for a direction.
+    inferred: set[frozenset[str]] = set()
+    for from_table, to_table, confidence, kind in rows:
         if confidence is not None and float(confidence) < MIN_CONFIDENCE:
             continue
         left, right = _bare(from_table), _bare(to_table)
         adjacency.setdefault(left, set()).add(right)
         adjacency.setdefault(right, set()).add(left)
         parents.setdefault(left, set()).add(right)
+        if kind == "inferred":
+            inferred.add(frozenset((left, right)))
     return JoinGraph(
         edges={name: frozenset(links) for name, links in adjacency.items()},
         parents={name: frozenset(links) for name, links in parents.items()},
+        inferred=frozenset(inferred),
     )

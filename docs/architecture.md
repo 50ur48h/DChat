@@ -409,7 +409,7 @@ flowchart LR
 
 ## 5.3 Schema / metadata model (§23)
 
-Stored in platform Postgres (tables in Part 10.1): `catalog_snapshots` → `catalog_tables` (incl. a rendered **table card**: name, description, columns with types and sample values, keys, flags — plus its embedding) → `catalog_columns` (type, nullability, PK/FK, null_frac, distinct_est, min/max, top_values, `semantic_role: measure|dimension|time|id`, `sensitivity`, `policy: allow|mask|deny`) → `catalog_relationships` (from/to, kind `declared|inferred`, confidence). Everything carries `org_id`.
+Stored in platform Postgres (tables in Part 10.1): `catalog_snapshots` → `catalog_tables` (incl. a rendered **table card**: name, description, columns with types and sample values, keys, flags — plus its embedding) → `catalog_columns` (type, nullability, PK/FK, null_frac, distinct_est, min/max, top_values, `semantic_role: measure|dimension|time|id`, `sensitivity`, `policy: allow|mask|deny`) → `catalog_relationships` (from/to, kind `declared|inferred`, confidence, `evidence` — what was measured, for the inferred ones only; D-050). Everything carries `org_id`.
 
 ## 5.4 Semantic layer architecture (§24)
 
@@ -739,7 +739,11 @@ column_policies(id, org_id, data_source_id, schema_name, table_name, column_name
                 -- snapshot, and a refresh must never reset one (D-013)
 catalog_relationships(id, org_id, snapshot_id, constraint_name,
                       from_schema, from_table, from_cols, to_schema, to_table, to_cols,
-                      kind declared|inferred, confidence)
+                      kind declared|inferred, confidence, evidence jsonb)
+                      -- `evidence` records what was measured for an inferred
+                      -- edge: parent uniqueness, child containment, the row
+                      -- counts behind both. Null for a declared one, which
+                      -- needs no evidence beyond the constraint (D-050)
 knowledge_documents(id, org_id, title, blob_path, mime, status, created_by, created_at)
 knowledge_chunks(id, org_id, document_id, seq, text, headings, embedding vector(1536), tsv tsvector)
 semantic_definitions(id, org_id, kind metric|entity|synonym, name, version, definition jsonb,

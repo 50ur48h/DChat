@@ -19,14 +19,16 @@ import uuid
 from collections.abc import AsyncIterator
 
 import pytest
-from sqlalchemy import URL, text
+from sqlalchemy import URL, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from customer_db import CustomerDatabase
+from dataagent.agent.capability import JOINABLE, UNREACHABLE, load_join_graph
 from dataagent.catalog import browse, discovery
 from dataagent.connectors.base import ColumnInfo, TableRef
 from dataagent.datasources import service as datasources
 from dataagent.db import engine as engine_module
+from dataagent.db.models import CatalogRelationship
 from dataagent.secrets.local import LocalSecretsProvider
 from dataagent.tenancy import session as session_module
 
@@ -457,3 +459,101 @@ def test_the_table_itself_is_in_the_hash() -> None:
     assert discovery.structural_hash(_table(name="invoices"), columns) != baseline
     assert discovery.structural_hash(_table(kind="view"), columns) != baseline
     assert discovery.structural_hash(_table(comment="orders"), columns) != baseline
+
+
+# ---------------------------------------------------------------------------
+# Inference, on the path the product actually walks (D-050, B-145)
+# ---------------------------------------------------------------------------
+
+
+async def test_an_undeclared_key_reaches_the_graph_the_planner_is_given(
+    platform: URL, migrated_database: URL, undeclared_customer_database: CustomerDatabase
+) -> None:
+    """**The reachability proof, not a proof that inference computes.**
+
+    `tests/catalog/test_inference.py` hands `infer_relationships` its arguments
+    directly, which is the one thing the product cannot do — and this repository
+    has shipped five capabilities that passed exactly that kind of test while
+    being reachable by nothing (CLAUDE.md). So this asserts nothing about the
+    inference function. It calls `discover`, the way a refresh does, and then
+    asks `load_join_graph` — the function the runner calls before planning — and
+    the edge has to have survived every step in between: measurement, the
+    `kind="inferred"` write, the confidence filter, and the graph build.
+
+    If any link stops carrying it, this goes red rather than staying green over
+    a capability nothing reaches.
+    """
+    org_id, data_source_id = await _registered(migrated_database, undeclared_customer_database)
+
+    outcome = await discovery.discover(
+        org_id=org_id, actor_user_id=None, data_source_id=data_source_id
+    )
+    assert outcome.changed is True
+
+    graph = await load_join_graph(org_id, data_source_id)
+
+    # The join the whole feature exists for, on a database that declares nothing.
+    assert graph.classify("fact_sale", "dim_outlet") == JOINABLE
+    assert graph.check(["fact_sale", "dim_outlet"]).answerable is True
+
+    # And the answer can say the join was measured rather than declared.
+    assert graph.inferred_joins(["fact_sale", "dim_outlet"]) == (("dim_outlet", "fact_sale"),)
+
+
+async def test_the_two_traps_do_not_become_joins(
+    platform: URL, migrated_database: URL, undeclared_customer_database: CustomerDatabase
+) -> None:
+    """Both halves of the owner's test, through the product's own path.
+
+    `map_item_key.item_key` and `dim_item.item_key` share a name and not one
+    value; `fact_sale.outlet_key` holds 1 to 5, which is inside `fact_transfer`'s
+    1 to 9 and inside every other dense range. An invented edge is worse than a
+    missing one — a missing edge refuses, an invented one answers, and the wrong
+    join returns a cartesian product rather than an error.
+    """
+    org_id, data_source_id = await _registered(migrated_database, undeclared_customer_database)
+    await discovery.discover(org_id=org_id, actor_user_id=None, data_source_id=data_source_id)
+
+    graph = await load_join_graph(org_id, data_source_id)
+
+    assert graph.classify("map_item_key", "dim_item") == UNREACHABLE, "same name, no shared values"
+    assert graph.classify("fact_sale", "fact_transfer") == UNREACHABLE, "1..5 fits 1..9"
+    assert graph.check(["map_item_key", "dim_item"]).answerable is False
+
+
+async def test_the_stored_edge_carries_what_was_measured(
+    platform: URL, migrated_database: URL, undeclared_customer_database: CustomerDatabase
+) -> None:
+    """A wrong edge should be a question about numbers, not an argument.
+
+    `evidence` is written by discovery and read by nobody at runtime, which is
+    precisely the shape of B-100 and B-133 — so it is asserted here on the
+    stored row rather than on the value in flight.
+    """
+    org_id, data_source_id = await _registered(migrated_database, undeclared_customer_database)
+    await discovery.discover(org_id=org_id, actor_user_id=None, data_source_id=data_source_id)
+
+    async with session_module.org_session(org_id) as session:
+        rows = (
+            await session.execute(
+                select(
+                    CatalogRelationship.from_table,
+                    CatalogRelationship.to_table,
+                    CatalogRelationship.kind,
+                    CatalogRelationship.confidence,
+                    CatalogRelationship.evidence,
+                )
+            )
+        ).all()
+
+    edges = {(row.from_table, row.to_table): row for row in rows}
+    assert ("fact_sale", "dim_outlet") in edges
+
+    edge = edges[("fact_sale", "dim_outlet")]
+    assert edge.kind == "inferred"
+    assert float(edge.confidence) >= 0.9
+    assert edge.evidence is not None
+    assert edge.evidence["orphans"] == 0
+    assert edge.evidence["parent_unique"] is True
+    assert edge.evidence["coverage"] == 1.0
+    assert edge.evidence["child_non_null"] == 40

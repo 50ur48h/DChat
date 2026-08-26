@@ -653,6 +653,11 @@ class CatalogRelationship(Base):
     confidence: Mapped[Decimal] = mapped_column(
         Numeric(precision=3, scale=2), nullable=False, server_default=text("1.0")
     )
+    #: What was measured, for an ``inferred`` edge (revision 0032, D-050).
+    #: **Null for a declared key and that is the honest value** — a foreign key
+    #: the engine states was read, not measured, and ``{}`` would suggest an
+    #: empty measurement rather than no measurement.
+    evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
 
 
 class AuditLog(Base):
