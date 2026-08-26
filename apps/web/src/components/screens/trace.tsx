@@ -51,6 +51,7 @@ const STEP_WORDS: Record<string, string> = {
   sql_validated: "Query checked",
   sql_rejected: "Query refused",
   query_executed: "Got results",
+  knowledge_consulted: "Read the organization's documents",
   result_summarized: "Read the results",
   finding_added: "Noted a finding",
   hypothesis_updated: "Updated a hypothesis",

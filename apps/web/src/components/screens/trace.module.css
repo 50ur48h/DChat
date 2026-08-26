@@ -151,7 +151,17 @@
   animation: spin 700ms linear infinite;
 }
 
+/*
+ * **The step word never shrinks; the detail does.**
+ *
+ * Both were `flex: 0 1 auto` with the default `min-width: auto`, so a long
+ * detail squeezed the word down to its longest-word width and it wrapped one
+ * word per line — "Checked what this database can answer" became six lines.
+ * The detail is the thing that should give: it already has `text-overflow:
+ * ellipsis`, which only ever does anything if it is what shrinks.
+ */
 .word {
+  flex: 0 0 auto;
   font-weight: 600;
   color: var(--ink);
 }
@@ -172,6 +182,7 @@
 }
 
 .detail {
+  flex: 1 1 auto;
   min-width: 0;
   color: var(--ink-subtle);
   font-size: 11.5px;
