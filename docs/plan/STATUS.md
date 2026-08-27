@@ -28,7 +28,11 @@ Current position: **Phase 13 — the chat product. WP13.1a (#121), WP13.1b
                   *"Dev is current"* below for why three revisions in one hop
                   were safe, and for the warning that section used to carry and
                   had wrong.
-Next step:        **WP13.12 — the period-coverage check (D-051).** Asked *"sales
+Next step:        **WP13.15 — the discovery version stamp (D-054, closes
+                  B-149).** Promoted ahead of WP13.12-13.14 for a reason that is
+                  not importance: all three add to what discovery writes, so all
+                  three land with the same defect unless this is in place first.
+                  Then **WP13.12 — the period-coverage check (D-051).** Asked *"sales
                   last month"* on 2026-08-27 the deployed app resolved **July
                   2026** against data ending **2025-12-31**, and the critic
                   *requires* that empty range rather than merely permitting it.
@@ -82,7 +86,16 @@ Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-27 by Claude Code (**The MiseQ v6.3 contract, mapped
+Last updated: 2026-08-27 by Claude Code (**Dev is current at `4d4513f`, and the
+              refresh could not see the capability it was deployed for.** A stated
+              invariant — `structural_hash` covering *"everything the catalog
+              stores about a table, and nothing else"* — was true when written and
+              falsified by D-050 the next day, with nothing checking it. The
+              refresh also *pays* for the sweep it discards, because inference runs
+              before the change decision. Filed **B-149** (P1), **B-150**
+              (staleness, which the stamp does not fix) and **B-151** (the same
+              class, found by looking: `MIN_CONFIDENCE` calibrated in a comment).
+              Previously: **The MiseQ v6.3 contract, mapped
               before any code.** Their contract assumes an LLM that reads a join
               catalog before writing SQL; ours derives joinability from the schema
               and the model cannot argue past it, so the content goes into the
@@ -216,6 +229,74 @@ customer's data. It narrows to the owner's address plus Azure services once the
 swap is confirmed. Note the dev host's public address **changed mid-session**
 (171.79.38.47 → 103.168.16.2), so the rule has to be written from whatever it is
 on the day rather than from a value recorded here.
+
+## The refresh that could not see the new capability (D-054, B-149)
+
+**Dev was deployed to `4d4513f` on 2026-08-27** — one dispatch, no retries, every
+step green including the migration job and the identity self-check; `/healthz`
+reports `missing_settings: []` and the served OpenAPI carries the routes D-050
+added, so the image is genuinely current rather than assumed to be.
+
+Then **Refresh catalog** on the MiseQ source answered *"No change. The catalog is
+still version 1, describing 29 tables."* and wrote no inferred relationship. The
+database had not changed. The platform had.
+
+**The finding is not the skip.** `structural_hash` states an invariant in its own
+docstring — *"Everything WP4.1 stores about a table goes in, and nothing else
+does — so two crawls that agree on this hash agree on every catalog row"* — which
+was **true when written and correct as reasoning**. D-050 added something to the
+snapshot that is not a function of table shape, and the sentence became false the
+next day. Nothing went red, because nothing was checking that the catalog was
+still a function of only the hash's inputs.
+
+**And it is worse than a skip.** Inference runs inside `_crawl`, which runs
+*before* `_store` compares anything, so that refresh scanned 251 columns for
+distinct counts and ran up to 97 containment queries against the customer's
+database — and discarded every result. The capability is paid for on every no-op
+refresh and stored on none of them.
+
+It generalises: **any source registered before any future discovery capability is
+permanently and silently missing it.** WP13.13's imported join catalog would land
+in snapshots no refresh ever rebuilds.
+
+### The class, checked rather than assumed
+
+The owner asked whether *a documented invariant with nothing enforcing it* had
+other instances. It was checked, and the answer is reassuring about the habit and
+not about the exceptions: `TENANT_TABLES`, `EVENT_TYPES` and `OUTCOME_STATES`
+each have a test that counts them, and `RELATIONSHIP_KINDS` builds its own CHECK
+from a single constant so it cannot drift. **Two were found without a counter** —
+this one, and **B-151**: `inference.py` calibrates `0.95 / 0.92 / 0.80` against
+`capability.MIN_CONFIDENCE = 0.9` in a **comment**, so raising that threshold
+above 0.95 would silently drop every inferred edge out of the join graph while
+discovery kept writing them and the catalog kept listing them.
+
+### What was measured while the catalog could not be
+
+Run against the live `miseq` from a laptop, the full sweep completes and finds
+**14 relationships**, all at 0.95 with zero unmatched values: `fact_sale` to
+`dim_outlet` and `dim_item`; `fact_sale_line` to `dim_item`; `fact_purchase` to
+`dim_supplier`; `fact_coupon` and `fact_member_visit` to `gold_member_rfm`;
+`map_item_key.legacy_item_key` to `dim_item`; and seven `*_date` columns to
+`dim_calendar`. Three more were **refused for ambiguity rather than guessed** —
+`bridge_item_ingredient.ingredient_key` and two `fact_recipe_portion` columns each
+fit `map_ingredient_alias` and `map_ingredient_alias_extended` equally well.
+
+**Two corrections to earlier claims in this file's history, both worth keeping.**
+`map_item_key` and `dim_item` *are* genuinely related — via `legacy_item_key`,
+211 distinct values and **0** unmatched. The trap column `item_key` is still
+refused on **208 of 208** unmatched, so B-145's test holds in the sense it was
+set, but "those two tables must not be joined" was never what the data said.
+And the sweep is **not stable**: one run reached 61 of 97 candidates and found 13
+edges, another completed all 97 and found 14. Same code, same database, same
+240-second budget — the difference was network latency, and nothing in the catalog
+records that a sweep was partial.
+
+### Deferred, and not folded in
+
+**B-150** — a measured edge can go false while the schema stays byte-identical,
+and neither the hash nor D-054's stamp will notice. Not fixed by WP13.15 and the
+PR must not imply otherwise.
 
 ## Phase 13 planning — the MiseQ v6.3 contract, mapped before any code (D-051, D-052, D-053)
 
