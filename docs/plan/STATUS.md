@@ -95,7 +95,11 @@ Last updated: 2026-08-27 by Claude Code (**MiseQ v6.4 loaded beside the live
               Found on the way: every login on that server could read another
               database's schema out of `pg_class` (**B-155**, closed on all three
               databases), and measured inference does not run on any source that
-              declares a key (**B-156**, open).
+              declares a key (**B-156**, open). **And the first two questions
+              asked of the new source both went wrong** — a synthetic back-cast
+              answered as measured fact with no caveat, then a refusal of three
+              months the real table holds (**B-157**, P1). `source_mode` appears
+              **zero times** in `apps/api/src`.
               Previously: **A priced model no role called, and a
               probe that could not have told you.** `gpt-5.6-terra` removed from
               dev; `/healthz` now resolves every role rather than checking that
@@ -385,6 +389,32 @@ made unnecessary is the correct response to that, not a loss.**
   **1,191 purchase rows** dated December 2024 against a 2025 calendar, so an inner
   join silently drops **8.7%** of purchases. Both disagreements become knowledge
   under WP13.14 rather than edges, and the framing has to survive the move.
+
+### The first two questions asked of it (B-157)
+
+The owner registered `miseq_v64` and asked two questions. Both went wrong, and
+the second is worse than the first.
+
+*"Monthly sales for whatever year of data we have"* returned 24 figures for 2023
+and 2024, marked **answered**, **high confidence**, no caveat. Every one of them
+is `source_mode = 'synthetic'`, `basis = 'back-cast from 2025 actuals at 78% of
+2025 level'`. The answer closed with *"The available monthly data covers January
+2023 through December 2024"* — while `fact_sale` sat unread with **112,327 rows,
+all `real`, covering all of 2025**.
+
+*"For Oct, nov, and dec 2025"* was then **refused**, on that same claim. The
+answer exists: MYR 99,336.20, 99,373.17 and 129,902.10, from 8,962 real sale
+rows. **The honest-refusal machinery worked perfectly on a false premise**, which
+is worse than a wrong answer, because a refusal also closes the question.
+
+**`source_mode` appears zero times in `apps/api/src`.** The platform has never
+read the column that says which rows are real — so the caveat could not have
+fired. But the caveat is the smallest of the four failures: table selection is
+unguided by provenance, and a claim about what data exists is never checked
+against the catalog. **D-053 said `source_mode` becomes a composer caveat; that
+would have fixed the footnote and left the wrong table, the false sentence and
+the wrong refusal untouched.** WP13.14 needs widening before it is built, and
+B-157 says how.
 
 ### Raised with the partner
 
