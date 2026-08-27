@@ -114,28 +114,67 @@ migration: .env ## Autogenerate a revision: make migration m="add widgets"
 secrets.key: ## Print a fresh LOCAL_SECRETS_KEY line to paste into .env
 	@$(UV_API) python -c "from cryptography.fernet import Fernet; print('LOCAL_SECRETS_KEY=' + Fernet.generate_key().decode())"
 
-# **`test.web.e2e` belongs here, and its absence cost a red build.** This target
-# says "everything CI will run" and prints "safe to push", and it was leaving out
-# the browser suite — so a WP11.2b change that every other check passed went to
-# CI and failed there on the one suite a developer had no reason to run. It is
-# the same rule the lint recipes above are written for: what a developer runs
-# must be what CI runs, with nothing between them that could differ. Costs about
-# a minute, and needs Chromium (`pnpm --dir apps/web exec playwright install
-# chromium`) — a one-off, and the failure names the command if it is missing.
+# **This target has now overstated itself twice, so it was audited rather than
+# patched a third time.** Every job and every step in `.github/workflows/ci.yml`
+# was walked against what this runs.
 #
-# **And `compile.web` belongs here for the same reason, learned the same way.**
-# CI's `web` job runs `lint`, `typecheck`, `test` **and then `next build`**; this
-# target ran the first three and stopped. WP13.16 went to CI green locally and
-# failed there on the production compile — the identical shape as the e2e
-# omission above, one step further down the same job. `build.web` is *not* this:
-# that target builds the Docker image, which CI does in a separate job.
+# The history is the argument. `test.web.e2e` was missing, and a WP11.2b change
+# that passed every other check failed in CI on the one suite a developer had no
+# reason to run. `compile.web` was missing, and WP13.16 did exactly the same
+# thing one step further down the same job. Both times the target said
+# "everything CI will run" and printed "safe to push". The audit found **six
+# more**, and two of them are guards rather than conveniences:
 #
-# The compose smoke (`test.web.smoke`) is deliberately **not** here: it builds
-# images and seeds a database, which is minutes rather than a minute, and CI runs
-# it on its own job.
+#   test.dal      — the DAL suite carries a 90% coverage gate (plan §4.4) that
+#                   `test` does not apply: `test.api` runs those tests without
+#                   the floor, so a regression on the security boundary's
+#                   coverage reached CI unseen.
+#   test.rls      — `pytest -m rls_proof` exists to fail when it collects
+#                   *nothing*. `test.api` runs the proofs as part of the suite
+#                   and would stay green if the marker vanished.
+#   build.infra   — `check.infra` greps templates for secrets; it does not
+#                   compile them. A Bicep syntax error passed preflight.
+#   lint.workflows— B-128's whole point was that a `run:` block was first
+#                   exercised by the deployment it gated. Leaving actionlint to
+#                   CI repeats the argument that filed it.
+#   check.todos   — `TODO(B-###)` or CI fails.
+#   check.roles   — the allowlist half of B-130's role check.
+#
+# What is **deliberately** not here is now stated in the output rather than
+# implied, because a developer reading "safe to push" is entitled to know what
+# that sentence does not cover.
 .PHONY: preflight
-preflight: lint typecheck check.status check.backlog check.env check.infra test test.web.e2e compile.web ## Everything CI will run, in CI's order
-	@echo "Preflight clean. Safe to push."
+preflight: lint typecheck check.status check.backlog check.env check.todos check.roles check.truths check.preflight lint.workflows test test.rls test.dal test.web.e2e compile.web check.infra build.infra ## Every CI step that needs no stack or cloud session
+	@echo ""
+	@echo "Preflight clean — every CI step that runs without a stack, a registry"
+	@echo "or a cloud session. CI will additionally run, and this did not:"
+	@echo "  gitleaks            a GitHub Action; no local equivalent is wired up"
+	@echo "  mssql connectors    needs the SQL Server container (make up.mssql)"
+	@echo "  evals               needs the platform DB and the pizza fixture"
+	@echo "  coverage floor      combines two CI shards; neither exists here"
+	@echo "  test.web.smoke      builds images and seeds a database; minutes"
+	@echo "  docker images       both prod builds"
+	@echo ""
+
+.PHONY: check.preflight
+check.preflight: ## Fail if ci.yml grew a step preflight neither runs nor excuses
+	$(UV_API) python ../../scripts/check_preflight.py --selftest
+	$(UV_API) python ../../scripts/check_preflight.py
+
+.PHONY: check.todos check.roles lint.workflows
+check.todos: ## Fail if a TODO carries no backlog id
+	bash scripts/check_todos.sh
+
+check.roles: ## Fail if a role id and the secret-scanner allowlist disagree (B-130)
+	sh ops/scripts/check_role_definitions.sh --allowlist-only
+
+# `MSYS_NO_PATHCONV=1` because Git Bash rewrites `-w /repo` into
+# `C:/Program Files/Git/repo` and docker rejects it — the quirk CLAUDE.md
+# records for `docker exec`, in its `docker run` form. Ignored off Windows.
+lint.workflows: ## actionlint over every workflow, with shellcheck on each `run:` block
+	MSYS_NO_PATHCONV=1 docker run --rm -v "$(CURDIR):/repo" -w /repo \
+	  rhysd/actionlint:latest@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 \
+	  -color
 
 .PHONY: check.status
 check.status: ## Fail if STATUS.md lost its phase checklist or signed-off work

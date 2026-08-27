@@ -149,6 +149,13 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+      # **The guard on the guard.** `preflight` twice claimed to be every check
+      # in this file and twice was not — the second time it was missing
+      # `test.dal`'s coverage gate and `test.rls`, the two on the security
+      # boundary. Adding the targets fixed those; this stops the next job from
+      # arriving unnoticed. Runs its own selftest first, per B-019.
+      - name: preflight still covers every step this file runs
+        run: uv run --directory apps/api python ../../scripts/check_preflight.py --selftest && uv run --directory apps/api python ../../scripts/check_preflight.py
       - name: Seed truths match the generator
         run: make check.truths
 
