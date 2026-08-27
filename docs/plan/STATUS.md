@@ -28,17 +28,37 @@ Current position: **Phase 13 — the chat product. WP13.1a (#121), WP13.1b
                   *"Dev is current"* below for why three revisions in one hop
                   were safe, and for the warning that section used to carry and
                   had wrong.
-Next step:        **WP13.15 — the discovery version stamp (D-054, closes
-                  B-149).** Promoted ahead of WP13.12-13.14 for a reason that is
-                  not importance: all three add to what discovery writes, so all
-                  three land with the same defect unless this is in place first.
-                  Then **WP13.12 — the period-coverage check (D-051).** Asked *"sales
-                  last month"* on 2026-08-27 the deployed app resolved **July
-                  2026** against data ending **2025-12-31**, and the critic
-                  *requires* that empty range rather than merely permitting it.
-                  The platform already holds the coverage and renders it where it
-                  cannot win. **Nothing is built yet** — the three specs are this
-                  PR's deliverable.
+Next step:        **WP13.14 — the contract, and provenance that reaches the
+                  query (D-053 as widened by D-058, closes B-157).** First of
+                  three, and the only one producing **wrong numbers**: asked for
+                  monthly sales the deployed app answered from a synthetic
+                  back-cast with no caveat, then refused three months that
+                  `fact_sale` holds. `source_mode` appears **zero times** in
+                  `apps/api/src`. **D-053's mapping was too narrow, and D-058
+                  records the correction**: a caveat alone would have shipped a
+                  correctly-caveated wrong refusal, the worst outcome available —
+                  a caveat on a refusal reads as diligence, and a refusal closes
+                  the question. Provenance now reaches table selection and a
+                  substitution ban as well, and the **coverage claim is its own
+                  fix**, checked against `CatalogColumn.min_val`/`.max_val` the
+                  way the capability check is: a claim the platform can verify
+                  and didn't.
+                  Then **WP13.20 — the answer's shape, chosen by the platform**,
+                  `series` rule first and **no `ChartAsk` narrowing** (D-044's
+                  warning: the platform overrides fields rather than removing
+                  them). The table renderer is split out as **B-158**.
+                  Then **WP13.21 — the trace spends what the events already
+                  carry**, web only, no new emit-time fields — the real *why*
+                  falls out of the two above as platform-computed reasons.
+                  **Still ahead of all three by merge order: WP13.15 — the
+                  discovery version stamp (D-054, closes B-149)**, because every
+                  one of them adds to what discovery writes. Then **WP13.12 — the
+                  period-coverage check (D-051/D-055)**, which is the other half
+                  of B-157's false-coverage failure: asked *"sales last month"* the
+                  app resolved **July 2026** against data ending **2025-12-31**.
+                  **WP13.13 is rescoped to the forbidden rows only (D-057)** — its
+                  join-import justification died when v6.4 declared the edges.
+                  **Nothing of the above is built yet.**
                   The pieces explicitly held back remain **system instructions,
                   tone, model selection and the answer-card polish
                   (B-046/047/048)** — named as next by the owner, not opened.
