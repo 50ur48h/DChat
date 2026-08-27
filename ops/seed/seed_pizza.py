@@ -641,6 +641,16 @@ def grant_readonly_role(cursor: psycopg.Cursor[tuple[object, ...]], database: st
     cursor.execute(
         sql.SQL("REVOKE ALL ON DATABASE {} FROM {}").format(sql.Identifier(database), identifier)
     )
+    # PUBLIC too, which the line above does not touch: PostgreSQL grants CONNECT
+    # and TEMP on every new database to PUBLIC, so revoking on the *role* leaves
+    # every login on the server able to connect to every database on it and read
+    # its table and column names out of `pg_class`. The stakes are lower here than
+    # in `load_sqlite.py` — this container holds generated data and nothing else —
+    # but the two functions are the same shape, and fixing one of two identical
+    # instances is how the other one survives (B-155).
+    cursor.execute(
+        sql.SQL("REVOKE ALL ON DATABASE {} FROM PUBLIC").format(sql.Identifier(database))
+    )
 
     cursor.execute(
         sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(sql.Identifier(database), identifier)

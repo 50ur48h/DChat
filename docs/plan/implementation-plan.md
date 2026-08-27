@@ -1034,39 +1034,53 @@ than two that drift.
   gap must fail the suite, because that is the outcome this change could
   plausibly produce and the one the owner ruled worse than the refusal.
 
-### WP13.13 — the customer's join catalog, imported and measured — `p13.13-imported-joins`
-Implements **D-052**. Depends on WP13.12 only for merge order, not technically.
+### WP13.13 — the joins the customer forbids — `p13.13-forbidden-joins`
+Implements **D-057**, which amends **D-052**. Depends on WP13.12 only for merge
+order, not technically.
 
-- Migration: `RELATIONSHIP_KINDS` gains `imported`; `catalog_relationships` gains
-  a **polarity** column (join / never-join) kept **orthogonal to `kind`**, so
-  "who says so" and "what they say" stay separable — a forbidden edge could in
-  principle come from any provenance.
-- `catalog/imported.py` (new): parse a join-catalog relation into candidate edges.
-  Handles the three shapes seen in the real file — same-name (`outlet_key`),
-  renamed (`outlet_key = home_outlet_key`) and composite (`weather_date =
-  business_date, outlet_key`) — and **ignores rows that are not joins**: six
-  `READ-FIRST` and two `DEPRECATED` rows of the 69 are prose, and belong to
-  WP13.14.
-- Each imported edge is **verified** with the existing `_orphan_count`, and both
-  the claim and the measurement are stored in `evidence`. Precedence: declared FK
-  → imported-and-verified → inferred → imported-but-unverified. **A disagreement
-  is recorded and surfaced, never silently resolved.**
+**Rescoped on 2026-08-27, and the reason is the point.** D-052 justified importing
+`v_join_catalog` on thirteen `ALLOWED` rows measurement could not reach — ten
+across a type family, three composite. MiseQ v6.4 declares **57 foreign keys** and
+unifies the outlet key to `TEXT`, so **51 of the 63 column pairs those rows assert
+are now declared constraints** and `dim_outlet` has eleven keys pointing into it.
+The acceptance number this work package was written around is met by the schema.
+The `ALLOWED` import is dropped; what remains is the nine rows a schema cannot
+express.
+
+- Migration: `catalog_relationships` gains a **polarity** column (join /
+  never-join), kept **orthogonal to `kind`** so "who says so" and "what they say"
+  stay separable. `RELATIONSHIP_KINDS` does **not** gain `imported` — that was
+  D-052's consequence and goes with it, along with the
+  `declared → imported-and-verified → inferred` precedence ladder.
+- `catalog/imported.py` (new): parse the **non-`ALLOWED`** rows of a join-catalog
+  relation — one `DISALLOWED`, two `DEPRECATED`, six `READ-FIRST` of the 69. Only
+  `DISALLOWED` becomes a relationship row; `DEPRECATED` marks objects
+  unreachable; `READ-FIRST` is prose and belongs to WP13.14.
 - `JoinGraph` gains forbidden pairs and a verdict distinct from `UNREACHABLE`,
-  with its own sentence. **The wording is a review item**: #130 removed *"the
+  with its own sentence. **The wording is the review item**: #130 removed *"the
   catalog explicitly prohibits"* because no prohibition existed, and this creates
   one that does. The customer's rule and the limit of our knowledge must not
   collapse back into one sentence.
 - Import is an **explicit Admin action** against a named relation, not discovery
   sniffing for a table called `v_join_catalog`. A table-name convention should not
   quietly decide what may be joined.
-- **Tests/Accept:** parser tests for all three join shapes and for the non-join
-  rows; a verification test where the claim is false and the disagreement is what
-  is asserted; precedence tests. **Live-path proof**: import against the
-  no-key fixture, then `load_join_graph`, and assert that a previously
-  unreachable pair is joinable *and* marked imported — and that the forbidden
-  pair refuses with the customer's reason rather than the absence-of-knowledge
-  sentence. On real MiseQ, the acceptance number is the one that motivated it:
-  **`dim_outlet` reaches nine tables it cannot reach today.**
+- **Tests/Accept:** parser tests for the four statuses, including that an
+  `ALLOWED` row is ignored rather than imported. **Live-path proof**: import
+  against a fixture, then `load_join_graph`, and assert that the forbidden pair
+  refuses **with the customer's reason** while an unknown pair still refuses with
+  ours — two different sentences, asserted as different. On real MiseQ the
+  acceptance case is `fact_sale ↔ fact_sale_line`: a question that would sum both
+  must refuse naming the double-count, and D-026's chasm reasoning already
+  refusing to *join* them is not the same thing and does not count as passing.
+
+> **Two joins are lost by dropping the `ALLOWED` import** and are recorded in
+> D-057 so this is reversible on evidence:
+> `fact_member_visit.receipt_id = fact_sale_line.receipt_id` (all 16,910 visit
+> receipts exist in the lines, but 72,465 of 89,375 receipts are not visits, so
+> the containment runs the wrong way for a foreign key), and the two rows where
+> `v_join_catalog` disagrees with the data — `dim_calendar ↔ fact_purchase`, where
+> an inner join drops **1,191 purchase rows** dated December 2024 against a 2025
+> calendar. Both become knowledge under WP13.14 rather than edges.
 
 ### WP13.14 — playbook, data quality, the revenue rule, and source mode — `p13.14-miseq-contract`
 Implements **D-053**. Four small features, each landing where something already

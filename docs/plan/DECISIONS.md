@@ -121,6 +121,115 @@ may be joined — and one more caveat the composer can attach: *the data diction
 says these join; we checked and found no unmatched values*, which is a different
 claim from either a foreign key or an inference.
 
+## D-057 — the join-import justification died when the schema declared the edges
+Date: 2026-08-27 · Phase: 13 · PR: this one (spec only; WP13.13 rescoped, not built)
+**Amends D-052.** This file is append-only and D-052 stays as written; what
+follows replaces its scope. D-052 was right about the product and wrong about how
+long its evidence would live, which is the useful thing to record.
+
+Context: MiseQ v6.4 arrived on 2026-08-27 and declares **57 foreign keys**, 39
+primary keys and a canonical `TEXT` outlet key. D-052 argued for importing
+`v_join_catalog` on a measured number: of the 60 `ALLOWED` rows, **ten crossed a
+type family** and measurement structurally could not find them — every one of them
+`dim_outlet.outlet_key` (`TEXT`) against an `INTEGER` outlet key — plus **three
+composite**. Thirteen of sixty, and WP13.13's acceptance criterion was written
+from it: *"`dim_outlet` reaches nine tables it cannot reach today."*
+
+**v6.4 declares all ten.** The type split that caused them was the partner's
+first fix, and `dim_outlet` now has **eleven** foreign keys pointing into it. The
+acceptance number is met by the physical schema, by the loader that was already
+carrying constraints across, with no import and no new provenance.
+
+Measured again against the new file rather than assumed: the 60 `ALLOWED` rows
+assert **63 column pairs, of which 51 are now declared foreign keys**. Six
+declared keys have no `ALLOWED` row at all (every one of them `business_key` into
+the single-row `dim_business`). Of the 12 pairs still undeclared, the product's
+own `infer_relationships`, run against the loaded database with its caps lifted,
+finds **one** — `fact_stock_move_outlet.move_date -> dim_calendar.cal_date`.
+**Six** are the `dim_weather` composite `(weather_date, outlet_key)`, where
+neither column is unique on its own and inference measures single columns —
+exactly the limit D-052 named, unchanged. **Two are claims the data does not
+support**, which is the interesting half and is covered below.
+
+**That number was four before the sweep ran, and the correction is worth
+keeping.** Applying D-050's rules by hand against the SQLite predicted four; the
+real run found one, because the hand version modelled neither
+`ColumnStats.unique` requiring `non_null > 1` (so a one-row table is never a
+parent) nor the ambiguity rule that records no edge when two parents fit equally
+well. Three of the four die on those. A close reading of an algorithm is not a
+run of it.
+
+Options: (a) build WP13.13 as specified and import all 61 join rows anyway;
+(b) drop WP13.13 entirely; (c) keep the work package and rescope it to the rows a
+schema cannot express.
+Decision: **(c)**, at the owner's direction (2026-08-27). WP13.13 becomes the
+**negative and advisory rows only** — one `DISALLOWED`, two `DEPRECATED`, six
+`READ-FIRST` — and the `ALLOWED` import is dropped.
+
+**This is a good outcome and should be read as one.** The partner changed their
+data so that our deterministic layer could do its job, instead of asking us to
+move enforcement into a prompt; the correct response is to delete the work their
+change made unnecessary, not to build it because it was specified. A work package
+that survives its own justification is how a codebase accumulates machinery
+nobody can explain later.
+
+**What is left is the half no schema can carry, and it was always D-052's
+sharpest point rather than its bulk.** A foreign key says a join is *possible*.
+Only the customer can say a join is *forbidden*: `DISALLOWED fact_sale ↔
+fact_sale_line`, *summing both double-counts revenue*, is a negative edge, and
+`catalog_relationships` has no way to distinguish *must not be combined* from *no
+link is known*. #130 removed the sentence *"the catalog explicitly prohibits"*
+because no prohibition existed; this creates one that does, and the two sentences
+must stay visibly different. That constraint on the wording is unchanged and is
+now the whole of the work package.
+
+**Two costs of dropping the `ALLOWED` import, stated so the decision is
+reversible on evidence rather than on memory.**
+
+* **`fact_member_visit.receipt_id = fact_sale_line.receipt_id` is a real join no
+  constraint can hold.** All **16,910** member-visit receipts exist in
+  `fact_sale_line`, and `fact_member_visit.receipt_id` is unique — but **72,465 of
+  the 89,375** receipts in `fact_sale_line` are not member visits, so the
+  containment runs the wrong way for a foreign key and D-050 rejects it correctly.
+  It is nonetheless the only path from a member to a basket. Losing it means
+  member-basket questions refuse.
+* **`v_join_catalog` disagrees with the data twice, and importing it was the
+  mechanism that would have surfaced that.** It marks `dim_calendar ↔
+  fact_purchase` `ALLOWED` on `cal_date = purchase_date`, while their own
+  changelog declines the foreign key because **1,191 purchase rows** fall outside
+  the calendar — all of December 2024, against a calendar of 2025 only. An inner
+  join there silently drops **8.7%** of purchases, which is precisely the
+  *"unmatched values"* case D-052 said should be recorded and surfaced. The
+  receipt row above is the second. Both are now knowledge (D-053) rather than
+  edges, and the framing must survive the move.
+
+Consequences: no migration for `imported` as a third `kind`, and no `declared →
+imported-and-verified → inferred` precedence ladder — both were D-052's
+consequences and both are dropped with the `ALLOWED` import. A **polarity**
+(join / never-join) is still needed and is now the only schema change WP13.13
+carries. The acceptance number changes from *"`dim_outlet` reaches nine tables"*
+to *"the forbidden pair refuses with the customer's reason, and an unknown pair
+still refuses with ours"*.
+
+**And measured inference does not run on this source at all**, which is a
+separate defect this decision does not fix (**B-156**). `discovery._crawl` calls
+it only `if not relationships`, so a database that declares any key gets none of
+it; `infer_relationships` takes a `declared` parameter written for exactly the
+mixed case, documented as *"so the same edge is never inferred twice"*, and its
+only caller passes `()`. Before v6.4 that gate was a sound optimisation. v6.4
+makes the mixed case the normal one — **six table pairs measurement connects that
+the schema does not declare**, and no path by which the product would ever look
+for them.
+
+**The same sweep settles a question this decision would otherwise have left
+open: measurement cannot stand in for declared keys.** It connects **25 of the 56
+declared table pairs**, and the misses are structural rather than random —
+`dim_ingredient` reaches twelve tables in the declared graph and **zero** in the
+measured one, because the nine-row `dim_waste_category` sits inside it and wins on
+coverage. That is B-146's recorded cost arriving on the dimension the schema uses
+most. So the two graphs are complements, not substitutes, and any future gate must
+treat them that way.
+
 ## D-056 — `/healthz` answers whether the deployment can work, not whether it is running
 Date: 2026-08-27 · Phase: 13 · PR: this one
 Context: `gpt-5.6-terra` sat in dev's `LLM_MODELS` and `LLM_PRICES`, priced, and

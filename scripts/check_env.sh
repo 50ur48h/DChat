@@ -105,6 +105,9 @@ SEED_FNB_READONLY_PASSWORD | As above.
 MSSQL_DB | Read by `ops/scripts/seed_mssql.sh`, which runs on the host against the on-demand SQL Server container.
 MSSQL_PIZZA_READONLY_USER | Created by that seed script and typed into the data-source form, exactly like the Postgres read-only login.
 MSSQL_PIZZA_READONLY_PASSWORD | As above.
+FNB_DEMO_ADMIN_PASSWORD | The admin login on `pg-fnb-demo-sk`, the standalone customer-demo server that belongs to the owner rather than to this project. No container has any business holding it: it is used by hand, on the host, to run `ops/seed/load_sqlite.py` against that server and to revoke PUBLIC on the database afterwards (B-155).
+MISEQ_READONLY_PASSWORD | The read-only login for the `miseq` database on that server. Host-only for the same reason as SEED_*_READONLY_PASSWORD: it is typed into the data-source form and reaches the API encrypted, through the API, the way any customer credential does -- never as an environment variable on a container.
+MISEQ_V64_READONLY_PASSWORD | As above, for the `miseq_v64` database loaded beside it on 2026-08-27.
 DB_PASSWORD | Deployment-only (WP12.2). Locally the owner password is inside DATABASE_URL and nothing needs it separately; in Azure the template builds the DSN in the clear and takes only this from Key Vault, and only the migration job is given it. Passing it to a compose service would add a second source of truth for a password that is already in the URL beside it.
 '
 
