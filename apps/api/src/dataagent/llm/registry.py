@@ -32,7 +32,15 @@ from contextlib import suppress
 from dataclasses import dataclass
 
 from dataagent.config import Settings, get_settings
-from dataagent.llm.base import DEFAULT_ROLE_TIERS, TIERS, LLMError, LLMProvider, Role, Tier
+from dataagent.llm.base import (
+    DEFAULT_ROLE_TIERS,
+    ROLES,
+    TIERS,
+    LLMError,
+    LLMProvider,
+    Role,
+    Tier,
+)
 
 __all__ = [
     "STUB_PROVIDERS",
@@ -44,6 +52,7 @@ __all__ = [
     "register_provider",
     "resolve",
     "tier_for",
+    "unresolvable_roles",
 ]
 
 
@@ -236,3 +245,47 @@ def resolve(role: Role, settings: Settings | None = None) -> tuple[ModelChoice, 
             )
         chain.append(ModelChoice(role=role, tier=tier, provider=provider, model=model))
     return tuple(chain)
+
+
+def unresolvable_roles(settings: Settings | None = None) -> list[str]:
+    """Roles this configuration cannot serve, as ``role -> why`` sentences.
+
+    **`/healthz` proved the wrong thing.** `missing_for_mode` asks whether
+    `LLM_MODELS` names *any* model for each configured provider, which is
+    `resolve`'s first two refusals and not its third: a deployment can name a
+    `small` and a `strong` model, satisfy that check, map a role to `mid`, and
+    fail at the first call of the first question. The configuration was reported
+    healthy and the product was not.
+
+    That gap is why it matters here rather than in the abstract. `gpt-5.6-terra`
+    sat in dev's `LLM_MODELS` and `LLM_PRICES` being called by no role at all,
+    because the only role defaulting to `mid` is `compose` and dev overrides it
+    to `small`. A priced model nothing calls is a trap for whoever tunes this
+    next, so it was removed — and removing it is only safe if mapping a role back
+    to `mid` fails *at the probe* rather than mid-question.
+
+    Empty is the healthy answer, and the common one. This resolves every role
+    rather than the roles a given request happens to need, because a deployment
+    that cannot answer one kind of question is not well.
+    """
+    resolved = settings if settings is not None else get_settings()
+    problems: list[str] = []
+    for role in ROLES:
+        # **`embed` is not resolved here and asking would invent a failure.**
+        # Embeddings are served by `EMBEDDINGS_PROVIDER`/`EMBEDDINGS_MODEL`, and
+        # the role appears on the tier ladder only so its spend can be priced —
+        # `DEFAULT_ROLE_TIERS` says as much where it maps it to a tier of its
+        # own. Demanding an `LLM_MODELS[provider]["embed"]` would report every
+        # correct deployment as degraded, which the existing probe tests caught
+        # the moment this checked every role blindly.
+        #
+        # Keyed on the tier rather than the role name, so a second
+        # embeddings-shaped role inherits the exemption instead of needing to be
+        # remembered here.
+        if tier_for(role, resolved) == "embed":
+            continue
+        try:
+            resolve(role, resolved)
+        except ProviderNotConfiguredError as error:
+            problems.append(f"{role}: {error}")
+    return problems
