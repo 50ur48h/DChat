@@ -121,6 +121,67 @@ may be joined — and one more caveat the composer can attach: *the data diction
 says these join; we checked and found no unmatched values*, which is a different
 claim from either a foreign key or an inference.
 
+## D-061 — a view that pre-joins is not the same as a view that knows something
+Date: 2026-08-28 · Phase: 13 · PR: this one (decision recorded; the import is WP13.13's)
+Context: the partner reports the waste refusal as unintended and names
+`v_waste_valued`, `v_dish_waste_rate` and `v_ingredient_cost_per_kg` as available.
+Those are views, and `load_sqlite.py` does not translate views (**B-148**). Three
+ways forward were compared; the owner chose **(2), import the views as views**
+(2026-08-28).
+
+**Why not (1), answer from base tables.** The cost chain is reproducible right up
+to the point where it is not. `dim_waste_category.erp_keys` holds a
+**semicolon-delimited list** of ingredient SKUs and the customer's views join
+through it with a `LIKE` over concatenated delimiters. **Seven of nine categories
+map to more than one SKU**; `sup` maps to thirteen. v6.4 declares a foreign key on
+the *singular* `erp_key`, so the base-table road averages cost per kg over one SKU
+where the customer averages over thirteen — **-53% to +706%** across the six
+comparable categories, from a join that is valid, returns rows and is approved by
+every check we have. Answered wrongly with no symptom is worse than a refusal.
+
+**Why not (3), materialise them as tables.** Three reasons, and the third is the
+one that decides it. A view recalculates and a table is a snapshot, so theirs
+changes and ours goes silently stale — B-150's shape with numbers instead of
+edges. Four of the fifteen views carry customer prose as string literals, which
+stays under `.SampleData/` either way. And **a materialised derived table stops
+reading as derived**: `TABLE_KINDS` is `("table", "view")`, introspection maps
+`relkind IN ('v','m')` to `view`, and the card the model reads opens with *"x
+(public.x) is a view"*. Materialised, it says *"is a table"* — and of the four
+views in the waste chain, `v_waste_valued` and `v_dish_waste_rate` carry a
+provenance column while **`v_ingredient_cost_per_kg` and `v_ingredient_unit_cost`
+carry none at all**, so those two would become indistinguishable from source data.
+That is precisely what the partner's `source_mode` rule exists to prevent, and we
+would be the ones breaking it.
+Decision: **(2)**. Imported as views, the derivation is visible at every layer for
+free, and the catalog records it without anyone remembering to.
+
+**B-148's reasoning stands and this does not overturn it**, which is worth
+separating carefully because the two look alike. **B-148 refused a view that
+pre-joins tables the platform would otherwise have had to prove joinable** — the
+objection is that it lets a model skip the capability check. A view that carries
+**business logic nothing else expresses** is a different object. Which of the four
+is which:
+
+| view | what its joins are | B-148's objection? |
+|---|---|---|
+| `v_ingredient_unit_cost` | **none** — one `GROUP BY` over `fact_purchase` | **No.** There is no join to bypass; it defines what unit cost *means*. |
+| `v_ingredient_cost_per_kg` | one **declared** foreign key to `dim_ingredient` | **Partly** — but the join it pre-computes is one the catalog already proves, so bypassing the check proves nothing. The arithmetic (cost per pack ÷ `pack_kg`, plus a usability flag) is the part that is not derivable. |
+| `v_waste_valued` | `dim_uom_factor` on category, **plus** the delimited-key mapping | **No, and this is the sharpest case.** Neither join is derivable. Measured inference *explicitly declined* the first one — *"no edge for `fact_waste.ingredient_key`: contained in `dim_uom_factor` and `dim_waste_category` equally well"* — which is the ambiguity rule doing its job. The customer knows which parent is right; we measured and honestly could not. |
+| `v_dish_waste_rate` | derivable joins only | **No.** The joins are incidental; the content is an allocation of category waste by unit-sales share, which no schema expresses. |
+
+So three of the four join on relationships the platform **cannot derive at all**,
+and importing them does not bypass a check — it supplies knowledge the check has
+no way to obtain. The one that does pre-join a derivable relationship does so over
+a declared key, where there was nothing to prove.
+
+Consequences: the loader gains view translation, which it has never had, and their
+SQL stays with their data under `.SampleData/` as before (**B-162** carries the
+delimited-key question, which importing these sidesteps for MiseQ and not for the
+next customer). **The rule this leaves behind, and the one worth quoting later:**
+*a view is refused when it pre-joins what we could have proved, and considered
+when it carries what we cannot derive.* B-148's entry is about the first kind and
+remains correct about it.
+
 ## D-060 — provenance ranks among tables that could each answer, and the substitution ban becomes a caveat
 Date: 2026-08-28 · Phase: 13 · PR: this one · **Amends D-058**
 Two of D-058's three `source_mode` items are built as specified. The third is not,
