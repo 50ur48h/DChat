@@ -261,8 +261,18 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
               value: 'openai'
             }
             {
+              // **No `mid`, because no role asks for one** (B-154). `mid` is the
+              // default tier for `compose` alone, and `LLM_ROLE_MAP` below moves
+              // it to `small` — so `gpt-5.6-terra` sat here priced and called by
+              // nothing, which is a trap for whoever tunes this next: it reads as
+              // a tier in play when reasoning about cost.
+              //
+              // Safe to remove because `/healthz` now resolves *every* role and
+              // reports one that maps to a tier no model fills. Map a role back
+              // to `mid` without adding a model and the probe says so, instead of
+              // the first question of the day dying at its first model call.
               name: 'LLM_MODELS'
-              value: '{"openai":{"small":"gpt-5.6-luna","mid":"gpt-5.6-terra","strong":"gpt-5.6-sol"}}'
+              value: '{"openai":{"small":"gpt-5.6-luna","strong":"gpt-5.6-sol"}}'
             }
             {
               // Composing is the long generation and the cheapest place to save,
@@ -275,7 +285,7 @@ resource api 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
               // means unpriced — never free. The embedding model is priced here
               // too, because it is metered against the same run.
               name: 'LLM_PRICES'
-              value: '{"gpt-5.6-luna":{"input":0.20,"output":1.20},"gpt-5.6-terra":{"input":2.00,"output":12.00},"gpt-5.6-sol":{"input":5.00,"output":30.00},"text-embedding-3-small":{"input":0.02,"output":0.00}}'
+              value: '{"gpt-5.6-luna":{"input":0.20,"output":1.20},"gpt-5.6-sol":{"input":5.00,"output":30.00},"text-embedding-3-small":{"input":0.02,"output":0.00}}'
             }
             {
               // **Half of what a developer's `.env` sets, on purpose.** Dev has

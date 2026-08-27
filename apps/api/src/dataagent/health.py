@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 
 from dataagent import __version__
 from dataagent.config import Settings, get_settings
+from dataagent.llm.registry import unresolvable_roles
 
 router = APIRouter(tags=["meta"])
 
@@ -50,6 +51,15 @@ class HealthResponse(BaseModel):
             "Names only — never values. Empty when status is 'ok'."
         ),
     )
+    unservable_roles: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Model roles this configuration cannot serve, and why. A deployment "
+            "can satisfy every required variable and still map a role to a tier "
+            "no model fills, which fails at the first question rather than here. "
+            "Names and reasons only — never a credential. Empty when 'ok'."
+        ),
+    )
 
 
 def resolve_version() -> str:
@@ -66,10 +76,30 @@ def resolve_version() -> str:
 
 @router.get("/healthz", summary="Liveness probe")
 async def healthz(settings: Annotated[Settings, Depends(get_settings)]) -> HealthResponse:
+    """Whether this deployment can do its job, not merely whether it is running.
+
+    **Two questions, because answering only the first was not enough.**
+    `missing_for_mode` asks whether the required variables are set, which is what
+    this probe checked and is `registry.resolve`'s first two refusals — not its
+    third. A deployment can name a `small` and a `strong` model, pass that check,
+    map a role to `mid`, and die at the first model call of the first question,
+    reporting `ok` the whole time.
+
+    `unresolvable_roles` closes it by resolving every role rather than the ones a
+    given request happens to need: a deployment that cannot answer one kind of
+    question is not well. It is what makes removing an unused model from
+    `LLM_MODELS` a safe tidy rather than a trap set for the next person to touch
+    `LLM_ROLE_MAP`.
+    """
     missing = settings.missing_for_mode()
+    # Only worth asking once the variables are there: with `LLM_MODELS` unset,
+    # every role is unresolvable and the list would repeat what `missing` said,
+    # more loudly and less usefully.
+    unservable = [] if missing else unresolvable_roles(settings)
     return HealthResponse(
-        status="degraded" if missing else "ok",
+        status="degraded" if (missing or unservable) else "ok",
         version=resolve_version(),
         git_sha=settings.git_sha,
         missing_settings=missing,
+        unservable_roles=unservable,
     )

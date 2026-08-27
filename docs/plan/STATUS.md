@@ -86,7 +86,14 @@ Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-27 by Claude Code (**A run's cost was never written, not
+Last updated: 2026-08-27 by Claude Code (**A priced model no role called, and a
+              probe that could not have told you.** `gpt-5.6-terra` removed from
+              dev; `/healthz` now resolves every role rather than checking that
+              *some* model exists, because dropping the only `mid` model made a
+              silent runtime failure one edit away. The first version of the check
+              reported every correct deployment as degraded — `embed` never goes
+              through `resolve` — and the probe's own tests caught it.
+              Previously: **A run's cost was never written, not
               merely never shown.** `cost_estimate` and `model_usage` have been on
               `agent_runs` since revision 0012, returned by both run endpoints and
               populated by nothing — while `usage_ledger` held the answer and the
@@ -252,6 +259,56 @@ customer's data. It narrows to the owner's address plus Azure services once the
 swap is confirmed. Note the dev host's public address **changed mid-session**
 (171.79.38.47 → 103.168.16.2), so the rule has to be written from whatever it is
 on the day rather than from a value recorded here.
+
+## WP13.19 — a model nothing called, and a probe that could not tell (D-056, B-154)
+
+Asked to confirm which model each role uses on dev, the answer had a hole in it:
+`gpt-5.6-terra` was configured and priced and **called by no role at all**. `mid`
+is the default tier for `compose` alone, and `LLM_ROLE_MAP` moves `compose` to
+`small` for cost. The owner's instruction was to give it a role or take it out,
+because a priced model nothing calls misleads whoever tunes this next.
+
+**Taking it out was the easy half, and on its own it would have been unsafe.**
+`Settings.missing_for_mode` asks whether `LLM_MODELS` names *any* model for each
+provider — `registry.resolve`'s first two refusals, not its third. So a
+deployment could name `small` and `strong`, satisfy `/healthz`, map a role to
+`mid`, and die at the first model call of the first question while reporting
+`ok`. Removing the only `mid` model made that one edit away rather than
+hypothetical.
+
+So `/healthz` now answers a second question: `unresolvable_roles` resolves
+**every** role, and failures come back as `unservable_roles` with the status
+degraded. A deployment that cannot answer one kind of question is not well.
+
+### The mistake worth keeping
+
+The first version checked every role blindly and reported **every correct
+deployment as degraded** — because `embed` never goes through `resolve` at all.
+Embeddings are served by `EMBEDDINGS_PROVIDER`/`EMBEDDINGS_MODEL`; the role sits
+on the ladder only so its spend can be priced, which `DEFAULT_ROLE_TIERS` says
+in as many words. **The probe's existing tests caught it on the first run**,
+which is the return on having written them. The exemption is keyed on the *tier*
+rather than the role name, so a second embeddings-shaped role inherits it instead
+of needing to be remembered.
+
+### And the removal's real dependency, asserted
+
+A test that read *"every default role resolves without a mid model"* failed, and
+it was right to: with no role map, `compose` defaults to `mid`, so a deployment
+without a `mid` model **is** broken. dev is safe only because it maps `compose`
+to `small`. That is now the assertion — both halves, because the second is the
+one that bites: delete the override and composition stops working, and the probe
+says so at boot rather than at the last step of somebody's question.
+
+### Evidence
+
+* `tests/test_health.py` **11 passed**, including the two pre-existing probe
+  tests that caught the `embed` mistake.
+* Every role resolved against the exact config the template now sets:
+  `intake`/`observe`/`critic`/`compose` → `gpt-5.6-luna`, `plan`/`sql` →
+  `gpt-5.6-sol`, nothing unservable.
+* `make build.infra` green — both parameter files compile.
+* `ruff`, `pyright` clean.
 
 ## WP13.18 — what the question cost (B-153)
 

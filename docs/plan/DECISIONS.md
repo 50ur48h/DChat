@@ -121,6 +121,49 @@ may be joined — and one more caveat the composer can attach: *the data diction
 says these join; we checked and found no unmatched values*, which is a different
 claim from either a foreign key or an inference.
 
+## D-056 — `/healthz` answers whether the deployment can work, not whether it is running
+Date: 2026-08-27 · Phase: 13 · PR: this one
+Context: `gpt-5.6-terra` sat in dev's `LLM_MODELS` and `LLM_PRICES`, priced, and
+**called by no role at all** — `mid` is the default tier for `compose` alone, and
+`LLM_ROLE_MAP` moves `compose` to `small` for cost (owner, 2026-08-24). A priced
+model nothing calls is a trap for whoever tunes this next: it reads as a tier in
+play when reasoning about spend.
+
+Removing it is the obvious tidy, and it was **not safe**, which is the part worth
+recording. `Settings.missing_for_mode` asks whether `LLM_MODELS` names *any*
+model for each configured provider — `registry.resolve`'s first two refusals, not
+its third. A deployment can name `small` and `strong`, satisfy the probe, map a
+role to `mid`, and die at the first model call of the first question while
+`/healthz` reports `ok` the whole time. Dropping the only `mid` model made that
+one edit away instead of hypothetical.
+Options: (a) leave the unused model in place and document it; (b) remove it and
+accept a runtime failure if a role is ever mapped back to `mid`; (c) remove it
+and make the probe answer the question that would catch it.
+Decision: **(c)**. `registry.unresolvable_roles` resolves **every** role and
+`/healthz` reports the failures as `unservable_roles`, degrading the status. A
+deployment that cannot answer one kind of question is not well, so every role is
+checked rather than the ones a given request happens to need.
+
+Two details that are the whole correctness of it:
+
+* **`embed` is exempt, keyed on its tier rather than its name.** Embeddings are
+  served by `EMBEDDINGS_PROVIDER`/`EMBEDDINGS_MODEL` and never go through
+  `resolve`; the role exists on the ladder so its spend can be priced, which
+  `DEFAULT_ROLE_TIERS` says where it maps it to a tier of its own. The first
+  version of this checked every role blindly and reported **every correct
+  deployment** as degraded — caught immediately by the probe's existing tests,
+  which is the argument for having had them.
+* **The check runs only once the required variables are present.** With
+  `LLM_MODELS` unset every role is unresolvable, and the list would restate
+  `missing_settings` more loudly and less usefully.
+Consequences: the probe gains a field, so its "names only, never values" rule now
+covers two lists — a role and a tier are configuration a reader can act on, and
+neither is a credential; there is a test that says so. And the removal's real
+dependency is now asserted rather than assumed: **dropping `mid` is safe only
+while `LLM_ROLE_MAP` keeps `compose` off it**, so deleting that override breaks
+composition — visibly, at boot, instead of at the last step of somebody's
+question.
+
 ## D-055 — one vocabulary for a partial answer, and a refusal that records what it refused
 Date: 2026-08-27 · Phase: 13 · PR: this one (spec only; built as WP13.12)
 **Extends D-051 rather than replacing it.** This file is append-only, and none of
