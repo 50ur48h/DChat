@@ -644,10 +644,61 @@ function AnswerCard({
               startedAt={run.started_at}
               finishedAt={run.finished_at}
             />
+            <Cost run={run} />
           </div>
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * What the question cost, beside the working that produced it.
+ *
+ * **The columns behind this existed since revision 0012 and nothing wrote them**
+ * — `model_usage`'s own comment called it "a rollup for the trace UI", and the
+ * rollup was never built, so the API returned `null` and `{}` and no screen
+ * could show what a run cost. The rollup now runs when a run ends; this is the
+ * half a person reads.
+ *
+ * **Null is shown as "not priced", never as a number.** A run holding a call the
+ * deployment cannot price reports no total rather than one that quietly omits
+ * it, and the breakdown says how many calls that was — so the absence is
+ * informative instead of merely blank.
+ */
+function Cost({ run }: { run: Run }) {
+  const usage = run.model_usage ?? {};
+  const calls = usage.calls ?? 0;
+  if (calls === 0 && run.cost_estimate == null) return null;
+
+  const unpriced = usage.unpriced_calls ?? 0;
+  const total = run.cost_estimate == null ? null : Number(run.cost_estimate);
+  // `agent_runs.cost_estimate` is stored at four decimal places while the ledger
+  // prices each call at six, so a very cheap run rounds to 0.0000. Showing
+  // "$0.0000" would read as free, which is the one thing this column promises
+  // never to say.
+  const money =
+    total === null
+      ? null
+      : total === 0
+        ? "less than $0.0001"
+        : `$${total.toFixed(total < 0.01 ? 4 : 2)}`;
+
+  const detail = [
+    `${calls} model call${calls === 1 ? "" : "s"}`,
+    usage.input_tokens || usage.output_tokens
+      ? `${((usage.input_tokens ?? 0) + (usage.output_tokens ?? 0)).toLocaleString()} tokens`
+      : null,
+    unpriced > 0 ? `${unpriced} not priced` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  return (
+    <span className={styles.cost} data-testid="run-cost">
+      <span className={styles.costAmount}>{money ?? "not priced"}</span>
+      <span className={styles.costMeta}>{detail}</span>
+    </span>
   );
 }
 

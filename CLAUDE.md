@@ -176,6 +176,18 @@ against the model the product parses it into.
   docker compose -f ops/docker-compose.yml --env-file .env up -d --build web
   docker exec dataagent-web-1 sh -c "ls node_modules/<the-package> >/dev/null && echo present"
   ```
+- **A local `make test.web` that reports missing files or "no tests" is usually
+  this machine, not the suite.** vitest forks a worker per test file, and under
+  memory pressure they fail to start: the run then collects a *subset* silently
+  and exits non-zero with `[vitest-pool]: Failed to start forks worker` and
+  `Timeout waiting for worker to respond` buried above the summary. Seen as
+  *"39 passed | 11 errors"*, *"no tests"*, and *"7 of 18 files"* in one session,
+  each looking like a different bug. The cause was **4.1 GB free of 31.4 GB** —
+  Docker Desktop's WSL VM reserves ~15 GiB while the containers inside it use
+  about 1 GB, and it does not give it back while the stack is up. The same suite
+  is 18 files and 240 tests with `pnpm exec vitest run --no-file-parallelism`.
+  Read the errors above the summary before believing the count, and cap
+  parallelism rather than chasing the tests.
 - Git Bash rewrites any argument starting with `/` into a `C:\...` path, so a
   `docker exec … sh -c '/opt/…'` arrives as nonsense. Start such command strings
   with a word (`exec /opt/…`), as `ops/scripts/seed_mssql.sh` does.

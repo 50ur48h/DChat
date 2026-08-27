@@ -86,7 +86,14 @@ Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-27 by Claude Code (**"Safe to push" was false about the
+Last updated: 2026-08-27 by Claude Code (**A run's cost was never written, not
+              merely never shown.** `cost_estimate` and `model_usage` have been on
+              `agent_runs` since revision 0012, returned by both run endpoints and
+              populated by nothing — while `usage_ledger` held the answer and the
+              per-run ceiling already summed it. Rolled up at the ending now, with
+              the three ways it could have lied tested: sub-cent rounding, one
+              unpriced call among priced ones, and a run that metered nothing.
+              Previously: **"Safe to push" was false about the
               security boundary.** `make preflight` skipped `test.dal`'s 90%
               coverage gate and `test.rls`'s collects-nothing guard — of every step
               it could have dropped, the two on the boundary the architecture calls
@@ -245,6 +252,59 @@ customer's data. It narrows to the owner's address plus Azure services once the
 swap is confirmed. Note the dev host's public address **changed mid-session**
 (171.79.38.47 → 103.168.16.2), so the rule has to be written from whatever it is
 on the day rather than from a value recorded here.
+
+## WP13.18 — what the question cost (B-153)
+
+Asked to surface a run's cost in the UI, because the fields were *"returned by
+the API and rendered nowhere"*. They were not rendered nowhere. **They were never
+written.**
+
+`agent_runs.cost_estimate` and `.model_usage` have existed since revision 0012.
+Both are declared on the model, read into `RunView`, returned by `RunOut` from
+both run endpoints — and populated by no code at all. Every run in every database
+carried `NULL` and `{}`. `model_usage`'s own comment calls it *"a rollup for the
+trace UI"*, and the rollup was never built. **B-100's shape one notch worse**:
+B-100's method line was at least computed before being dropped.
+
+**The data was there the whole time, and already trusted for something harder.**
+`usage_ledger` holds one row per provider call — role, tier, model, tokens,
+`cost_usd` — and `budget.spent_on_run` already sums it to enforce the per-run
+ceiling. The ceiling worked off data the run's own row never received.
+
+So rendering the fields as they stood would have shown a permanent blank, or a
+`$0.00` that reads as free. The work was populate-then-render, not render.
+
+### Three ways this could have shipped as a quiet lie
+
+* **Scale.** `usage_ledger.cost_usd` is scale 6; `agent_runs.cost_estimate` is
+  scale 4. A run under $0.0001 stores `0.0000`, and `$0.0000` reads as **free** —
+  the one thing that column's comment promises never to say. The screen says
+  *less than $0.0001*.
+* **One unpriced call among priced ones.** The total goes `NULL`, not a smaller
+  number. This is the case an average gets wrong, because four-of-five priced
+  *looks* complete. `unpriced_calls` survives beside it, so an absent total still
+  says why.
+* **Rounding direction.** `$0.0195` renders as `$0.02` — up, never down. The
+  first test asserted `$0.0195` and failed; the component was right and the
+  assertion was wrong, so the assertion changed.
+
+### Reached, not merely computed
+
+The thread renders from `GET …/conversations/{id}/runs`, not from the detail
+route — B-106's lesson. Both go through the same `_run_view`, checked rather than
+assumed, so the cost reaches the screen that actually draws answer cards. Five
+API tests and four web tests, all asserting on **what the route returns**.
+
+### The local test host, finally diagnosed
+
+Three sessions of odd vitest results — *"39 passed | 11 errors"*, *"no tests"*,
+*"7 of 18 files"* — were never the tests. The output says
+`[vitest-pool]: Failed to start forks worker … Timeout waiting for worker to
+respond`, eleven at once. **Free memory was 4.1 GB of 31.4 GB**: Docker Desktop's
+WSL VM reserves 15.34 GiB while the containers inside it use about 1 GB, and it
+does not hand it back. With file parallelism capped the suite is **18 files, 240
+tests, all passing**. Recorded in CLAUDE.md, because the failure looks exactly
+like broken tests and is not.
 
 ## WP13.17 — "safe to push" was false about the security boundary (B-152)
 

@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from decimal import Decimal
+from typing import cast
 
 import pytest
 
@@ -457,3 +459,219 @@ async def test_the_conversation_list_shows_only_your_own(tenant: Tenant) -> None
     assert [view.title for view in theirs] == ["Theirs"]
     assert len(mine) == 1
     assert mine[0].message_count == 1
+
+
+# ---------------------------------------------------------------------------
+# What the run cost, from the ledger that already knew (B-153)
+# ---------------------------------------------------------------------------
+
+
+#: One priced model, so a test can prove a total rather than only its absence.
+PRICES = {"m-priced": {"input": 10.0, "output": 30.0}}
+
+
+async def _charge(
+    tenant: Tenant,
+    run_id: uuid.UUID,
+    *,
+    model: str,
+    role: str,
+    input_tokens: int,
+    output_tokens: int,
+    priced: bool = False,
+) -> None:
+    """One provider call, through the meter the product uses.
+
+    Through `meter.record` rather than by inserting a row, so the test exercises
+    the same path a real call takes — including `estimate_cost`, which is what
+    decides whether the run ends up with a number or a NULL.
+    """
+    from dataagent.llm.base import Usage
+    from dataagent.llm.meter import record
+    from llm_fixture import build_settings
+
+    await record(
+        org_id=tenant.org_id,
+        run_id=run_id,
+        role=role,  # type: ignore[arg-type]
+        tier="strong",
+        provider="openai",
+        model=model,
+        usage=Usage(input_tokens=input_tokens, output_tokens=output_tokens),
+        latency_ms=12,
+        settings=build_settings(llm_prices=PRICES) if priced else None,
+    )
+
+
+async def test_a_finished_run_says_what_it_cost(tenant: Tenant) -> None:
+    """**Both columns existed since revision 0012 and nothing wrote them.**
+
+    `model_usage`'s own comment calls it "a rollup for the trace UI"; the rollup
+    was never built, so every run carried NULL and `{}` while `usage_ledger` held
+    the answer and `budget.spent_on_run` already summed it to enforce the per-run
+    ceiling. Asserted on the **view the route returns**, not on the ledger query,
+    because a value that is right in flight and absent from the response is the
+    defect this repository keeps filing (B-133).
+    """
+    asked = await _ask(tenant)
+    await service.transition(org_id=tenant.org_id, run_id=asked.run_id, status="running")
+    await _charge(
+        tenant,
+        asked.run_id,
+        model="m-1",
+        role="sql",
+        input_tokens=1000,
+        output_tokens=100,
+    )
+    await _charge(
+        tenant,
+        asked.run_id,
+        model="m-1",
+        role="sql",
+        input_tokens=500,
+        output_tokens=50,
+    )
+    await _charge(
+        tenant,
+        asked.run_id,
+        model="m-2",
+        role="compose",
+        input_tokens=200,
+        output_tokens=20,
+    )
+
+    run = await service.transition(org_id=tenant.org_id, run_id=asked.run_id, status="completed")
+
+    usage = run.model_usage
+    assert usage["calls"] == 3
+    assert usage["input_tokens"] == 1700
+    assert usage["output_tokens"] == 170
+    assert usage["unpriced_calls"] == 3, "no price table in tests, so every call is unpriced"
+
+    by_model = cast(list[dict[str, object]], usage["by_model"])
+    # Grouped by model **and role**, because "what did this cost" and "where did
+    # it go" are the same question asked at two widths.
+    assert [(row["model"], row["role"], row["calls"]) for row in by_model] == [
+        ("m-1", "sql", 2),
+        ("m-2", "compose", 1),
+    ]
+
+
+async def test_an_unpriced_call_leaves_the_total_null_rather_than_understating_it(
+    tenant: Tenant,
+) -> None:
+    """**Null means unpriced, never free** — the rule both columns were born with.
+
+    A run holding a call the price table does not cover gets NULL, not a total
+    that silently omits it. An understated number is worse than an absent one,
+    because it reads as the answer and nothing about it looks wrong.
+    """
+    asked = await _ask(tenant)
+    await service.transition(org_id=tenant.org_id, run_id=asked.run_id, status="running")
+    await _charge(
+        tenant, asked.run_id, model="unpriced", role="sql", input_tokens=10, output_tokens=1
+    )
+
+    run = await service.transition(org_id=tenant.org_id, run_id=asked.run_id, status="completed")
+
+    assert run.cost_estimate is None
+    # And the breakdown survives, so NULL never means "we know nothing".
+    assert run.model_usage["unpriced_calls"] == 1
+    assert run.model_usage["calls"] == 1
+
+
+async def test_a_run_that_called_no_model_claims_no_price(tenant: Tenant) -> None:
+    """Nothing recorded is not the same claim as nothing spent.
+
+    From here the two are indistinguishable — a run that made no call and a run
+    whose ledger write failed both present as zero rows — so the honest answer is
+    that there is no priced total, with an empty breakdown beside it saying why.
+    """
+    asked = await _ask(tenant)
+    await service.transition(org_id=tenant.org_id, run_id=asked.run_id, status="running")
+
+    run = await service.transition(org_id=tenant.org_id, run_id=asked.run_id, status="completed")
+
+    assert run.cost_estimate is None
+    assert run.model_usage == {
+        "calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "unpriced_calls": 0,
+        "by_model": [],
+    }
+
+
+async def test_a_priced_run_reports_the_total_the_ledger_adds_up_to(tenant: Tenant) -> None:
+    """The positive case, and the one a person actually reads.
+
+    Two calls on a model priced at $10/M in and $30/M out: 1,000 + 500 input and
+    100 + 50 output, which is 0.015 + 0.0045. Asserted as an exact Decimal
+    because a cost shown to a person must not have drifted through a float.
+    """
+    asked = await _ask(tenant)
+    await service.transition(org_id=tenant.org_id, run_id=asked.run_id, status="running")
+    await _charge(
+        tenant,
+        asked.run_id,
+        model="m-priced",
+        role="sql",
+        input_tokens=1000,
+        output_tokens=100,
+        priced=True,
+    )
+    await _charge(
+        tenant,
+        asked.run_id,
+        model="m-priced",
+        role="sql",
+        input_tokens=500,
+        output_tokens=50,
+        priced=True,
+    )
+
+    run = await service.transition(org_id=tenant.org_id, run_id=asked.run_id, status="completed")
+
+    assert run.cost_estimate == Decimal("0.0195")
+    assert run.model_usage["unpriced_calls"] == 0
+    by_model = cast(list[dict[str, object]], run.model_usage["by_model"])
+    # The value, not its spelling: `usage_ledger.cost_usd` is scale 6, so the
+    # string carries the ledger's own precision (`0.019500`) rather than a
+    # prettier one. A string because JSONB has no decimal and a float would round
+    # a price; the reader formats it, and nothing does arithmetic on it again.
+    assert Decimal(str(by_model[0]["cost_usd"])) == Decimal("0.0195")
+
+
+async def test_one_unpriced_call_among_priced_ones_still_nulls_the_total(tenant: Tenant) -> None:
+    """The case the rule exists for, and the one an average would get wrong.
+
+    Four fifths of a run being priced is exactly when a total is most tempting
+    and most misleading: it looks complete. The breakdown keeps both halves, so
+    the reader can see what was missed rather than being handed a smaller number.
+    """
+    asked = await _ask(tenant)
+    await service.transition(org_id=tenant.org_id, run_id=asked.run_id, status="running")
+    await _charge(
+        tenant,
+        asked.run_id,
+        model="m-priced",
+        role="sql",
+        input_tokens=1000,
+        output_tokens=100,
+        priced=True,
+    )
+    await _charge(
+        tenant,
+        asked.run_id,
+        model="m-unknown",
+        role="compose",
+        input_tokens=10,
+        output_tokens=1,
+        priced=True,
+    )
+
+    run = await service.transition(org_id=tenant.org_id, run_id=asked.run_id, status="completed")
+
+    assert run.cost_estimate is None
+    assert run.model_usage["unpriced_calls"] == 1
+    assert run.model_usage["calls"] == 2
