@@ -1224,6 +1224,11 @@ pairs with the `via` table that makes each a chasm. So *what it considered* and
   *"Considered 41 tables and selected 5."* *"Ruled out joining fact_sale and
   fact_purchase — they share only dim_business."* *"Two definitions matched out
   of eighteen."*
+- **And fix the one number this builder gets wrong** (**B-160**).
+  `context_selected` names what the *search* returned; `render` may keep fewer.
+  Since B-159 that sentence reads *"picked 25 tables"*, which is worth reading and
+  therefore worth being true. The better sentence is available at the same time:
+  *five tables in full and twenty in outline* says what the model actually saw.
 - **No new emit-time fields** (owner, 2026-08-27). *Why* a table was picked is
   not in any payload, and the only way to surface it today would be to smuggle
   model reasoning into one. The real *why* falls out of **WP13.14**'s provenance
