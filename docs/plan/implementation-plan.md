@@ -1146,9 +1146,15 @@ fix and the one the partner's contract asks for by name.
 3. **`source_mode` → the composer caveat D-053 specified**, unchanged, on
    `composer.limitations_for`'s existing `read` set — D-050's seam, three lines
    above the inferred-join note.
-4. **`source_mode` → no silent substitution.** A run that read a modelled table
-   while a `real` table covering the asked-for period existed has run the wrong
-   query; it does not reach the composer in that state.
+4. ~~**`source_mode` → no silent substitution.**~~ **Not built (D-060), and
+   building it would have been a false block.** The clause that makes it safe —
+   *"covering the asked-for period"* — is the period D-059 established does not
+   exist structurally, and without it the ban refuses correct answers:
+   *"how much did we waste?"* is answered from `fact_waste`, which is
+   `synthetic`, and after B-159 a real measure-bearing table is often in the same
+   bundle. The case is already reported by two caveats written for other reasons —
+   item 3 above names what an answer read, and B-093's note names what it did not.
+   Sharpening the second with provenance is **B-161**.
 5. `v_question_playbook` → `verified_queries`; `meta_data_quality` → knowledge
    documents (27 rows, **advisory by construction**, L4); rule 5 (`fact_sale` for
    revenue, never unioned with `fact_sale_line`) → a semantic definition with

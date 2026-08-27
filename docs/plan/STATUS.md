@@ -109,7 +109,17 @@ Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-27 by Claude Code (**The period an answer is about, measured
+Last updated: 2026-08-28 by Claude Code (**Observed or modelled, and a ban that
+              would have been a false block.** WP13.14's `source_mode` halves.
+              Ranking is confined to tables that offer measures, because
+              `source_mode` splits MiseQ's *dimensions* as sharply as its facts
+              and a straight sort would put seven real dimensions ahead of
+              `fact_waste` on a waste question. The substitution ban is **not
+              built**: its safety clause is the period D-059 established does not
+              exist, and without it the ban refuses correct answers. The case is
+              already reported by two caveats that were there for other reasons
+              (D-060, B-161).
+              Previously: **The period an answer is about, measured
               on both sides.** WP13.14's general mechanism, built first and alone
               because it is the only piece that works on a database with no
               `source_mode` column. **D-058's specified comparison could not be
@@ -306,6 +316,77 @@ customer's data. It narrows to the owner's address plus Azure services once the
 swap is confirmed. Note the dev host's public address **changed mid-session**
 (171.79.38.47 → 103.168.16.2), so the rule has to be written from whatever it is
 on the day rather than from a value recorded here.
+
+## WP13.14, part two — observed or modelled (D-060, B-157)
+
+The `source_mode` halves, built after the general mechanism and still the
+cuttable ones. Two of D-058's three items are built as specified; the third is
+not, and both departures came from measuring the dataset rather than from taste.
+
+**The measurement that killed the obvious implementation.** D-058 said observed
+data should outrank modelled data where two tables could each answer, and the
+obvious reading is a stable sort of the bundle by provenance. On `miseq_v64`
+that is wrong, because `source_mode` splits the **dimensions** as sharply as the
+facts:
+
+| `real` | `synthetic` |
+|---|---|
+| `dim_calendar`, `dim_outlet`, `dim_item`, `dim_ingredient`, `dim_supplier`, `dim_business`, `dim_vertical` | `dim_member`, `dim_weather`, `dim_waste_category`, `dim_industry_benchmark` |
+
+Sorting the bundle would put **seven real dimensions ahead of `fact_waste` on a
+question about waste** — and with `CARDS_KEPT_IN_FULL` at five, the one table that
+answers the question would lose its detail to `dim_vertical`, which has three
+rows. So the reordering is confined to cards that **offer measures**
+(`offers_measures`, already B-093's cheapest honest test for *could this table
+have answered*), and those cards are re-laid into their own existing positions.
+A dimension never moves, membership never changes, ties keep search order.
+
+**The caveat names the tables an answer read**, narrowed the way the join caveat
+is — MiseQ is 24 `synthetic` of 36 labelled tables, so caveating everything
+*offered* would put a warning on every answer including the ones drawn entirely
+from observed rows. It says what the label means in words, because
+*"source_mode is synthetic"* is the customer's vocabulary and not the reader's.
+
+### The substitution ban is not built, and building it would have been a false block
+
+D-058 wanted a run that read a modelled table *"while a `real` table covering the
+asked-for period existed"* stopped before the composer. **The clause that makes
+that safe is the clause D-059 already established does not exist** — no period is
+recorded anywhere structural. And without it the ban fires on correct answers:
+*"how much did we waste?"* is answered from `fact_waste`, which is `synthetic`,
+and after B-159 raised the card limit a real measure-bearing table is often in
+the same bundle. That is a false block, which the owner named as this component's
+characteristic failure.
+
+**It turns out the case is already reported twice.** The new caveat names the
+modelled tables an answer read, and **B-093's existing note already names the ones
+it did not** — *"the question also matched X — tables with figures it could have
+been answered from, and not read here."* Sharpening that sentence with provenance
+is filed as **B-161** rather than done here, because a second caveat saying nearly
+the same thing is how a reader learns to skip caveats.
+
+### A convention, not a discovery
+
+`inference.py` refuses to read a column name by construction; `provenance.py`
+reads one on purpose, because a customer told us what it means.
+`PROVENANCE_COLUMN` is the single place that assumption lives. On a database
+without such a column every function returns nothing and every caller carries on
+unchanged — which is most databases, and is why the coverage check was ordered
+ahead of this. **An unlabelled table ranks with the observed ones**: absence of a
+label is not evidence of modelling, and the opposite rule would demote the whole
+of any database that does not use the convention.
+
+Values come from `CatalogColumn.top_values`, so this needs a source to have been
+**profiled** — a catalog alone gives nothing, the same precondition D-059 has.
+
+### Evidence
+
+* `tests/agent/test_provenance.py` **14 passed**, including
+  `test_a_dimension_never_overtakes_the_table_that_answers_the_question`, which is
+  the measurement above written as an assertion.
+* `tests/agent/test_composer.py` — the caveat fires for a table the run read and
+  stays silent about one it did not.
+* `ruff`, `pyright` clean.
 
 ## WP13.14, part one — the period an answer is about (D-059, B-157)
 

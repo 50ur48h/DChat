@@ -80,6 +80,8 @@ from dataagent.agent.coverage import (
 )
 from dataagent.agent.critic import CriticVerdict
 from dataagent.agent.loop import LoopOutcome, research
+from dataagent.agent.provenance import modes_of
+from dataagent.agent.provenance import reorder as provenance_order
 from dataagent.agent.state import ResearchState, StateFinding
 from dataagent.agent.tools.base import ToolContext
 from dataagent.agent.tools.chart import CreateChartOut
@@ -407,7 +409,34 @@ async def _investigate(
             for column in table.columns
         ]
     )
+    # **Which rows are observed and which are modelled** (D-053, D-058, B-157).
+    # Measured from what the profiler already wrote, never asked of a model.
+    provenance = {
+        f"{table.schema_name}.{table.table_name}": modes_of(
+            [(column.name, column.top_values) for column in table.columns]
+        )
+        for table in catalog.tables
+        if f"{table.schema_name}.{table.table_name}" in offered
+    }
+    # Observed data first, **among the cards that could each answer** — a
+    # straight sort would put seven real dimensions ahead of `fact_waste` on a
+    # question about waste, and with `CARDS_KEPT_IN_FULL` at five the one table
+    # that answers would lose its detail to `dim_vertical`. Membership is
+    # unchanged: a modelled table stays reachable for a question only it can
+    # answer, which for 2023-2024 is every question.
+    bundle = replace(
+        bundle,
+        cards=provenance_order(
+            bundle.cards,
+            modes=lambda card: provenance.get(card.qualified, ()),
+            answers_questions=lambda card: offers_measures(card.card_text),
+        ),
+    )
+
     state.capability = {
+        # What each offered table's rows are, so the composer can narrow to the
+        # ones an answer actually read — the same discipline as `inferred`.
+        "provenance": {table: list(modes) for table, modes in provenance.items() if modes},
         # Which of the joins on offer rest on a measurement rather than on a
         # declared key (D-050). Recorded for every offered table; the composer
         # narrows it to the ones an answer actually read, because a caveat about
