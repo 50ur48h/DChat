@@ -86,7 +86,15 @@ Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-27 by Claude Code (**The trace reads as sentences, and the
+Last updated: 2026-08-27 by Claude Code (**"Safe to push" was false about the
+              security boundary.** `make preflight` skipped `test.dal`'s 90%
+              coverage gate and `test.rls`'s collects-nothing guard — of every step
+              it could have dropped, the two on the boundary the architecture calls
+              non-negotiable — plus six more. Filed **B-152**. Fixed by adding all
+              eight and by `check_preflight.py`, which asserts every ci.yml step is
+              covered or excused *and* that every claimed target is genuinely
+              reachable from `preflight`; proven by reverting the Makefile, where it
+              fails naming both guards. Previously: **The trace reads as sentences, and the
               causal refusal is specified.** `STEP_SENTENCES` replaces flat labels,
               built only from payload fields that already existed — several of
               which nothing had rendered — with no payload enriched, which is the
@@ -237,6 +245,72 @@ customer's data. It narrows to the owner's address plus Azure services once the
 swap is confirmed. Note the dev host's public address **changed mid-session**
 (171.79.38.47 → 103.168.16.2), so the rule has to be written from whatever it is
 on the day rather than from a value recorded here.
+
+## WP13.17 — "safe to push" was false about the security boundary (B-152)
+
+`make preflight` exists to be the thing a developer runs instead of guessing. It
+prints **"Preflight clean. Safe to push."** An audit of every job and every step
+in `.github/workflows/ci.yml` against what it actually ran found **eight**
+omissions, and the two that matter are the two it could least afford:
+
+* **`test.dal`** — the DAL suite carries a **90% coverage gate** (plan §4.4) on
+  the security boundary. `test.api` runs those tests **without the floor**, so
+  preflight ran the tests and skipped the gate. A coverage regression on the DAL
+  reached CI unseen, and the developer had been told they were safe.
+* **`test.rls`** — `pytest -m rls_proof` exists to fail when it collects
+  **nothing**. `test.api` runs the proofs inside the whole suite and would stay
+  green if the marker vanished. The guard against the tenant-isolation proofs
+  silently disappearing was itself not run.
+
+**The claim was false in the most expensive direction available to it.** Of every
+step preflight could have quietly dropped, it dropped the two guarding the
+boundary the architecture says is not negotiable — and said "safe to push" over
+them.
+
+The other six: `build.infra` (`check.infra` greps templates for secrets and never
+*compiles* them, so a Bicep syntax error passed), `lint.workflows` (B-128 was
+filed because a `run:` block was first exercised by the deployment it gated —
+leaving actionlint to CI repeats the argument that filed it), `check.todos`,
+`check.roles`, `check.truths`, and `compile.web`.
+
+### Why an audit rather than a ninth patch
+
+**This target had already been corrected twice for the same overstatement.**
+`test.web.e2e` was missing and a WP11.2b change failed in CI on the one suite
+nobody had reason to run; `compile.web` was missing and WP13.16 did the same
+thing one step further down the same job. Both times the fix was to add the
+target and move on. A third correction of that kind would have been a promise to
+be more careful, which is what the first two were.
+
+### The guard that keeps it true (`check_preflight.py`)
+
+Adding targets fixes today. **A new CI job would recreate the defect tomorrow**,
+which is D-054's shape exactly: a claim with nothing keeping it true. So the
+claim is now checked, in `hygiene` and in `preflight` itself, against a manifest
+that accounts for **every** step in `ci.yml` — 20 covered, 26 excluded in writing.
+
+Three assertions, and the third is what makes it more than a second list to
+drift:
+
+1. every CI step is covered or excused, so a new job cannot arrive unnoticed;
+2. every entry still matches a real step, so a stale excuse cannot outlive what
+   it excused and quietly exempt the next thing;
+3. **every target claimed as coverage is genuinely reachable from `preflight`**,
+   read out of the Makefile. Without this the manifest could claim `test.dal`
+   while the Makefile had dropped it — the guard agreeing with the lie it exists
+   to catch.
+
+**Proven against the defect, not just written.** Reverting `preflight` to the
+version that shipped makes the check fail naming both guards: *"claims coverage
+by `test.dal`, which `preflight` does not reach."* Its `--selftest` covers four
+ways it could stop working (B-019), and all four are caught.
+
+### And it stops claiming what it cannot do
+
+The excluded 26 are now **printed** rather than implied. `preflight` ends by
+naming what CI will additionally run — gitleaks, the mssql connectors, the evals,
+the coverage floor, the compose smoke, both docker images — because a developer
+reading "safe to push" is entitled to know the sentence's edges.
 
 ## WP13.16 — the trace, in sentences
 
