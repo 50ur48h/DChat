@@ -2,7 +2,13 @@
 
 Current position: **Phase 13 — the chat product. WP13.1a (#121), WP13.1b
                   (#122), WP13.2 (#123), WP13.3 (#124) and WP13.4 (#125)
-                  merged. WP13.10 in review (#130); WP13.11 open.**
+                  merged. WP13.10 (#130) and WP13.11 (#131) merged too.**
+                  **WP13.12, WP13.13 and WP13.14 are specified and not built** —
+                  the MiseQ v6.3 contract mapped onto our machinery before any
+                  code, at the owner's instruction (D-051, D-052, D-053; specs in
+                  the plan §6, Phase 13). Ordered, and the first is not a tie: the
+                  period-coverage check is the only one of the three producing a
+                  **wrong** answer rather than an absent one.
                   **WP13.10 and WP13.11 split one defect on the owner's
                   instruction** — B-145, the MiseQ source refusing nearly every
                   real question. The wording ships alone so the honest refusal
@@ -22,12 +28,16 @@ Current position: **Phase 13 — the chat product. WP13.1a (#121), WP13.1b
                   *"Dev is current"* below for why three revisions in one hop
                   were safe, and for the warning that section used to carry and
                   had wrong.
-Next step:        **The owner's.** WP13.1a, WP13.1b and WP13.2 together deliver
-                  the chat product asked for on 2026-08-25, in the design the
-                  owner chose from two mockups. The pieces explicitly held back
-                  are **system instructions, tone, model selection and the
-                  answer-card polish (B-046/047/048)** — named as next by the
-                  owner, not opened by this session.
+Next step:        **WP13.12 — the period-coverage check (D-051).** Asked *"sales
+                  last month"* on 2026-08-27 the deployed app resolved **July
+                  2026** against data ending **2025-12-31**, and the critic
+                  *requires* that empty range rather than merely permitting it.
+                  The platform already holds the coverage and renders it where it
+                  cannot win. **Nothing is built yet** — the three specs are this
+                  PR's deliverable.
+                  The pieces explicitly held back remain **system instructions,
+                  tone, model selection and the answer-card polish
+                  (B-046/047/048)** — named as next by the owner, not opened.
                   **What the owner should judge is the rendered result.** The
                   approved mockup is the reference, and the manual script is in
                   the WP13.2 PR.
@@ -72,7 +82,19 @@ Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-26 by Claude Code (**The MiseQ swap: loaded and verified,
+Last updated: 2026-08-27 by Claude Code (**The MiseQ v6.3 contract, mapped
+              before any code.** Their contract assumes an LLM that reads a join
+              catalog before writing SQL; ours derives joinability from the schema
+              and the model cannot argue past it, so the content goes into the
+              catalog and the control flow is not taken (D-051/052/053, plan §6).
+              The number that decides the import: **10 of 60 declared joins cross a
+              type family and measurement structurally cannot find them**, every
+              one of them `dim_outlet.outlet_key` TEXT against an INTEGER outlet
+              key. The new SQLite still declares **zero foreign keys**, and its 19
+              new primary-key columns are on none of the tables the join graph
+              needs. Raised with the partner in writing: their Postgres DDL
+              declares no primary keys while their SQLite has 19.
+              Previously: **The MiseQ swap: loaded and verified,
               not yet cut over.** `miseq` and `miseq_readonly` exist beside the
               untouched `fnb`/`fnb_readonly`; 29 of 29 table counts match the source
               and the figures match the supplied context to the cent. The near-miss
@@ -194,6 +216,97 @@ customer's data. It narrows to the owner's address plus Azure services once the
 swap is confirmed. Note the dev host's public address **changed mid-session**
 (171.79.38.47 → 103.168.16.2), so the rule has to be written from whatever it is
 on the day rather than from a value recorded here.
+
+## Phase 13 planning — the MiseQ v6.3 contract, mapped before any code (D-051, D-052, D-053)
+
+A partner sent a second dataset drop with a **system-prompt contract**: an LLM
+that reads `v_join_catalog`, `v_question_playbook` and `meta_data_quality` before
+writing SQL. **That is a different product.** Ours derives joinability from the
+schema deterministically and the model cannot argue past it (arch 4.3), and the
+owner's instruction was explicit: do not move enforcement back into the prompt.
+
+So the split is **content in, control flow out**. Their prose is evidence about a
+schema, and evidence belongs in the catalog where the deterministic checks
+already read it. Three work packages, specified in the plan (§6, Phase 13) and
+decided in D-051/052/053. **Nothing is built.**
+
+### Why the ordering, and why the first one is not a tie
+
+**WP13.12 is the only one of the three currently producing a *wrong answer*
+rather than an absent one.** Asked *"sales last month"* on 2026-08-27, the
+deployed app resolved **July 2026** against data that ends **2025-12-31**. Three
+of our own pieces line up to make that happen:
+
+* `as_of` defaults to the wall clock — **D-027's deliberate choice**, not the bug;
+* `TODAY_RULE`'s mitigation (*"if the range runs past the end of the data, say
+  so"*) is **one sentence of prose that nothing verifies**;
+* the critic **requires** the empty range — `_range_matches` blocks an answer
+  whose SQL does not cover 2026-07.
+
+And the platform already knows better: `catalog_columns.min_val`/`max_val` are
+profiled on every refresh and reach the model **only as card prose at L4**,
+droppable and framed as *not instructions*, while `Today is …` sits at L0. The
+weaker layer holds the true fact. That is CLAUDE.md's defect list again, in a new
+place.
+
+**The partner's fix is refused.** Resolving "last month" to the dataset's max date
+makes the same question mean something different every time data is appended, so
+no answer is reproducible and B-005's pinned-`as_of` eval seam stops meaning
+anything. Coverage becomes a platform-established fact at L0 instead, with three
+outcomes — covered, partial, none — and `none` finishes as a refusal rather than
+a confident zero.
+
+### What the import is worth, in numbers
+
+`v_join_catalog` has 69 rows; **61 are joins** and 8 are prose. Of the 60
+`ALLOWED` edges:
+
+| | count |
+|---|---|
+| same type family — D-050's inference can find them | 47 |
+| **cross type family — it structurally cannot** | **10** |
+| composite (two columns) — it measures single pairs only | 3 |
+
+Every one of the ten is `dim_outlet.outlet_key` (`TEXT`) against an `INTEGER`
+outlet key. **Measurement reaches `dim_outlet` from `fact_sale` only because that
+one column happens to be `TEXT`** — waste by outlet, stockouts by outlet, visits
+by outlet all still refuse. Import buys 13 of 60, and they are the ones that make
+the outlet dimension usable.
+
+Imported edges are **measured, not trusted**: `_orphan_count` already exists, the
+claim and the check are stored together, and a disagreement is surfaced rather
+than resolved. The one `DISALLOWED` row (`fact_sale ↔ fact_sale_line` —
+*summing both double-counts revenue*) needs a representation we do not have, and
+**its wording is a review item**: #130 removed *"the catalog explicitly
+prohibits"* because no prohibition existed, and this creates one that does.
+
+### The new dataset, checked rather than assumed
+
+**Still zero foreign keys.** New since the last drop: **19 primary-key columns
+and 9 unique indexes** — on `dim_industry_benchmark`, `dim_uom_factor`,
+`dim_weather`, `fact_campaign_response`, `fact_labour_shift`,
+`fact_sale_monthly_history`, `fact_shrinkage_cause`, `meta_source_lineage` and
+`v_question_playbook`. **Not one is on a table the join graph needs**:
+`dim_outlet`, `dim_item`, `fact_sale`, `fact_sale_line`, `dim_ingredient`,
+`dim_member` and `dim_supplier` still declare nothing. B-145's measured inference
+keeps its place and changes job — breadth comes from import, and measurement
+becomes the only thing that can contradict a stale hand-maintained file.
+
+**Raised with the partner in writing (2026-08-27):** their
+`postgres_schema.sql` declares **no primary keys at all**, while the SQLite it
+was generated from carries 19 primary-key columns and 9 unique indexes. Their
+package disagrees with itself, and the DDL is the lossy half. We do not run it —
+the schema is derived from the SQLite by `load_sqlite.py` — so nothing here is
+blocked on the answer.
+
+### Not taken, and why (owner, 2026-08-27)
+
+The contract's control flow; the Competition UX disclosure; the
+progressive-disclosure UX prescription, which is a second answer to a design
+already chosen (D-047); the "never say" list as prompt text; the 15 SQLite views
+(**B-148** — and four of them carry the customer's data-quality prose as string
+literals in the view SQL, which is the `ops/seed/` case CLAUDE.md already
+records); and their Postgres DDL.
 
 ## WP13.11 — measured inference (D-050, closes B-145, opens B-146)
 

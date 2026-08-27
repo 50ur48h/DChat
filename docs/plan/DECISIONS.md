@@ -4,6 +4,171 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-051 — a relative period is resolved against the clock, and the platform checks the data can answer it
+Date: 2026-08-27 · Phase: 13 · PR: this one (spec only; built as WP13.12)
+Context: asked *"what were the sales last month"* on 2026-08-27 against the MiseQ
+source, the deployed product resolved **July 2026**. That database holds
+**2025-01-01 to 2025-12-31** and nothing else. The run queried an empty month.
+
+Three things had to line up for that, and all three are ours:
+
+* `as_of` defaults to the wall clock (`agent/context.py`), which **D-027 chose
+  deliberately** and is not the defect.
+* `TODAY_RULE` carries the only mitigation — *"if the range runs past the end of
+  the data, say so in the answer"* — as **one sentence of prose with nothing
+  enforcing it**.
+* The critic does not merely permit the empty range, it **requires** it:
+  `stated_range` resolves "last month" against `as_of` and `_range_matches`
+  **blocks** an answer whose SQL does not cover 2026-07. The platform mandates a
+  query it has everything it needs to know is empty.
+
+And it does know. `catalog_columns.min_val`/`max_val` are profiled on every
+refresh, and `semantic_role` already marks time columns. That coverage reaches
+the model **only as card prose at L4** — droppable to fit a budget, and framed by
+`REFERENCE_FRAME` as the customer's records and *explicitly not instructions* —
+while `Today is {as_of}` sits at **L0** and is never dropped. The two disagree and
+the weaker one is the true one.
+
+Options: (a) resolve relative periods against `MAX(date)`, which is what the
+partner's patch asks for; (b) keep the clock and add a deterministic coverage
+check; (c) tell the model to check and hope.
+Decision: **(b)**.
+
+**(a) is refused and D-027's reason still holds.** A period taken from the data
+moves when data is appended: the same question means something different next
+week, no answer is reproducible, and an eval pinned to `as_of` — the whole point
+of B-005's seam — stops meaning anything. Their fix trades one irreproducibility
+for another, and the one it trades to is harder to see. **(c) is what we have**,
+and it is the shape of every entry on CLAUDE.md's defect list: a rule stated in a
+prompt, verified by nothing, failing silently.
+
+Coverage becomes a **platform-established fact**, assembled the way the capability
+check is and rendered at **L0** beside it — not a hint the model weighs against
+the anchor, because that is the argument it is currently losing. Three outcomes,
+and the middle one is what earns the design:
+
+* **covered** — nothing said, which is almost every run;
+* **partly covered** — answer the overlap, and say which slice was used and what
+  was asked for;
+* **not covered at all** — refuse, naming the period asked and the period held.
+  A refusal here is a *correct* answer to a question the data cannot support, and
+  it is the outcome the current behaviour turns into a confident zero.
+
+Consequences: the critic's range rule has to be told, or it will block the
+corrected range as not matching the question — the check and the critic must
+agree on one resolved period. `min_val`/`max_val` stop being card decoration and
+become load-bearing, so the profiler's honesty about them matters more than it
+did. And per CLAUDE.md this ships with proof it is **reached**: a test that drives
+an out-of-range period through a run and asserts what the API returns, not one
+that calls the checker directly.
+
+## D-052 — a customer's join catalog is a third provenance: imported, then measured
+Date: 2026-08-27 · Phase: 13 · PR: this one (spec only; built as WP13.13)
+Context: the MiseQ v6.3 drop ships `v_join_catalog`, 69 rows the partner intends
+an LLM to read before writing SQL. We will not do that — the join graph is
+deterministic and architecture 4.3 says the model cannot talk its way past it —
+but the *content* is evidence about a schema, and evidence belongs in the catalog
+where the deterministic checks already read it.
+
+Measured against the file, the case is quantitative rather than a matter of
+taste. Of the 60 `ALLOWED` rows, **47** are within one type family and D-050's
+inference can find them. **Ten cross a type family and it structurally cannot** —
+every one of them `dim_outlet.outlet_key` (`TEXT`) against an `INTEGER` outlet key
+on `fact_sale_line`, `fact_waste`, `fact_stock_count`, `fact_stockout_event`,
+`fact_member_visit`, `fact_stock_move_outlet`, `fact_transfer` (both ends),
+`dim_member.home_outlet_key` and `fact_reconciliation_gap`. **Three more are
+composite** (date plus outlet), and inference measures single columns only.
+
+So measurement reaches `dim_outlet` from `fact_sale` **only because that one
+column happens to be `TEXT`**. Waste by outlet, stockouts by outlet, visits by
+outlet: all still refuse. That is what import buys, and it is 13 of 60.
+
+Options: (a) import them as `declared`, trusting the file; (b) ignore the file and
+rely on measurement; (c) import as a distinct provenance and measure what was
+imported.
+Decision: **(c).** A customer assertion is neither the engine's constraint nor our
+measurement, and flattening it into `declared` would make a hand-maintained file
+indistinguishable from a foreign key the database enforces. `kind` gains a third
+value.
+
+**Imported and measured, not one or the other.** `_orphan_count` already exists,
+so an imported edge can carry the claim *and* the check in `evidence`. Precedence
+when several sources speak: **declared foreign key → imported-and-verified →
+inferred → imported-but-unverified.** Where a claim and a measurement disagree,
+the disagreement is **recorded and surfaced, never silently resolved** — a
+customer whose dictionary says two columns join when 12% of rows do not has a data
+problem worth being told about, and picking a winner hides it.
+
+**The `DISALLOWED` row gets its own representation**, and this is the part to get
+right. `fact_sale ↔ fact_sale_line` — *summing both double-counts revenue* — is a
+**negative** edge, and the join graph has no way to say "these must not be
+combined" as distinct from "no link is known". **#130 removed the sentence "the
+catalog explicitly prohibits" three days ago because no prohibition existed.**
+Importing this creates one that does, and the two sentences must stay visibly
+different: one is the customer's rule, the other is the limit of our knowledge,
+and collapsing them again would undo B-145a for the sake of a shorter code path.
+Partial consolation: D-026's chasm reasoning already refuses to join two facts
+under a shared parent, so the shape is caught even where the row is absent.
+
+**Only 61 of the 69 rows are joins.** Six `READ-FIRST` and two `DEPRECATED` rows
+are prose about how to answer — they are knowledge (D-053), and importing them as
+edges would be a category error that puts sentences in a graph.
+
+Consequences: a migration widening `RELATIONSHIP_KINDS`, an explicit
+**Admin-initiated** import rather than discovery sniffing for a table called
+`v_join_catalog` — a convention over a table name should not quietly decide what
+may be joined — and one more caveat the composer can attach: *the data dictionary
+says these join; we checked and found no unmatched values*, which is a different
+claim from either a foreign key or an inference.
+
+## D-053 — their prose becomes an enforced object where it can be, and knowledge where it cannot
+Date: 2026-08-27 · Phase: 13 · PR: this one (spec only; built as WP13.14)
+Context: the rest of the MiseQ contract — `v_question_playbook` (12 archetypes),
+`meta_data_quality` (27 rows), the revenue rule, and `source_mode` on every table.
+The partner's design puts all of it in a system prompt and asks the model to
+comply. Ours cannot: a prompt is not a boundary here, and a rule the platform
+states but never checks is the defect this repository keeps filing.
+
+Options: (a) take the contract as prompt text; (b) drop what cannot be enforced;
+(c) map each item to the strongest mechanism that fits it, and say plainly which
+ones are advisory.
+Decision: **(c)**, and the mapping is the decision:
+
+* **`v_question_playbook` → `verified_queries`**, which is what that table is for.
+  It does not fit cleanly and the gap is worth stating: these are twelve
+  *skeletons keyed by archetype*, not approved question-to-SQL pairs, so they are
+  weaker grounding than the feature assumes. `required_caveat` has no column there
+  at all and belongs with limitations.
+* **`meta_data_quality` → knowledge documents.** A clean fit — retrieved by
+  meaning, cited, already built. **And advisory by construction**: knowledge is
+  L4, framed as the customer's own records and not instructions. It will shape how
+  an answer is written and it will not stop anything, which is the right power for
+  framing guidance and the wrong power for a prohibition. Saying so here is the
+  point; the failure mode is believing a knowledge document enforces something.
+* **Rule 5 — `fact_sale` for revenue, never unioned with `fact_sale_line` → a
+  semantic definition with required filters.** D-033's critic already checks a
+  statement against the definitions a question matched, so this one is genuinely
+  enforceable rather than merely stated.
+* **`source_mode` → a composer caveat derived from what the run read**, which is
+  the same seam D-050 added for inferred joins and needs no new concept. It is
+  fully derivable: `fact_sale` is 112,327 rows all `real`, `fact_sale_line` 471,786
+  all `synthetic`, `gold_dish_cost_margin` 49 all `derived`. An answer that read a
+  modelled table says so, and it says so because of what it read rather than
+  because a prompt asked it to.
+
+**Not taken, with reasons** (owner, 2026-08-27): the contract's control flow
+(*"read the playbook before writing SQL"*), which is the whole objection; the
+Competition UX disclosure, which is demo staging and not product behaviour; the
+progressive-disclosure UX prescription, which is a second and conflicting answer
+to a design the owner already chose (D-047); and the "never say" list as prompt
+text, whose intent is right and whose mechanism would read as a guarantee nobody
+verifies. The deprecated objects — `map_ingredient_alias`, `fact_waste.stage` —
+are loaded but must not be reachable by a question.
+
+Consequences: four small features rather than one contract, each landing where
+something already checks it, and one explicit admission — the data-quality corpus
+is guidance, not enforcement. B-147 and B-148 carry what this defers.
+
 ## D-050 — an inferred join is measured, and the answer that uses one says so
 Date: 2026-08-26 · Phase: 13 · PR: this one
 Context: B-145. `miseq` declares **0 foreign keys and 0 primary keys**, so
