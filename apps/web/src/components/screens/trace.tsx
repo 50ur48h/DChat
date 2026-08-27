@@ -115,38 +115,111 @@ export const STEP_SENTENCES: Record<string, (payload: Payload) => Step> = {
   }),
 
   context_selected: (payload) => {
+    // **This builder spends what the event already carries** (WP13.21). The
+    // payload has held `definitions_available`, `tables_found_via`,
+    // `tables_found_by`, `history_turns`, `restrictions` and `as_of` since long
+    // before it said any of them out loud — *what it considered* and *what it
+    // ruled out* were being discarded at render time. No new emit-time field is
+    // read here: the real *why a table won* is not in any payload, and the only
+    // way to produce it today would be to smuggle model reasoning into one.
     const tables = list(payload, "tables");
     const definitions = list(payload, "definitions_applied");
-    const parts: string[] = [];
+    const available = num(payload, "definitions_available");
+    const inFull = num(payload, "tables_in_full");
+    const inOutline = num(payload, "tables_in_outline");
+    const dropped = num(payload, "tables_dropped");
+    const sentences: string[] = [];
+
     if (tables.length > 0) {
-      parts.push(`picked ${plural(tables.length, "table", "tables")} — ${joinNames(tables)}`);
+      // **B-160.** How much of each the model actually saw, not just how many
+      // the search returned. A detail is a different thing from an outline, and
+      // "25 tables" said neither.
+      const detail =
+        inFull !== null && inOutline !== null && inOutline > 0
+          ? ` — ${inFull} in full and ${inOutline} in outline`
+          : "";
+      sentences.push(
+        `and picked ${plural(tables.length, "table", "tables")}${detail}: ${joinNames(tables)}.`,
+      );
     }
-    if (definitions.length > 0) {
-      parts.push(`using your own definition of ${joinNames(definitions, 2)}`);
+    if (dropped !== null && dropped > 0) {
+      sentences.push(
+        `${plural(dropped, "table", "tables")} matched but would not fit the prompt, so ${dropped === 1 ? "it was" : "they were"} left out.`,
+      );
+    }
+    if (str(payload, "tables_found_via") === "thread") {
+      sentences.push("The question named no table of its own, so the earlier turns chose them.");
+    }
+    const byMeaning = Object.values(nested(payload, "tables_found_by") ?? {}).filter(
+      (arm) => arm === "vector" || arm === "both",
+    ).length;
+    if (byMeaning > 0 && tables.length > 0) {
+      sentences.push(
+        `${byMeaning} of them ${byMeaning === 1 ? "was" : "were"} found by meaning rather than by matching a word.`,
+      );
+    }
+    if (available !== null && available > 0) {
+      // **B-087's finding, said out loud.** An empty list beside a non-zero
+      // count is the whole point: none of your definitions matched is a
+      // different fact from you have no definitions.
+      sentences.push(
+        definitions.length > 0
+          ? `${definitions.length} of your ${available} definitions applied: ${joinNames(definitions, 2)}.`
+          : `None of your ${available} definitions matched this question.`,
+      );
+    }
+    const restricted = num(payload, "restrictions");
+    if (restricted !== null && restricted > 0) {
+      sentences.push(`${plural(restricted, "column is", "columns are")} restricted by policy.`);
+    }
+    const turns = num(payload, "history_turns");
+    if (turns !== null && turns > 0) {
+      sentences.push(`Read with ${plural(turns, "earlier turn", "earlier turns")} for context.`);
     }
     return {
       lead: "Searched the catalogue for tables that fit the question",
-      rest: parts.length > 0 ? `and ${parts.join(", ")}.` : "",
+      rest: sentences.join(" "),
     };
   },
 
   capability_checked: (payload) => {
     const unreachable = list(payload, "unreachable");
-    // The payload carries objects for these, so fall back to the count when the
-    // shape is not a plain list of names.
+    const comparable = list(payload, "comparable");
+    const period = str(payload, "available_period");
     const blocked = unreachable.length > 0 ? joinNames(unreachable) : null;
+    const sentences: string[] = [];
+
     if (payload.answerable === false) {
-      return {
-        lead: "Checked those tables can actually be linked",
-        rest: blocked
+      sentences.push(
+        blocked
           ? `— they cannot (${blocked}), and joining them anyway would invent rows rather than fail.`
           : "— they cannot, and joining them anyway would invent rows rather than fail.",
-      };
+      );
+    } else {
+      sentences.push("— they can, so the numbers will line up row for row.");
+      // **What it ruled out**, which the payload has always carried and the
+      // sentence never spent. A pair that shares only a parent is the chasm
+      // trap (D-026), and naming it is the difference between "checked" and
+      // "checked, and here is what came back".
+      if (blocked) {
+        sentences.push(`Ruled out joining ${blocked}: the catalogue records no link.`);
+      }
     }
-    return {
-      lead: "Checked those tables can actually be linked",
-      rest: "— they can, so the numbers will line up row for row.",
-    };
+    if (comparable.length > 0) {
+      sentences.push(
+        `${joinNames(comparable, 2)} can only be compared side by side, not joined row to row.`,
+      );
+    }
+    // Present even when null, which is how an abstention is told apart from a
+    // pass (B-157, D-059).
+    if ("available_period" in payload) {
+      sentences.push(
+        period
+          ? `The dated columns here run ${period}.`
+          : "No dated column here has been profiled, so nothing was compared against.",
+      );
+    }
+    return { lead: "Checked those tables can actually be linked", rest: sentences.join(" ") };
   },
 
   plan_created: (payload) => {
