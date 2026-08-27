@@ -882,6 +882,126 @@ Format per WP: **Branch → Build → Tests → Accept** (accept = commands/chec
 
 ---
 
+## Phase 13 — the chat product, and the MiseQ contract (M13)
+
+**Phase 13 was opened by the owner on 2026-08-25, after Phase 12 stopped at
+WP12.2 (D-043).** Its first five work packages — WP13.1a, WP13.1b, WP13.2,
+WP13.3, WP13.4 — were specified in conversation and are recorded in
+`docs/plan/STATUS.md` rather than here, and WP13.10/13.11 were a defect split.
+**The three below are specified here before any code**, at the owner's
+instruction, because they change what the platform *asserts* rather than how it
+looks.
+
+They come from a partner's MiseQ v6.3 handoff: a system-prompt contract, a
+Postgres schema recommendation, and a SQLite runtime carrying `v_join_catalog`,
+`v_question_playbook`, `meta_data_quality` and a `source_mode` column on every
+table. **The contract assumes a different product** — one whose LLM reads a join
+catalog before writing SQL. Ours derives joinability from the schema and the
+model cannot argue past it (arch 4.3). So the *content* is taken as evidence into
+the catalog, and the *control flow* is not taken at all (D-053).
+
+Ordered. WP13.12 first because it is the only one of the three that is currently
+producing a wrong answer rather than an absent one.
+
+### WP13.12 — the period a question asks for, checked against the data — `p13.12-period-coverage`
+Implements **D-051**. Closes nothing; this is a live defect found on the deployed
+dev app (*"sales last month"* → July 2026, against data ending 2025-12-31).
+
+- `agent/coverage.py` (new): given the tables a question selected and the range it
+  named, return `covered | partial | none` plus the window actually held. The
+  range comes from `critic.stated_range` — **reused, not reimplemented**, because
+  the check and the critic must resolve one period or they will disagree and the
+  critic will block the corrected answer.
+- Coverage is read from `catalog_columns.min_val`/`max_val` where `semantic_role`
+  is `time`, scoped to the selected tables. No new profiling: those columns have
+  been populated on every refresh since WP4.2 and reach the model today only as
+  card prose.
+- `ContextBundle` gains a coverage note rendered at **L0** beside
+  `capability_note` — a platform-established fact, never truncated, not a hint at
+  L4 competing with `TODAY_RULE`'s anchor.
+- `critic._range_matches` is told the covered window, so a statement that
+  correctly narrows to the overlap passes instead of being blocked for not
+  covering a month that does not exist.
+- `composer.limitations_for` gains the partial-coverage caveat, next to D-050's
+  inferred-join one.
+- **`none` finishes the run as a refusal** with `outcome_state` set accordingly
+  (D-044), naming the period asked and the period held. A refusal is the correct
+  answer to a question this data cannot support; a confident zero is not.
+- **Tests/Accept:** unit tests on the resolver for covered/partial/none and for
+  a question naming no period (the common case — the check must not fire).
+  **Plus proof it is reached on the live path** (CLAUDE.md): a run driven through
+  the API with an out-of-range period, asserting on **what the route returns** —
+  `view.answered`, the stored `outcome_state`, and the limitation text — not on
+  an intermediate object. Golden eval **19** (*"empty-result honesty, future date
+  range"*, §8 appendix D) is wired to this and must go from silent to explicit.
+
+### WP13.13 — the customer's join catalog, imported and measured — `p13.13-imported-joins`
+Implements **D-052**. Depends on WP13.12 only for merge order, not technically.
+
+- Migration: `RELATIONSHIP_KINDS` gains `imported`; `catalog_relationships` gains
+  a **polarity** column (join / never-join) kept **orthogonal to `kind`**, so
+  "who says so" and "what they say" stay separable — a forbidden edge could in
+  principle come from any provenance.
+- `catalog/imported.py` (new): parse a join-catalog relation into candidate edges.
+  Handles the three shapes seen in the real file — same-name (`outlet_key`),
+  renamed (`outlet_key = home_outlet_key`) and composite (`weather_date =
+  business_date, outlet_key`) — and **ignores rows that are not joins**: six
+  `READ-FIRST` and two `DEPRECATED` rows of the 69 are prose, and belong to
+  WP13.14.
+- Each imported edge is **verified** with the existing `_orphan_count`, and both
+  the claim and the measurement are stored in `evidence`. Precedence: declared FK
+  → imported-and-verified → inferred → imported-but-unverified. **A disagreement
+  is recorded and surfaced, never silently resolved.**
+- `JoinGraph` gains forbidden pairs and a verdict distinct from `UNREACHABLE`,
+  with its own sentence. **The wording is a review item**: #130 removed *"the
+  catalog explicitly prohibits"* because no prohibition existed, and this creates
+  one that does. The customer's rule and the limit of our knowledge must not
+  collapse back into one sentence.
+- Import is an **explicit Admin action** against a named relation, not discovery
+  sniffing for a table called `v_join_catalog`. A table-name convention should not
+  quietly decide what may be joined.
+- **Tests/Accept:** parser tests for all three join shapes and for the non-join
+  rows; a verification test where the claim is false and the disagreement is what
+  is asserted; precedence tests. **Live-path proof**: import against the
+  no-key fixture, then `load_join_graph`, and assert that a previously
+  unreachable pair is joinable *and* marked imported — and that the forbidden
+  pair refuses with the customer's reason rather than the absence-of-knowledge
+  sentence. On real MiseQ, the acceptance number is the one that motivated it:
+  **`dim_outlet` reaches nine tables it cannot reach today.**
+
+### WP13.14 — playbook, data quality, the revenue rule, and source mode — `p13.14-miseq-contract`
+Implements **D-053**. Four small features, each landing where something already
+checks it.
+
+- `v_question_playbook` → `verified_queries`. Twelve archetypes; the
+  `required_caveat` column has no home there and is carried as a limitation.
+- `meta_data_quality` → knowledge documents (27 rows). **Advisory by
+  construction** — L4, framed as the customer's records and not instructions —
+  and the PR must say so rather than imply the corpus enforces anything.
+- Rule 5 (`fact_sale` for revenue, never unioned with `fact_sale_line`) → a
+  semantic definition with required filters, which D-033's critic already checks.
+- `source_mode` → a composer caveat derived from the tables a run actually read,
+  on the seam D-050 built. An answer resting on `synthetic` or `derived` rows says
+  so because of what it read.
+- Deprecated objects (`map_ingredient_alias`, `fact_waste.stage`) are loaded and
+  **must not be reachable by a question**.
+- **Tests/Accept:** a definition test that the revenue rule blocks a union of the
+  two fact tables; a live-path test that a question answered from
+  `fact_sale_line` carries the modelled caveat in what the API returns; knowledge
+  retrieval over the real 27 rows. **No prompt-text assertions** — if a rule can
+  only be checked by reading the prompt, it is not in this work package.
+
+> **Not taken from the handoff** (owner, 2026-08-27, recorded in D-053): the
+> contract's control flow; the Competition UX disclosure; the
+> progressive-disclosure UX prescription, which conflicts with D-047; the "never
+> say" list as prompt text; the 15 SQLite views (**B-148**); and their
+> `postgres_schema.sql`, which we do not run — we derive the schema from the
+> SQLite, and their DDL declares **no primary keys at all** while the SQLite
+> carries 19 primary-key columns and 9 unique indexes. That contradiction was
+> raised with the partner in writing on 2026-08-27.
+
+---
+
 # §7 — Session rituals and safety valves
 
 ## 7.1 Session start
