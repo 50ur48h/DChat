@@ -500,3 +500,28 @@
   background: var(--surface-sunken);
   font-size: var(--text-sm);
 }
+
+/* **What the question cost**, sitting in the same quiet strip as Evidence and
+   the trace: revealed on hover like its neighbours, and reachable by keyboard
+   and on touch through the rules above, which apply to every child of
+   `.working` rather than to any one of them. Set at the same weight as
+   `.summaryMeta` — a number a person may want and never needs, which is
+   design.md rule 4's ordering. */
+.cost {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--s1);
+  padding: 2px 0;
+  font-size: 11.5px;
+  line-height: 18px;
+  color: var(--ink-subtle);
+}
+
+.costAmount {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.costMeta {
+  color: var(--ink-subtle);
+}

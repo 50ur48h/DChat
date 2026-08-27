@@ -63,6 +63,7 @@ from dataagent.db.models import (
     Organization,
     QueryExecution,
     ResultArtifact,
+    UsageLedger,
 )
 from dataagent.runs.events import EventType, RecordedEvent, read_events, write_event
 from dataagent.tenancy.session import org_session
@@ -942,6 +943,81 @@ async def conversation_history(
         ]
 
 
+async def _roll_up_usage(session: AsyncSession, run: AgentRun) -> None:
+    """Fill ``cost_estimate`` and ``model_usage`` from this run's ledger rows.
+
+    **Both columns have existed since revision 0012 and nothing ever wrote
+    them.** `model_usage`'s own comment calls it *"a rollup for the trace UI"*;
+    the rollup was never built, so every run in every database carries `NULL`
+    and `{}`, the API returns them, and no screen could show what a question
+    cost. `usage_ledger` had the answer the whole time — one row per provider
+    call, with role, model, tokens and `cost_usd` — and `budget.spent_on_run`
+    already sums it to enforce the per-run ceiling. The ceiling worked off data
+    the run's own row never received.
+
+    **`NULL` means unpriced, never free**, which is the rule both columns were
+    given at birth and the one this must not quietly soften. A run holding any
+    call the price table does not cover gets `NULL` rather than a total that
+    silently omits it — an understated number is worse than an absent one,
+    because it reads as the answer. A run with no ledger rows at all also gets
+    `NULL`: nothing was recorded, which is not the same claim as nothing was
+    spent, and the two are indistinguishable from here.
+
+    The breakdown is kept whatever the total does, so `NULL` never means "we
+    know nothing" — `unpriced_calls` says exactly how many calls could not be
+    priced, and `by_model` still names them.
+    """
+    rows = (
+        await session.execute(
+            select(
+                UsageLedger.model,
+                UsageLedger.role,
+                func.count().label("calls"),
+                func.coalesce(func.sum(UsageLedger.input_tokens), 0).label("input_tokens"),
+                func.coalesce(func.sum(UsageLedger.output_tokens), 0).label("output_tokens"),
+                func.sum(UsageLedger.cost_usd).label("cost_usd"),
+                func.count().filter(UsageLedger.cost_usd.is_(None)).label("unpriced"),
+            )
+            .where(UsageLedger.run_id == run.id)
+            .group_by(UsageLedger.model, UsageLedger.role)
+            .order_by(UsageLedger.model, UsageLedger.role)
+        )
+    ).all()
+
+    by_model: list[dict[str, object]] = []
+    calls = inputs = outputs = unpriced = 0
+    total = Decimal("0")
+    for row in rows:
+        calls += row.calls
+        inputs += int(row.input_tokens)
+        outputs += int(row.output_tokens)
+        unpriced += row.unpriced
+        if row.cost_usd is not None:
+            total += row.cost_usd
+        by_model.append(
+            {
+                "model": row.model,
+                "role": row.role,
+                "calls": row.calls,
+                "input_tokens": int(row.input_tokens),
+                "output_tokens": int(row.output_tokens),
+                # A string, because JSONB has no decimal and a float would round
+                # a price. The reader formats it; nothing here does arithmetic on
+                # it again.
+                "cost_usd": None if row.cost_usd is None else str(row.cost_usd),
+            }
+        )
+
+    run.model_usage = {
+        "calls": calls,
+        "input_tokens": inputs,
+        "output_tokens": outputs,
+        "unpriced_calls": unpriced,
+        "by_model": by_model,
+    }
+    run.cost_estimate = None if (unpriced or not rows) else total
+
+
 async def transition(
     *,
     org_id: uuid.UUID,
@@ -995,6 +1071,10 @@ async def transition(
             # without a named part treats '' and NULL alike and a column that holds
             # both for the same meaning is one nobody can query.
             run.unanswered = unanswered or None
+            # Written at the ending, for the same reason `outcome_state` is: it
+            # is a fact about the run that is true once and never again, and a
+            # screen should not have to re-derive it from the ledger per row.
+            await _roll_up_usage(session, run)
         await session.flush()
 
         event, payload = _event_for(status, run=run, totals=totals, first_start=first_start)

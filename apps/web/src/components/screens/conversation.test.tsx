@@ -847,3 +847,79 @@ describe("an answer keeps its evidence when the next question is asked (B-106)",
     expect(screen.getAllByText("6,214 orders were placed in July 2026.")).toHaveLength(1);
   });
 });
+
+/**
+ * What the question cost (B-153).
+ *
+ * **The columns behind this existed since revision 0012 and nothing wrote
+ * them** — `model_usage`'s own comment called it "a rollup for the trace UI"
+ * and the rollup was never built, so the API returned `null` and `{}` and no
+ * screen could show what a run cost. These assert the half a person reads, and
+ * particularly the case where an honest absence beats a tidy number.
+ */
+describe("what the run cost", () => {
+  const priced = { ...ANSWERED, cost_estimate: "0.0195", model_usage: { calls: 3, input_tokens: 1700, output_tokens: 170, unpriced_calls: 0, by_model: [] } };
+
+  it("shows the total and where it went", async () => {
+    routeFetch({ run: priced });
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    const cost = await screen.findByTestId("run-cost");
+    // Two decimals at or above a cent, four below it: $0.0195 reads as $0.02,
+    // which rounds *up* and so cannot understate. Four decimals everywhere would
+    // put trailing noise on every ordinary run.
+    expect(cost).toHaveTextContent("$0.02");
+    expect(cost).toHaveTextContent("3 model calls");
+    expect(cost).toHaveTextContent("1,870 tokens");
+  });
+
+  it("says 'not priced' rather than a number that understates", async () => {
+    // The rule both columns were born with: null means unpriced, never free. A
+    // run with four fifths of its calls priced is exactly when a total is most
+    // tempting and most misleading, because it looks complete.
+    routeFetch({
+      run: {
+        ...ANSWERED,
+        cost_estimate: null,
+        model_usage: { calls: 5, input_tokens: 10, output_tokens: 2, unpriced_calls: 1, by_model: [] },
+      },
+    });
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    const cost = await screen.findByTestId("run-cost");
+    expect(cost).toHaveTextContent("not priced");
+    // The absence stays informative: it says how many calls could not be priced
+    // rather than leaving the reader to guess whether the run was free.
+    expect(cost).toHaveTextContent("1 not priced");
+    expect(cost.textContent).not.toMatch(/\$/);
+  });
+
+  it("never renders a sub-cent run as free", async () => {
+    // `agent_runs.cost_estimate` stores four decimal places while the ledger
+    // prices each call at six, so a very cheap run rounds to 0.0000. "$0.0000"
+    // would read as free, which is the one thing this column promises never to
+    // say.
+    routeFetch({
+      run: {
+        ...ANSWERED,
+        cost_estimate: "0.0000",
+        model_usage: { calls: 1, input_tokens: 8, output_tokens: 1, unpriced_calls: 0, by_model: [] },
+      },
+    });
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    const cost = await screen.findByTestId("run-cost");
+    expect(cost).toHaveTextContent("less than $0.0001");
+    expect(cost.textContent).not.toContain("$0.0000");
+  });
+
+  it("shows nothing at all for a run that recorded no usage", async () => {
+    // Older runs, and runs that ended before a model was called. An empty strip
+    // is honest; "$0.00" would not be.
+    routeFetch({ run: { ...ANSWERED, cost_estimate: null, model_usage: {} } });
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    await screen.findByText(/6,214 orders/);
+    expect(screen.queryByTestId("run-cost")).toBeNull();
+  });
+});

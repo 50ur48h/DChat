@@ -398,6 +398,23 @@ export interface Finding {
   cited: boolean;
 }
 
+/** The per-model rollup behind {@link Run.cost_estimate}. */
+export interface RunUsage {
+  calls?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  unpriced_calls?: number;
+  by_model?: {
+    model?: string;
+    role?: string;
+    calls?: number;
+    input_tokens?: number;
+    output_tokens?: number;
+    /** Null for a model the price table does not cover. */
+    cost_usd?: string | null;
+  }[];
+}
+
 export interface Run {
   id: string;
   conversation_id: string;
@@ -429,6 +446,28 @@ export interface Run {
    * name. "Could not answer the cost" is useful; "partly answered" alone is not.
    */
   unanswered?: string;
+  /**
+   * What this run cost, in USD, or `null` when no total can be stated.
+   *
+   * **Null means unpriced, never free** — the rule the column was born with. A
+   * run holding any call the deployment's price table does not cover reports
+   * null rather than a total that silently omits it, because an understated
+   * number reads as the answer and nothing about it looks wrong. A run with no
+   * metered call at all is also null: nothing was recorded, which is a different
+   * claim from nothing was spent, and the two are indistinguishable from here.
+   *
+   * A string, because the API sends an exact decimal and a JSON number would
+   * round a price on the way in.
+   */
+  cost_estimate?: string | null;
+  /**
+   * Where that cost went: calls, tokens, and a row per model and role.
+   *
+   * `unpriced_calls` is why a null total can still be informative — it says how
+   * many calls could not be priced rather than leaving the reader to guess
+   * whether the run was free or merely unmeasured.
+   */
+  model_usage?: RunUsage;
   findings: Finding[];
   /**
    * What this answer does not establish, in plain words — a ceiling that stopped
