@@ -86,6 +86,16 @@ function totalsOf(payload: Payload): Payload {
   return typeof value === "object" && value !== null ? (value as Payload) : {};
 }
 
+/** A nested object, or null. `null` is a value a payload deliberately carries —
+ * `coverage: null` says the check did not run — so it must not read as an
+ * empty object that then renders as though something happened. */
+function nested(payload: Payload, key: string): Payload | null {
+  const value = payload[key];
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Payload)
+    : null;
+}
+
 /** "1 row" / "3 rows", so no sentence ever says "1 rows". */
 function plural(count: number, one: string, many: string): string {
   return `${count.toLocaleString()} ${count === 1 ? one : many}`;
@@ -268,7 +278,31 @@ export const STEP_SENTENCES: Record<string, (payload: Payload) => Step> = {
       limitations && limitations > 0
         ? ` with ${plural(limitations, "caveat", "caveats")} attached`
         : "";
-    return { lead: "Wrote the answer", rest: `from what the queries returned${caveats}.` };
+    const parts = [`from what the queries returned${caveats}.`];
+    // **The period check says which of three things happened, including that it
+    // could not look** (B-157, D-059). A run where it abstained has to read
+    // differently from one where it ran and passed — otherwise the absence of a
+    // caveat means two different things and nobody can tell which. That is the
+    // whole reason the payload carries a reason beside the status.
+    const coverage = nested(payload, "coverage");
+    if (coverage) {
+      const answered = str(coverage, "answered");
+      const available = str(coverage, "available");
+      const reason = str(coverage, "reason");
+      const status = str(coverage, "status");
+      if (status === "outside" && answered && available) {
+        parts.push(`It covers ${answered}, while the catalogue records ${available}.`);
+      } else if (status === "contained" && answered) {
+        parts.push(`It covers ${answered}, which is inside the period the catalogue records.`);
+      } else if (status === "abstained") {
+        parts.push(
+          reason
+            ? `The period could not be checked: ${reason}.`
+            : "The period could not be checked.",
+        );
+      }
+    }
+    return { lead: "Wrote the answer", rest: parts.join(" ") };
   },
 
   run_finished: (payload) => {

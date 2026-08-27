@@ -1126,6 +1126,7 @@ async def record_answer(
     limitations: Sequence[str] = (),
     chart: Mapping[str, object] | None = None,
     method: str = "",
+    coverage: Mapping[str, object] | None = None,
 ) -> MessageView:
     """Write the assistant's reply for a run, and what it does not establish.
 
@@ -1178,6 +1179,12 @@ async def record_answer(
                 # apart from one nobody asked for: `null`, `"spec"` or the
                 # refusal's own code (B-087's discipline, for pictures).
                 "chart": _chart_outcome(chart),
+                # **Present whatever it says, including "I could not look."** A
+                # run where the period check abstained has to be distinguishable
+                # in the trace from one where it ran and passed; without this key
+                # the absence of a caveat would mean two different things and a
+                # reader would have no way to tell which (B-157, D-059).
+                "coverage": dict(coverage) if coverage is not None else None,
             },
         )
         return MessageView(

@@ -50,6 +50,9 @@ import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime
+from typing import cast
+
+from sqlalchemy import select
 
 from dataagent.agent import composer, critic
 from dataagent.agent.budget import Budget, BudgetState
@@ -67,6 +70,14 @@ from dataagent.agent.context import (
     build_context,
     history_block,
 )
+from dataagent.agent.coverage import (
+    Coverage,
+    Period,
+    available_period,
+    coverage_note,
+    describe,
+    period_of_values,
+)
 from dataagent.agent.critic import CriticVerdict
 from dataagent.agent.loop import LoopOutcome, research
 from dataagent.agent.state import ResearchState, StateFinding
@@ -74,9 +85,11 @@ from dataagent.agent.tools.base import ToolContext
 from dataagent.agent.tools.chart import CreateChartOut
 from dataagent.agent.tools.finalize import FINALIZE, FinalizeIn
 from dataagent.agent.tools.registry import ToolRegistry, default_registry
+from dataagent.catalog.browse import active_catalog
 from dataagent.catalog.cards import offers_measures
 from dataagent.config import Settings
 from dataagent.dal.policy import SourcePolicy
+from dataagent.db.models import QueryExecution, ResultArtifact
 from dataagent.knowledge import embeddings
 from dataagent.llm.base import LLMError
 from dataagent.runs import service as runs
@@ -376,6 +389,24 @@ async def _investigate(
     policy = await source_policy(context.org_id, source_id)
     gaps = relevant_pairs(graph.unreachable_pairs(), bundle.table_names)
     chasms = relevant_pairs(graph.comparable_pairs(), bundle.table_names)
+
+    # **What periods this database can speak about** (B-157, D-058). Measured
+    # from `CatalogColumn.min_val`/`.max_val`, which the profiler takes from the
+    # engine rather than from a sample (B-051) — and narrowed to the bundle's
+    # own tables, because the candidate set for anything said about coverage is
+    # what this run was offered, not the whole catalog. Comparing against all of
+    # it would flag claims that are true about the tables in play, and a false
+    # block is this component's characteristic failure (owner, 2026-08-27).
+    offered = set(bundle.table_names)
+    catalog = await active_catalog(context.org_id, source_id)
+    available = available_period(
+        [
+            (column.data_type, column.min_val, column.max_val)
+            for table in catalog.tables
+            if f"{table.schema_name}.{table.table_name}" in offered
+            for column in table.columns
+        ]
+    )
     state.capability = {
         # Which of the joins on offer rest on a measurement rather than on a
         # declared key (D-050). Recorded for every offered table; the composer
@@ -386,12 +417,20 @@ async def _investigate(
         "comparable": [
             {"left": chasm.left, "right": chasm.right, "via": chasm.via} for chasm in chasms
         ],
+        # Carried on the state so the composer can compare an answer against it
+        # without a second catalog read, the same way `inferred` is.
+        "available_period": None if available is None else [available.earliest, available.latest],
     }
     await events.emit(
         "capability_checked",
         {
             "unreachable": [f"{gap.left} ↔ {gap.right}" for gap in gaps],
             "comparable": [f"{chasm.left} ↔ {chasm.right} via {chasm.via}" for chasm in chasms],
+            # **Emitted even when it is null**, which is the whole point: a source
+            # whose dated columns nobody profiled has to be distinguishable in the
+            # trace from one that was checked and covered the question. An absent
+            # key would make those two runs look identical.
+            "available_period": None if available is None else str(available),
         },
     )
     notes: list[str] = []
@@ -427,6 +466,11 @@ async def _investigate(
             "own subquery or CTE first, then join the two aggregates. Do not join the "
             "detail rows."
         )
+    # Last of the notes, because it is the only one that is not about a join —
+    # and it is a fact rather than an instruction, so it reads better after the
+    # rules than in front of them.
+    if period_note := coverage_note(available):
+        notes.append(period_note)
     if notes:
         bundle = bundle.with_capability_note(" ".join(notes))
 
@@ -853,6 +897,65 @@ PARTIAL_RESULT_RULE = (
 )
 
 
+async def _coverage_for(
+    context: ToolContext, state: ResearchState, cited: Sequence[str]
+) -> Coverage:
+    """What period the answer's own results covered, against what the catalog records.
+
+    **The sample is only used when it provably is the whole result.** A stored
+    artifact keeps at most `SAMPLE_ROWS` rows, and `truncated` says the *DAL* hit
+    its row cap — not that the sample is partial. So a result of 200 rows that
+    was never truncated still has a 50-row sample, and a min/max over it would be
+    a range taken from part of the data presented as the whole. That is B-051
+    exactly, arriving through a field whose name does not warn you. The guard is
+    `row_count == len(sample_rows)`, and anything else abstains with a reason.
+
+    Reading the sample rather than the artifact store is deliberate: the store is
+    a network round trip per execution, and a coverage sentence is not worth one.
+    An answer big enough to have been sampled gets an honest abstention instead.
+    """
+    available: object = state.capability.get("available_period")
+    ends: list[str] = (
+        [str(end) for end in cast(list[object], available)] if isinstance(available, list) else []
+    )
+    period = Period(earliest=ends[0], latest=ends[1]) if len(ends) == 2 else None
+    if not cited:
+        return describe(answered=None, available=period, reason="the answer cites no result")
+
+    values: list[object] = []
+    reason = ""
+    async with org_session(context.org_id) as session:
+        rows = (
+            await session.execute(
+                select(ResultArtifact, QueryExecution)
+                .join(QueryExecution, QueryExecution.id == ResultArtifact.query_execution_id)
+                .where(QueryExecution.run_id == context.run_id)
+            )
+        ).all()
+    for artifact, execution in rows:
+        if str(execution.id) not in set(cited):
+            continue
+        sample = list(artifact.sample_rows or [])
+        if artifact.truncated:
+            reason = reason or (
+                "a result the answer rests on was cut off at the row limit, so its "
+                "last period is not its latest"
+            )
+            continue
+        if execution.row_count is not None and execution.row_count != len(sample):
+            reason = reason or (
+                f"a result the answer rests on kept {len(sample)} of its "
+                f"{execution.row_count} rows, so its earliest and latest are not known"
+            )
+            continue
+        values.extend(cell for row in sample for cell in row)
+
+    answered, why = period_of_values(values, truncated=False)
+    return describe(
+        answered=answered, available=period, reason=reason or (why if not values else "")
+    )
+
+
 async def _write_ending(
     context: ToolContext,
     events: EventWriter,
@@ -875,6 +978,12 @@ async def _write_ending(
     **cited** mark on the findings the answer rests on.
     """
     state = working.state
+    # Before `assemble`, because the composer owns the order limitations are read
+    # in and a caveat appended afterwards would sit wherever it happened to land.
+    # Stored on the state the same way `capability["inferred"]` is, so
+    # `limitations_for` stays a pure function of what the run knows.
+    coverage = await _coverage_for(context, state, cited)
+    state.capability["coverage"] = coverage.as_payload()
     composed = composer.assemble(final, state, verdict, citations=cited, caveat=caveat)
     chart = await _chart_for(context, tools, events, final, cited)
     await runs.record_answer(
@@ -882,6 +991,11 @@ async def _write_ending(
         run_id=context.run_id,
         content=final.answer,
         limitations=list(composed.limitations),
+        # **In the trace whatever it says**, including when it says it could not
+        # look: a run where the check abstained has to be distinguishable from
+        # one where it ran and passed, or the absence of a caveat means two
+        # different things and a reader cannot tell which (owner, 2026-08-27).
+        coverage=coverage.as_payload(),
         # **B-100.** `assemble` has built this since Phase 9 and this call
         # dropped it, so architecture 4.2's four parts of an answer shipped as
         # three. It is stored rather than recomputed on read for the reason

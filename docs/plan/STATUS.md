@@ -109,7 +109,17 @@ Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-27 by Claude Code (**MiseQ v6.4 loaded beside the live
+Last updated: 2026-08-27 by Claude Code (**The period an answer is about, measured
+              on both sides.** WP13.14's general mechanism, built first and alone
+              because it is the only piece that works on a database with no
+              `source_mode` column. **D-058's specified comparison could not be
+              built**: the claim it wanted to check exists only in the model's
+              prose, so D-059 compares two measurements instead and records the
+              narrowing in three places — it catches an answer resting on a window
+              the catalog does not describe, never a false coverage statement in
+              general. Abstention is loud in the trace and silent on the answer
+              card, and the planner is told the range as fact.
+              Previously: **MiseQ v6.4 loaded beside the live
               source, and it deleted a work package.** 57 declared foreign keys
               and a unified `TEXT` outlet key mean **51 of the 63 column pairs**
               `v_join_catalog` asserts are now constraints, so D-052's
@@ -296,6 +306,88 @@ customer's data. It narrows to the owner's address plus Azure services once the
 swap is confirmed. Note the dev host's public address **changed mid-session**
 (171.79.38.47 → 103.168.16.2), so the rule has to be written from whatever it is
 on the day rather than from a value recorded here.
+
+## WP13.14, part one — the period an answer is about (D-059, B-157)
+
+The general mechanism, built first and alone because it is the only piece that
+works on a database with no `source_mode` column (owner, 2026-08-27). The
+`source_mode` halves follow and stay cuttable.
+
+**D-058 said to compare *"an answer asserting the limits of available data"*
+against the catalog. That assertion does not exist.** `ExecutionRef` carries
+tables and a SQL hash and no period, `ResearchState` has no period field, and a
+refusal's reason is prose. So D-059 records the choice: compare two things that
+are already measured rather than parse a claim out of what the model wrote.
+
+**The narrowing, because "coverage check" oversells it.** This catches *an answer
+resting on a window the catalog does not describe*. It does **not** catch a false
+coverage statement in general — a correct 2025 result described as *"we only hold
+2023 data"* passes, and always will. Written in three places, because a limit kept
+only in prose gets forgotten: the module docstring, the work package, and a
+passing test called `test_a_false_sentence_over_a_correct_result_is_not_caught`.
+
+### Both sides are measurements
+
+| | source | guard |
+|---|---|---|
+| available | `CatalogColumn.min_val`/`.max_val` | from the engine, never a sample (B-051) |
+| answered | the rows the run returned | only when the sample **provably is** the whole result |
+
+**The second guard is the one that nearly got away.** `truncated` says the *DAL*
+hit its row cap — not that the sample is partial. A result of 200 rows that was
+never truncated still has a 50-row sample, so a min/max over it would be a range
+taken from part of the data and presented as the whole. That is B-051 arriving
+through a field whose name does not warn you. The rule is
+`row_count == len(sample_rows)`, and anything else abstains.
+
+### Containment, not narrowness
+
+*"Sales last month"* returns one month out of a year and is completely correct.
+A check that caveated it would teach people to skip caveats — the failure D-034's
+budget note and B-146's coverage floor were both written against. Containment is
+silent there and loud on B-157's answer, which covered 2023-2024 while every dated
+column in its bundle ran through 2025. Asserted both ways.
+
+### Abstention is loud in the trace and silent on the answer card
+
+The owner's requirement, and the two live in different places on purpose. A reader
+of an answer is owed caveats **about their answer**; *"a check could not run"* is
+not one, and putting it there is the padding that makes people stop reading the
+ones that matter. So `capability_checked` carries `available_period` **even when
+null**, `answer_composed` carries `coverage` **whatever it says**, and
+`trace.tsx` renders three different sentences for `outside`, `contained` and
+`abstained` — the last with its reason, because *"could not be checked"* with no
+*why* is the same silence wearing a label.
+
+### The planner is told the range
+
+Appended to the capability note — architecture 4.3's existing *"told as fact"*
+seam, no new mechanism, and the module says plainly that it is **not**
+enforcement. It is the half that stops the wrong sentence being written at all:
+B-157's refusal, three months of 2025 declared missing while `dim_calendar` held
+every one of them, is a sentence a planner shown the range would not have written.
+
+### Evidence
+
+* `tests/agent/test_coverage.py` **16 passed** — the pure rules, including the
+  narrowing as an assertion.
+* `tests/agent/test_composer.py` — `outside` speaks, `contained` and `abstained`
+  do not.
+* `tests/agent/test_runner.py` — **end to end**: the range reaches the **`sql`
+  prompt** (not the bundle — if it stops being rendered the test goes red rather
+  than staying green over a string nobody reads); an unprofiled source abstains
+  with the key present; and a profiled one returns `contained` with
+  `2020-01 to 2024-05` on both sides.
+* `trace.test.tsx` **52 passed**, including that `coverage: null` renders nothing.
+* `ruff`, `pyright`, `tsc` clean.
+
+### One piece of luck, named rather than relied on
+
+`fact_sale_monthly_history.year_month` is TEXT, so the profiler gives it no range
+and it contributes **nothing** to the available side — the table B-157's wrong
+answer came from is invisible to this check. It works on MiseQ because the *other*
+tables in that bundle are dated. `wants_range` is **not** widened to text to fix
+that, because it would reopen B-051.
 
 ## B-159 — retrieval handed the model five tables out of forty-one
 

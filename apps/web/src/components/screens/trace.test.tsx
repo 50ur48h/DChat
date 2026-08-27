@@ -111,3 +111,65 @@ describe("an event this build has never heard of", () => {
     expect(step.rest).toBe("");
   });
 });
+
+describe("the period check is legible, including when it could not run", () => {
+  // **B-157, D-059.** The owner's requirement: a run where the check abstained
+  // must be distinguishable from one where it ran and passed. Three statuses,
+  // three different sentences — and the abstention carries its reason, because
+  // "could not be checked" with no "why" is the same silence wearing a label.
+
+  it("says both periods when the answer is outside what the catalogue records", () => {
+    const step = build("answer_composed", {
+      limitations: 1,
+      coverage: {
+        status: "outside",
+        reason: "",
+        answered: "2023-01 to 2024-12",
+        available: "2025-01 to 2025-12",
+      },
+    });
+
+    expect(step.rest).toContain("2023-01 to 2024-12");
+    expect(step.rest).toContain("2025-01 to 2025-12");
+  });
+
+  it("says the answer sat inside the period when it did", () => {
+    const step = build("answer_composed", {
+      limitations: 0,
+      coverage: {
+        status: "contained",
+        reason: "",
+        answered: "2025-12",
+        available: "2025-01 to 2025-12",
+      },
+    });
+
+    expect(step.rest).toContain("inside the period");
+  });
+
+  it("says why it could not look, rather than saying nothing", () => {
+    const step = build("answer_composed", {
+      limitations: 0,
+      coverage: {
+        status: "abstained",
+        reason: "the result was cut off at the row limit",
+        answered: null,
+        available: null,
+      },
+    });
+
+    expect(step.rest).toContain("could not be checked");
+    expect(step.rest).toContain("row limit");
+  });
+
+  it("is silent when the payload carries no coverage at all", () => {
+    // `coverage: null` is what an older server sends, and what a run that never
+    // reached the composer leaves behind. It must not render as though a check
+    // happened — `nested()` returning null rather than `{}` is what guarantees
+    // that, and this is the assertion that holds it.
+    expect(build("answer_composed", { limitations: 0, coverage: null }).rest).not.toContain(
+      "period",
+    );
+    expect(build("answer_composed", { limitations: 0 }).rest).not.toContain("period");
+  });
+});

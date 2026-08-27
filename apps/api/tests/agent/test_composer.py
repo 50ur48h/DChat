@@ -469,3 +469,61 @@ def test_a_run_recorded_before_inference_existed_has_no_caveat() -> None:
     assert decode_inferred_joins([{"left": "a"}, "nonsense", {"left": "a", "right": "b"}]) == (
         ("a", "b"),
     )
+
+
+# ---------------------------------------------------------------------------
+# The period an answer is about (B-157, D-059)
+# ---------------------------------------------------------------------------
+
+
+def test_an_answer_outside_the_catalogs_period_says_so_beside_the_answer() -> None:
+    """B-157's first screenshot: 24 figures for 2023-2024 while every dated column
+    in the bundle ran through 2025. The reader gets both measurements, not a
+    verdict, because the useful thing is the pair — and because a reader who
+    disagrees can go and look at either."""
+    state = _state(_ref())
+    state.capability["coverage"] = {
+        "status": "outside",
+        "reason": "",
+        "answered": "2023-01 to 2024-12",
+        "available": "2025-01 to 2025-12",
+    }
+
+    notes = limitations_for(state, CriticVerdict(verdict="pass"))
+
+    assert any("2023-01 to 2024-12" in note and "2025-01 to 2025-12" in note for note in notes)
+
+
+def test_an_answer_inside_the_catalogs_period_adds_no_caveat() -> None:
+    """*"Sales last month"* returns one month out of a year and is correct. A
+    caveat here would teach people to skip caveats, which is the failure D-034's
+    budget note and B-146's coverage floor were both written against."""
+    state = _state(_ref())
+    state.capability["coverage"] = {
+        "status": "contained",
+        "reason": "",
+        "answered": "2025-12",
+        "available": "2025-01 to 2025-12",
+    }
+
+    assert limitations_for(state, CriticVerdict(verdict="pass")) == ()
+
+
+def test_an_abstention_is_loud_in_the_trace_and_silent_on_the_answer_card() -> None:
+    """The two live in different places on purpose.
+
+    A reader of an answer is owed caveats **about their answer**; *"a check could
+    not run"* is not one, and putting it here would be the padding that makes
+    people stop reading the ones that matter. The trace is where that belongs,
+    and `answer_composed` carries it — asserted in `test_runner.py`, on the
+    payload, because that is the object a person can actually look at.
+    """
+    state = _state(_ref())
+    state.capability["coverage"] = {
+        "status": "abstained",
+        "reason": "the result was cut off at the row limit",
+        "answered": None,
+        "available": "2025-01 to 2025-12",
+    }
+
+    assert limitations_for(state, CriticVerdict(verdict="pass")) == ()
