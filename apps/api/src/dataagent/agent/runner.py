@@ -53,7 +53,13 @@ from datetime import UTC, date, datetime
 
 from dataagent.agent import composer, critic
 from dataagent.agent.budget import Budget, BudgetState
-from dataagent.agent.capability import CapabilityChasm, CapabilityGap, JoinGraph, load_join_graph
+from dataagent.agent.capability import (
+    CapabilityChasm,
+    CapabilityGap,
+    JoinGraph,
+    encode_inferred_joins,
+    load_join_graph,
+)
 from dataagent.agent.context import (
     HISTORY_TURNS,
     ContextBundle,
@@ -371,6 +377,11 @@ async def _investigate(
     gaps = relevant_pairs(graph.unreachable_pairs(), bundle.table_names)
     chasms = relevant_pairs(graph.comparable_pairs(), bundle.table_names)
     state.capability = {
+        # Which of the joins on offer rest on a measurement rather than on a
+        # declared key (D-050). Recorded for every offered table; the composer
+        # narrows it to the ones an answer actually read, because a caveat about
+        # a join nobody used is noise that teaches people to skip caveats.
+        "inferred": encode_inferred_joins(graph.inferred_joins(bundle.table_names)),
         "unreachable": [{"left": gap.left, "right": gap.right} for gap in gaps],
         "comparable": [
             {"left": chasm.left, "right": chasm.right, "via": chasm.via} for chasm in chasms

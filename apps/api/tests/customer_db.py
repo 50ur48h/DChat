@@ -167,3 +167,89 @@ async def build(url: URL) -> CustomerDatabase:
         await engine.dispose()
 
     return CustomerDatabase(url=url, reader_username=READER_ROLE, reader_password=READER_LOGIN)
+
+
+#: A customer database that declares **nothing** — no primary keys, no foreign
+#: keys — which is the shape most of them arrive in and the one that made the
+#: product refuse every real question (B-145). Modelled on `miseq`, including
+#: both of the traps that dataset supplied.
+UNDECLARED_SCHEMA = """
+CREATE TABLE dim_outlet (
+    outlet_key  integer NOT NULL,
+    outlet_name text NOT NULL
+);
+INSERT INTO dim_outlet (outlet_key, outlet_name) VALUES
+    (1, 'Harbour'), (2, 'Northgate'), (3, 'Riccarton'), (4, 'Papanui'), (5, 'Cuba Street');
+
+-- The join the product needs: every one of these outlet_key values exists in
+-- dim_outlet, and the column repeats, which is what makes it a many-to-one.
+CREATE TABLE fact_sale (
+    sale_id    integer NOT NULL,
+    outlet_key integer NOT NULL,
+    amount     numeric(8, 2) NOT NULL
+);
+INSERT INTO fact_sale (sale_id, outlet_key, amount)
+SELECT g, 1 + (g % 5), (g * 7 % 90) + 10 FROM generate_series(1, 40) AS g;
+
+-- **The first trap, and the one the live run fell into.** outlet_key holds 1..5,
+-- and 1..5 is inside 1..9 — so containment against transfer_id is true and means
+-- nothing. It must lose to dim_outlet, which its five values account for
+-- entirely, rather than being resolved by what the columns are called.
+CREATE TABLE fact_transfer (
+    transfer_id integer NOT NULL,
+    moved_qty   integer NOT NULL
+);
+INSERT INTO fact_transfer (transfer_id, moved_qty)
+SELECT g, g * 2 FROM generate_series(1, 9) AS g;
+
+-- **The second trap, which is the owner's test.** Same column name on both
+-- sides, and not one value in common.
+CREATE TABLE dim_item (
+    item_key  text NOT NULL,
+    item_name text NOT NULL
+);
+INSERT INTO dim_item (item_key, item_name) VALUES
+    ('I1', 'Flat White'), ('I2', 'Long Black'), ('I3', 'Mocha'),
+    ('I4', 'Chai'), ('I5', 'Scone'), ('I6', 'Muffin');
+
+CREATE TABLE map_item_key (
+    item_key text NOT NULL,
+    source   text NOT NULL
+);
+INSERT INTO map_item_key (item_key, source) VALUES
+    ('WB-1', 'a'), ('WB-2', 'a'), ('WB-3', 'b'), ('WB-4', 'b'),
+    ('WB-1', 'c'), ('WB-2', 'c'), ('WB-3', 'd'), ('WB-4', 'd');
+"""
+
+
+async def build_undeclared(url: URL) -> CustomerDatabase:
+    """`build`, against a database that declares no keys at all."""
+    engine = create_async_engine(url, isolation_level="AUTOCOMMIT")
+    try:
+        async with engine.connect() as connection:
+            for statement in filter(None, (part.strip() for part in UNDECLARED_SCHEMA.split(";"))):
+                await connection.execute(text(statement))
+
+            await connection.execute(
+                text(f"""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '{READER_ROLE}')
+                    THEN CREATE ROLE {READER_ROLE} NOLOGIN;
+                    END IF;
+                END
+                $$;
+                """)
+            )
+            await connection.execute(
+                text(f"ALTER ROLE {READER_ROLE} WITH LOGIN PASSWORD '{READER_LOGIN}'")
+            )
+            await connection.execute(
+                text(f'GRANT CONNECT ON DATABASE "{url.database}" TO {READER_ROLE}')
+            )
+            for statement in filter(None, (part.strip() for part in GRANTS.split(";"))):
+                await connection.execute(text(statement))
+    finally:
+        await engine.dispose()
+
+    return CustomerDatabase(url=url, reader_username=READER_ROLE, reader_password=READER_LOGIN)

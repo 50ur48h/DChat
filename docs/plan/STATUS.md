@@ -1,8 +1,12 @@
 # STATUS — data-agent build
 
-Current position: **Phase 13 — the chat product. WP13.4 in review; WP13.1a
-                  (#121), WP13.1b (#122), WP13.2 (#123) and WP13.3 (#124)
-                  merged.**
+Current position: **Phase 13 — the chat product. WP13.1a (#121), WP13.1b
+                  (#122), WP13.2 (#123), WP13.3 (#124) and WP13.4 (#125)
+                  merged. WP13.10 in review (#130); WP13.11 open.**
+                  **WP13.10 and WP13.11 split one defect on the owner's
+                  instruction** — B-145, the MiseQ source refusing nearly every
+                  real question. The wording ships alone so the honest refusal
+                  can be seen before inference changes what gets refused.
                   Phases 0-11 done and signed off. **Phase 12 STOPPED AFTER
                   WP12.2 (D-043)** — WP12.3 and WP12.4 are deferred, not
                   cancelled. **There is no `v1.0.0` tag and there will not be one
@@ -190,6 +194,87 @@ customer's data. It narrows to the owner's address plus Azure services once the
 swap is confirmed. Note the dev host's public address **changed mid-session**
 (171.79.38.47 → 103.168.16.2), so the rule has to be written from whatever it is
 on the day rather than from a value recorded here.
+
+## WP13.11 — measured inference (D-050, closes B-145, opens B-146)
+
+`miseq` declares **0 foreign keys and 0 primary keys**, so `catalog_relationships`
+was empty, the join graph had no edges, and the capability check refused almost
+every real question the owner asked it. The schema had allowed `kind="inferred"`
+with a `confidence` since revision 0007 and **nothing had ever written one**.
+
+**The entry worth reading is the first live run, not the design.** Containment
+was implemented exactly as specified — parent unique, child contained, never a
+name — and against the real database it produced **ten edges of which eight were
+rubbish**. Every one of the eight was a *correct measurement*:
+`fact_sale_line.outlet_key` holds five values, `1` to `5`, so it is genuinely
+contained in `fact_transfer.transfer_id` (1 to 9), in `fact_sale.sale_id`
+(1 to 112,327), and in seven more. **Every dense integer range contains a small
+one.** The owner's stated test would have passed on its `map_item_key` half while
+the feature was inventing joins on the other.
+
+Two rules came out of that, both arithmetic on counts already measured, so both
+cost no query and run before any scan:
+
+* **Coverage ≥ 0.9** — the child's distinct values must account for nearly all of
+  its parent's. Set that high because **a lone candidate is never contradicted**:
+  where several parents contain a child the best-covered one wins and the losers
+  are recorded, but at 0.5 a single candidate still walked through at 0.556.
+* **Many-to-one** — the child must repeat some value. A foreign key *is* a
+  fan-in, and unique-inside-unique is what two independent surrogate counters
+  look like.
+
+And one performance change that was really a correctness change: the containment
+scan walks the child's **distinct** values rather than its rows. Same claim —
+every value has a match exactly when every distinct value does — but the row form
+asked the parent 471,786 questions to learn what five answered, which is why the
+first run reached ten candidates before its budget ran out and never got to the
+join the whole feature exists for.
+
+### The owner's test, on the live database
+
+    dim_outlet <-> fact_sale FOUND      : True
+    map_item_key <-> dim_item ABSENT    : True
+
+Thirteen edges, and every one reads as a real relationship: `outlet_key` to
+`dim_outlet` (5 distinct), `item_key` to `dim_item` (211) from both fact tables,
+`supplier_key` to `dim_supplier` (30), `member_key` to `gold_member_rfm` (5,659)
+from two tables, and **seven** `*_date` columns to `dim_calendar` (365). No
+`fact_transfer`. No `map_item_key`.
+
+**One result is recorded rather than celebrated.** `fact_coupon.member_key` binds
+to `gold_member_rfm.member_key` (5,659 distinct, coverage 1.0) instead of
+`dim_member` (9,000 distinct, coverage 0.63) — not a wrong edge, since every
+value does exist there, but the dimension is the better parent and the floor is
+why it lost. That is B-146, filed with the live numbers rather than as a
+hypothetical.
+
+### Evidence
+
+* **Reached, not merely computed.** `tests/catalog/test_discovery.py` gains three
+  tests that call `discover()` the way a refresh does and then ask
+  `load_join_graph` — the function the runner calls before planning. The edge has
+  to survive measurement, the `kind="inferred"` write, the confidence filter and
+  the graph build. This is the check CLAUDE.md's defect list exists for: the unit
+  tests hand `infer_relationships` its arguments directly, which is the one thing
+  the product cannot do.
+* A new `undeclared_customer_database` fixture — no primary keys, no foreign
+  keys, both miseq traps — so this runs in CI on every commit rather than only
+  against a customer's database.
+* `evidence` is asserted **on the stored row**, not on the value in flight
+  (B-100, B-133).
+* Nine unit tests in `tests/catalog/test_inference.py`, including a regression
+  test for the dense-range false positive the live run found.
+* Revision `0032` adds `catalog_relationships.evidence`; architecture 10.1
+  updated in the same PR.
+* Inference runs **only when the engine declared nothing**, so a database with
+  real constraints pays none of this.
+
+### What is still partial, honestly
+
+The sweep stops early on miseq — **61 of 97 candidates** even at a 240s budget —
+and says so in its report rather than presenting a partial sweep as a complete
+one. Fewer inferred edges means more honest refusals, which is the safe direction
+to fail in.
 
 ## WP13.4 — all six states (D-049, closes B-142)
 

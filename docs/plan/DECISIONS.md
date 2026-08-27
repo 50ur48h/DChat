@@ -4,6 +4,96 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-050 — an inferred join is measured, and the answer that uses one says so
+Date: 2026-08-26 · Phase: 13 · PR: this one
+Context: B-145. `miseq` declares **0 foreign keys and 0 primary keys**, so
+`catalog_relationships` was empty and the capability check refused almost every
+real question. The schema anticipated this — `kind` has allowed `inferred` with a
+`confidence` since 0006 — and nothing ever wrote one.
+Options: (a) match on column name and type, which is what most catalog tools do;
+(b) measure containment against the data; (c) ask the model to guess from the
+schema.
+Decision: **(b)**, and this dataset is why the other two are not close. Name
+matching would create `map_item_key.item_key -> dim_item.item_key` with total
+confidence; the two columns match **0.0%** of rows. Meanwhile the edge the
+product actually needs, `fact_sale.outlet_key -> dim_outlet.outlet_key`, is
+**112,327 of 112,327** — and a name matcher gets that one right too, so on this
+schema it would look like it worked. **A rule that is right for the wrong reason
+is indistinguishable from a rule that works, until it isn't.**
+
+The evidence is two measurements and nothing else:
+
+* **the parent side is unique** — `count(DISTINCT c) = count(c)`. Without this
+  the edge is not many-to-one and has **no direction**, and direction is what
+  D-026's chasm-trap reasoning needs to tell a narrowing hop from a fanning one.
+* **the child side is contained** — an exact `NOT EXISTS` scan returning **0**
+  orphans. Not "mostly contained": an edge at 99% is a join that silently drops
+  rows, which is a wrong answer with no symptom and therefore worse than a
+  refusal.
+
+**And containment on its own is worth almost nothing, which the first live run
+against miseq is what proved.** It produced ten edges. **Eight were rubbish**,
+and every one of the eight was a correct measurement: `outlet_key` holds five
+values, `1` to `5`, so it is contained in `fact_transfer.transfer_id` (1 to 9),
+in `fact_sale.sale_id` (1 to 112,327), and in seven more. *Every dense integer
+range contains a small one.* The test the owner set would have passed on the
+`map_item_key` half while the feature was, in fact, inventing joins.
+
+Two further rules came out of that run, both arithmetic on counts phase 1 has
+already measured, so both cost nothing and run before any scan:
+
+* **Coverage** — the child's distinct values must account for at least 90% of
+  its parent's. Five values explain a five-row `dim_outlet` completely and a
+  112,327-row key not at all, and the difference is the whole distinction
+  between a key and a number that happens to fit. It is set that high because a
+  **lone candidate is never contradicted**: 0.5 left
+  `fact_sale_line.outlet_key -> fact_transfer.transfer_id` standing at 0.556,
+  since `dim_outlet.outlet_key` is `text` in that schema while
+  `fact_sale_line.outlet_key` is `bigint` — the real parent was excluded on type
+  and a nine-row surrogate counter ran unopposed.
+* **Many-to-one** — the child must repeat some value. A foreign key *is* a
+  fan-in, and a child that never repeats has not shown one. This is what rejects
+  the case coverage leaves standing: `dim_outlet.outlet_key` sits inside
+  `fact_transfer.transfer_id` at 0.56 coverage with no competitor to lose to,
+  and unique-inside-unique is exactly what two independent surrogate counters
+  look like.
+
+Where a child is contained in several parent *tables*, the better-covered one
+wins and the losers are recorded in the evidence; where nothing dominates, **no
+edge is written** — two equally good candidates are not half an answer. A column
+that fits more than twelve tables is skipped whole rather than resolved, since
+resolution over a truncated candidate list can crown a winner the real parent
+never ran against.
+
+Names are used for **nothing** in any of this. Candidates are narrowed by type
+family and by distinct-count arithmetic, and two identically named columns get
+exactly the scrutiny two differently named ones do.
+
+Confidence is scored from how much data stood behind the measurement, not from
+how plausible the pair looks: `0.95` above 100 child rows, `0.92` above 10,
+`0.80` below that — under `MIN_CONFIDENCE`, so a three-row coincidence is
+**recorded and not relied on**. Every edge stores its evidence in
+`catalog_relationships.evidence`, so a wrong one is traced rather than argued
+about.
+Consequences: the coverage floor **will miss a real key**, and on this very
+dataset it already does — `fact_coupon.member_key` binds to
+`gold_member_rfm.member_key` (coverage 1.0) rather than to `dim_member`
+(coverage 0.63), because only 63% of members hold a coupon. Not a wrong edge, but
+not the better parent either. Recorded as B-146 rather than smoothed over. It is the safe direction: a
+missing edge refuses, an invented one answers, and the wrong join returns a
+cartesian product rather than an error.
+
+Also a new nullable JSONB column (revision 0032) and a discovery step
+that runs **only when the engine declared nothing** — a database with real
+constraints pays none of this. The work is bounded (`MAX_PAIRS_CHECKED`,
+`BUDGET_SECONDS`, and a containment scan that walks the child's **distinct**
+values rather than its rows — the same claim, and the difference between asking
+a parent 471,786 questions and asking it five) and reports honestly when it stops
+early rather than presenting a partial sweep as a complete one. `JoinGraph` now carries which edges were inferred; the planner is
+told, and `limitations_for` adds a caveat to any answer whose executions actually
+read one — silently passing an inference off as a declaration is how B-057's
+cartesian product gets back in. Architecture 10.1 updated for the new column.
+
 ## D-049 — waiting, emptiness, and showing something before it is true
 Date: 2026-08-26 · Phase: 13 · PR: this one
 Context: sixteen places in the product either said `Loading…`, said `None yet.`,

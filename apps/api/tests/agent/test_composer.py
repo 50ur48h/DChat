@@ -15,6 +15,11 @@ from __future__ import annotations
 
 import uuid
 
+from dataagent.agent.capability import (
+    JoinGraph,
+    decode_inferred_joins,
+    encode_inferred_joins,
+)
 from dataagent.agent.composer import assemble, limitations_for, method_note
 from dataagent.agent.critic import BLOCK, WARN, CriticFinding, CriticVerdict
 from dataagent.agent.state import ExecutionRef, ResearchState
@@ -384,3 +389,83 @@ def test_a_confidence_outside_the_three_words_becomes_medium() -> None:
     composed = assemble(_draft(confidence="very high"), _state(_ref()), None, citations=())
 
     assert composed.confidence == "medium"
+
+
+# ---------------------------------------------------------------------------
+# An answer that rests on a measured join says so (D-050)
+# ---------------------------------------------------------------------------
+
+
+def _with_inferred(*, read: list[str], offered: list[str]) -> ResearchState:
+    """A run whose graph had an inferred edge among `offered`, and read `read`.
+
+    **The capability dict is built by the product's own encoder**, not by a
+    literal written here. A test that hand-rolls `{"left": ..., "right": ...}`
+    proves the composer can parse a shape this file invented — which is how
+    B-109 stayed green over a field the schema never carried.
+    """
+    graph = JoinGraph(
+        edges={"fact_sale": frozenset({"dim_outlet"}), "dim_outlet": frozenset({"fact_sale"})},
+        inferred=frozenset({frozenset({"fact_sale", "dim_outlet"})}),
+    )
+    state = _state(
+        ExecutionRef(execution_id="e1", row_count=3, ok=True, summary="a row", tables=read)
+    )
+    state.capability = {"inferred": encode_inferred_joins(graph.inferred_joins(offered))}
+    return state
+
+
+def test_an_answer_built_on_a_measured_join_says_the_join_was_measured() -> None:
+    """`miseq` declares no foreign keys, so every join it offers was inferred.
+
+    Both are good enough to join on. Only a declared key is good enough to pass
+    off as the database's own word, and silently treating an inference as a
+    declaration is how B-057's cartesian product gets back in.
+    """
+    notes = limitations_for(
+        _with_inferred(
+            read=["public.fact_sale", "public.dim_outlet"],
+            offered=["fact_sale", "dim_outlet"],
+        ),
+        CriticVerdict(verdict="pass"),
+    )
+
+    assert any("measured rather than declared" in note for note in notes)
+    assert any("dim_outlet and fact_sale" in note for note in notes)
+
+
+def test_a_caveat_about_a_join_nobody_used_is_not_written() -> None:
+    """Narrowed to the tables the run actually read.
+
+    A caveat on every answer is a caveat nobody reads, which is the same
+    argument the single-source test above makes — and it would train people to
+    skip the one that matters.
+    """
+    notes = limitations_for(
+        _with_inferred(read=["public.dim_calendar"], offered=["fact_sale", "dim_outlet"]),
+        CriticVerdict(verdict="pass"),
+    )
+
+    assert not any("measured rather than declared" in note for note in notes)
+
+
+def test_the_two_ends_of_the_capability_record_agree() -> None:
+    """**The seam itself**, because both sides of it live in different modules.
+
+    `runner` encodes, `composer` decodes, and for most of this repository's
+    history a pair like that has been two literals that happened to match. If a
+    rename breaks one, this goes red rather than every caveat quietly vanishing.
+    """
+    pairs = (("dim_outlet", "fact_sale"), ("dim_item", "fact_sale_line"))
+
+    assert decode_inferred_joins(encode_inferred_joins(pairs)) == pairs
+
+
+def test_a_run_recorded_before_inference_existed_has_no_caveat() -> None:
+    """`capability` is a plain dict round-tripped through the database, so an
+    older run simply has no such key. That is an answer without a caveat, not an
+    error."""
+    assert decode_inferred_joins(None) == ()
+    assert decode_inferred_joins([{"left": "a"}, "nonsense", {"left": "a", "right": "b"}]) == (
+        ("a", "b"),
+    )
