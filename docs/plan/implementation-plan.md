@@ -1099,8 +1099,15 @@ the `source_mode`-specific halves are what gets cut** — never the coverage che
 The tempting order is the opposite one, because `source_mode` is the more visible
 fix and the one the partner's contract asks for by name.
 
-1. **The coverage claim, checked against the catalog — the general mechanism
-   (D-058).** An answer asserting the limits of available data is compared with
+1. **The coverage check — the general mechanism (D-058, narrowed by D-059).**
+   **It catches an answer resting on a window the catalog does not describe, not
+   a false coverage statement in general**: nothing reads the answer's prose, so
+   a correct 2025 result described as *"we only hold 2023 data"* passes. That
+   limit is deliberate — parsing a range assertion out of prose is a
+   number-shaped verdict from evidence that cannot carry one — and it is asserted
+   as a passing test so a later reader cannot assume the broader thing.
+   The trigger is **containment, not narrowness**: *"sales last month"* returns
+   one month of a year and must stay silent. An answer asserting the limits of available data is compared with
    `CatalogColumn.min_val`/`.max_val` — engine-supplied, exact (**B-051** forbids
    a derived range), masked on the way in. A claim narrower than what those
    ranges say is a **finding**. Deterministic and not overridable by the model,

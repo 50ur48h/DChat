@@ -121,6 +121,73 @@ may be joined — and one more caveat the composer can attach: *the data diction
 says these join; we checked and found no unmatched values*, which is a different
 claim from either a foreign key or an inference.
 
+## D-059 — the coverage check catches an answer outside the data, not a false claim about it
+Date: 2026-08-27 · Phase: 13 · PR: this one · **Amends D-058**
+D-058 said *"an answer asserting the limits of available data is compared with
+`CatalogColumn.min_val`/`.max_val`."* Building it found that the assertion half is
+not available: **the claim exists only in the model's prose.** `ExecutionRef`
+carries tables and a SQL hash and no period, `ResearchState` has no period field,
+and a refusal's reason is a sentence. There is nothing structural to compare.
+
+Options: (a) parse a range assertion out of the answer text; (b) ask the model to
+declare the period it is claiming; (c) compare two things that are already
+measured — what the run's result covered, against what the catalog records — and
+accept a narrower check.
+Decision: **(c)**, at the owner's direction (2026-08-27).
+
+(a) is the objection the owner raised about similarity scores, wearing a
+different hat: a number-shaped verdict drawn from evidence that cannot carry one.
+It would also fail *silently* whenever the model phrased the same claim
+differently, and **a check that fails silently on phrasing is worse than a
+narrower check that fails loudly**. (b) puts the answer in the hands of the thing
+being checked, which D-058 exists to stop.
+
+**What it catches, said plainly because the name oversells it.** It catches *an
+answer resting on a window the catalog does not describe*. It does **not** catch a
+false coverage statement in general: nothing in `agent/coverage.py` reads the
+answer's prose, so a model that answers correctly from 2025 rows and then writes
+*"we only hold 2023 data"* passes this check and always will. Someone reading
+"coverage check" later will assume the broader thing, so the limit is written at
+the top of the module, in the work package, and as a **passing test** —
+`test_a_false_sentence_over_a_correct_result_is_not_caught` — because a limit
+recorded only in prose is a limit that gets forgotten.
+
+**Both sides are measurements.** Available comes from `min_val`/`max_val`, which
+the profiler takes from the engine and never from a sample (B-051). Answered comes
+from the rows the run returned, and **only when the result was not truncated** —
+the last row of a capped result is a floor, not a latest, and a coverage sentence
+built on one would be a fact about our row limit dressed as a fact about the
+customer's data.
+
+**The trigger is containment, not narrowness**, and that choice is the difference
+between a caveat people read and one they learn to skip. "Narrower" fires on every
+ordinary question: *"sales last month"* legitimately returns one month out of a
+year. Containment is silent there and loud on B-157's answer, which covered
+2023-2024 while every dated column in its bundle ran through 2025.
+
+**Abstention is an outcome with a reason, not a silence** (the owner's second
+requirement). A source nobody profiled, a truncated result, a period column the
+profiler gives no range to — each ends in `status="abstained"` with a sentence,
+carried into the trace. `capability_checked` emits `available_period` **even when
+it is null**, because an absent key would make a run that could not be checked
+indistinguishable from one that was checked and passed.
+
+**And the planner is told the range** (the owner's third point). Not enforcement,
+and the module says so: the composer's limitation is what holds. But it uses a
+seam that already exists — architecture 4.3's *"told as fact"* — and it is the
+half that stops the wrong sentence being written at all. B-157's refusal is one a
+planner shown *"2025-01 to 2025-12"* would not have written.
+
+Consequences: one extra catalog read per run, narrowed to the bundle's own tables
+(owner, 2026-08-27) rather than the whole catalog — comparing against all of it
+would flag claims that are true about the tables in play, and a false block is
+this component's characteristic failure. **A table whose period column is text
+contributes nothing to the available side**, which is exactly
+`fact_sale_monthly_history` — and `wants_range` must not be widened to text to
+fix that, because it would reopen B-051. The check still works on MiseQ because
+the *other* tables in the bundle are dated, and that is luck worth naming rather
+than a property to rely on.
+
 ## D-058 — provenance decides which table is read, not only what the footnote says
 Date: 2026-08-27 · Phase: 13 · PR: this one (spec only; widens WP13.14)
 **Amends D-053.** This file is append-only and D-053 stands; what follows widens

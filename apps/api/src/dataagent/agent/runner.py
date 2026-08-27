@@ -67,6 +67,7 @@ from dataagent.agent.context import (
     build_context,
     history_block,
 )
+from dataagent.agent.coverage import available_period, coverage_note
 from dataagent.agent.critic import CriticVerdict
 from dataagent.agent.loop import LoopOutcome, research
 from dataagent.agent.state import ResearchState, StateFinding
@@ -74,6 +75,7 @@ from dataagent.agent.tools.base import ToolContext
 from dataagent.agent.tools.chart import CreateChartOut
 from dataagent.agent.tools.finalize import FINALIZE, FinalizeIn
 from dataagent.agent.tools.registry import ToolRegistry, default_registry
+from dataagent.catalog.browse import active_catalog
 from dataagent.catalog.cards import offers_measures
 from dataagent.config import Settings
 from dataagent.dal.policy import SourcePolicy
@@ -376,6 +378,24 @@ async def _investigate(
     policy = await source_policy(context.org_id, source_id)
     gaps = relevant_pairs(graph.unreachable_pairs(), bundle.table_names)
     chasms = relevant_pairs(graph.comparable_pairs(), bundle.table_names)
+
+    # **What periods this database can speak about** (B-157, D-058). Measured
+    # from `CatalogColumn.min_val`/`.max_val`, which the profiler takes from the
+    # engine rather than from a sample (B-051) — and narrowed to the bundle's
+    # own tables, because the candidate set for anything said about coverage is
+    # what this run was offered, not the whole catalog. Comparing against all of
+    # it would flag claims that are true about the tables in play, and a false
+    # block is this component's characteristic failure (owner, 2026-08-27).
+    offered = set(bundle.table_names)
+    catalog = await active_catalog(context.org_id, source_id)
+    available = available_period(
+        [
+            (column.data_type, column.min_val, column.max_val)
+            for table in catalog.tables
+            if f"{table.schema_name}.{table.table_name}" in offered
+            for column in table.columns
+        ]
+    )
     state.capability = {
         # Which of the joins on offer rest on a measurement rather than on a
         # declared key (D-050). Recorded for every offered table; the composer
@@ -386,12 +406,20 @@ async def _investigate(
         "comparable": [
             {"left": chasm.left, "right": chasm.right, "via": chasm.via} for chasm in chasms
         ],
+        # Carried on the state so the composer can compare an answer against it
+        # without a second catalog read, the same way `inferred` is.
+        "available_period": None if available is None else [available.earliest, available.latest],
     }
     await events.emit(
         "capability_checked",
         {
             "unreachable": [f"{gap.left} ↔ {gap.right}" for gap in gaps],
             "comparable": [f"{chasm.left} ↔ {chasm.right} via {chasm.via}" for chasm in chasms],
+            # **Emitted even when it is null**, which is the whole point: a source
+            # whose dated columns nobody profiled has to be distinguishable in the
+            # trace from one that was checked and covered the question. An absent
+            # key would make those two runs look identical.
+            "available_period": None if available is None else str(available),
         },
     )
     notes: list[str] = []
@@ -427,6 +455,11 @@ async def _investigate(
             "own subquery or CTE first, then join the two aggregates. Do not join the "
             "detail rows."
         )
+    # Last of the notes, because it is the only one that is not about a join —
+    # and it is a fact rather than an instruction, so it reads better after the
+    # rules than in front of them.
+    if period_note := coverage_note(available):
+        notes.append(period_note)
     if notes:
         bundle = bundle.with_capability_note(" ".join(notes))
 
