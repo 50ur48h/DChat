@@ -26,6 +26,17 @@ in the reader's browser, so a spec that could name an external address is a spec
 that could exfiltrate a customer's aggregates to anybody who could talk the model
 into writing one. Values travel inline or not at all.
 
+**Half of what this refuses is no longer reachable from the product** (WP13.20,
+**B-164**). `agent/shape.py` now chooses the mark and the axes from the frame, so
+it never asks for a mark outside the whitelist, a column the result does not have,
+a `y` that holds words, more categories than there is room for, or a colour on an
+axis it already used. Those branches are kept as the last check before a spec
+reaches a browser — `decide` is a boundary and defence in depth on one is
+justified — but they are **belt and braces now, not the live path**, and a test
+that exercises them proves nothing about what a person gets. What is still
+genuinely reachable: `too_many_points`, `types_not_recorded` and `unordered_line`,
+because `shape_of` does not judge any of the three.
+
 **A chart is never drawn from a sample.** The artifact store holds the whole
 masked result; a result larger than `MAX_POINTS` is declined rather than
 truncated into a picture that looks complete. B-051 settled the general form of
@@ -51,6 +62,7 @@ __all__ = [
     "Frame",
     "axis_title",
     "decide",
+    "kind_of",
 ]
 
 #: The marks a reader can interpret without a legend explaining the mark itself.
@@ -264,7 +276,7 @@ def _present(values: Sequence[object]) -> tuple[object, ...]:
     return tuple(value for value in values if value is not None)
 
 
-def _kind(values: Sequence[object]) -> Literal["quantitative", "temporal", "nominal"]:
+def kind_of(values: Sequence[object]) -> Literal["quantitative", "temporal", "nominal"]:
     """What a column is, judged from the values rather than from its name.
 
     Values, because a column called `order_date` holding `Q1`/`Q2` is not a date
@@ -316,7 +328,7 @@ def decide(frame: Frame, request: ChartRequest) -> Chart:
         )
 
     y_values = _column_values(frame, request.y)
-    if _kind(y_values) != "quantitative":
+    if kind_of(y_values) != "quantitative":
         if _stale_numeric(frame, request.y):
             # **B-103, and B-087's rule applied to a storage format.** This
             # result was written before column types were recorded, so the
@@ -337,7 +349,7 @@ def decide(frame: Frame, request: ChartRequest) -> Chart:
         )
 
     x_values = _column_values(frame, request.x)
-    x_kind = _kind(x_values)
+    x_kind = kind_of(x_values)
 
     if x_kind == "nominal":
         distinct = len({str(value) for value in x_values})

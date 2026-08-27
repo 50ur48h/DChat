@@ -263,11 +263,18 @@ async def test_a_chart_that_cannot_be_drawn_says_so_on_the_run(
 ) -> None:
     """**The property the whole chart design turns on** (WP11.1).
 
-    This question's result is a single count, so a bar chart of it has no
-    horizontal axis to use — and the model asked for one anyway, which is exactly
-    what a real one does. What must not happen is silence: a picture that fails
-    to appear with no reason given is indistinguishable from a broken page, which
-    is B-087's lesson carried into charts.
+    This question's result is a single count, so there is nothing to draw. What
+    must not happen is silence: a picture that fails to appear with no reason
+    given is indistinguishable from a broken page, which is B-087's lesson
+    carried into charts.
+
+    **The reason changed with WP13.20 and the change is an improvement.** It used
+    to be `no_such_column` — the model had asked for an axis the result did not
+    have, and the refusal blamed the model's mistake. The platform chooses the
+    axes now, so it never names a column that is not there; what it says instead
+    is `unchartable_shape`, and the sentence is about the *data*: a single figure
+    is a sentence, not a picture. A refusal that blames the right thing is worth
+    more than one that blames a mistake nobody can make any more.
 
     Asserted on the **run** rather than on the tool, because that is where the
     answer card reads it from, and because the refusal has to survive the whole
@@ -304,10 +311,11 @@ async def test_a_chart_that_cannot_be_drawn_says_so_on_the_run(
     chart = run["chart"]
     assert chart is not None, "a chart was asked for and the run recorded nothing about it"
     assert chart.get("spec") is None
-    # Names the column that is missing, because the reader's next question is
-    # which one — the same reason B-092 made a card's values carry their share.
-    assert "opened_year" in chart["declined"]
-    assert chart["code"] == "no_such_column"
+    # Says what about the result made a picture the wrong answer, because the
+    # reader's next question is why — the same reason B-092 made a card's values
+    # carry their share.
+    assert "single figure" in chart["declined"]
+    assert chart["code"] == "unchartable_shape"
 
     # And the limitations are untouched: a missing picture says nothing about
     # whether the answer is true, so it does not go in the list that is about
@@ -315,25 +323,38 @@ async def test_a_chart_that_cannot_be_drawn_says_so_on_the_run(
     assert not any("chart" in note.lower() for note in run["limitations"])
 
 
-async def test_the_colour_the_model_asked_for_reaches_the_chart_that_refuses_it(
+SERIES_SQL = "SELECT opened_on, name, id FROM shops"
+
+
+async def test_the_series_the_platform_chose_reaches_the_stored_chart(
     context: ToolContext, fake_llm: FakeLLM, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """**B-109's own defect, asserted end to end.**
+    """**B-109's guard, kept — with the subject changed and the property intact.**
 
-    The colour channel was built, tested and unreachable: `_spec` assembled it,
-    `ChartRequest` carried it, the tool accepted it, a unit test asserted its
+    B-109 was a colour channel built, tested and unreachable: `_spec` assembled
+    it, `ChartRequest` carried it, the tool accepted it, a unit test asserted its
     axis title — and `ChartAsk`, the schema the model fills, had no field for it,
-    so nothing the model could say ever arrived. A unit test on `decide` cannot
-    see that, because it hands `decide` the request directly; only a run can.
+    so nothing the model could say ever arrived. The guard written for it asserted
+    that the **model's** colour reached `decide`, proved by a refusal only a
+    series could cause.
 
-    So this asserts the **refusal**, and the refusal is the proof: `decide` can
-    only answer `colour_would_repeat_an_axis` if a series reached it. Without the
-    field travelling, the same run refuses for a different reason entirely.
+    **WP13.20 made the platform choose the series, so the model's no longer
+    travels — and this test went red, which is the guard doing its job rather
+    than an inconvenience.** The property worth guarding was never *whose* choice
+    it was: it was that the channel survives the whole chain, `shape_of` → the
+    tool → `decide` → `_spec` → the stored run, so that it cannot quietly become
+    dead code again.
+
+    So the subject moves and the shape of the proof gets **stronger**: this
+    asserts a spec that was *built* with a colour encoding rather than a refusal
+    that implies one was seen. A result of a date, a name and a number is what
+    `shape_of` turns into a line split by series — the *outlet A and outlet B*
+    case, which is what the whole feature was for.
     """
     fake_llm.script(
         Plan(
-            sql=KNOWN_GOOD_SQL,
-            purpose="Count shops whose opening date falls in 2021",
+            sql=SERIES_SQL,
+            purpose="List each shop with the date it opened",
             answerable=True,
             reason="",
         ).model_dump_json(),
@@ -345,7 +366,7 @@ async def test_the_colour_the_model_asked_for_reaches_the_chart_that_refuses_it(
             open_questions=[],
             next_purpose="",
             done=True,
-            rationale="the count answers it",
+            rationale="the rows answer it",
         ).model_dump_json(),
         role="plan",
     )
@@ -359,9 +380,18 @@ async def test_the_colour_the_model_asked_for_reaches_the_chart_that_refuses_it(
 
     assert status == 200
     chart = run["chart"]
-    assert chart is not None
-    assert chart["code"] == "colour_would_repeat_an_axis"
-    assert "already on the" in chart["declined"]
+    assert chart is not None, "a chart was asked for and the run recorded nothing about it"
+    assert chart.get("declined") is None, chart
+    spec = chart["spec"]
+    encoding = spec["encoding"]
+    assert "color" in encoding, (
+        "the series never reached the spec: the channel is unreachable again, which "
+        "is the defect B-109 was filed for"
+    )
+    assert encoding["color"]["field"] == "name"
+    # And the platform's own choice of mark travelled with it, rather than the
+    # model's: a date against a number is a line whatever the model asked for.
+    assert spec["mark"] == "line"
 
 
 async def test_the_answer_is_the_database_s_own_number(

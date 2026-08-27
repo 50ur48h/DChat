@@ -109,7 +109,16 @@ Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-28 by Claude Code (**Observed or modelled, and a ban that
+Last updated: 2026-08-28 by Claude Code (**The answer's shape is the platform's
+              choice now.** A date against a number is a line, a category against
+              a number is a bar, and a spare category becomes a **series** — so
+              *outlet A and outlet B monthly* is one chart with two lines rather
+              than two answers, which is what `ChartAsk.series` was built for in
+              WP11.1 and filled by nothing since. Judged from the values, never a
+              column's name. `ChartAsk` is **not** narrowed (D-044's trap);
+              whether to draw at all stays with the model. Prose is still the only
+              shape an answer *body* has — that is B-158.
+              Previously: **Observed or modelled, and a ban that
               would have been a false block.** WP13.14's `source_mode` halves.
               Ranking is confined to tables that offer measures, because
               `source_mode` splits MiseQ's *dimensions* as sharply as its facts
@@ -316,6 +325,101 @@ customer's data. It narrows to the owner's address plus Azure services once the
 swap is confirmed. Note the dev host's public address **changed mid-session**
 (171.79.38.47 → 103.168.16.2), so the rule has to be written from whatever it is
 on the day rather than from a value recorded here.
+
+## WP13.20 — the answer's shape, chosen by the platform
+
+Twenty-four monthly figures arrived as two paragraphs of prose, and a two-outlet
+question would have arrived as two answers. Until now the model chose the chart
+and the platform only validated it: `ChartAsk` carries `mark`, `x`, `y` and
+`series`, all model-filled, so the *form* of an answer was one temperature sample
+away from being different.
+
+`agent/shape.py` decides it from the frame that actually came back, using
+`charts.kind_of` — which judges a column **from its values, never its name**, so
+`order_date` holding `Q1`/`Q2` is a category and not a time axis. The rules:
+
+| the result has | the form |
+|---|---|
+| a date against a number | **line** |
+| a category against a number | **bar** |
+| either, plus a spare category | the same, **split by series** |
+| one figure | no chart — *"a single figure is a sentence"* |
+| no numbers, or nothing to plot them against | no chart, with the reason |
+
+**Bar rather than line for categories**, because a line drawn between two
+unrelated categories implies a progression from one to the other and there is
+none. And a spare category becomes a **series** — *outlet A and outlet B monthly*
+is one chart with a line each, which is the case the owner named and the case
+`ChartAsk.series` was built for in WP11.1 and filled by nothing since.
+
+**A date beats a category for the axis.** A result carrying both is a series over
+time, not a comparison between categories; grouping it into bars throws the time
+axis away.
+
+### Two scoping decisions, stated rather than left to be discovered
+
+**Whether to draw at all stays with the model.** This chooses *what form*, not
+*whether* — a chart forced onto every answer is its own noise, and "is a picture
+worth it here" is a judgement about the question rather than about the result's
+shape. `ChartAsk.of` is untouched.
+
+**The model's fields are overridden, not removed.** Narrowing `ChartAsk` so it
+cannot send a mark would mean deleting model-filled members from a schema that is
+`extra="forbid"`, and **D-044 is the warning**: removing `FinalizeIn.answered`
+broke three producers found separately over two hours, one of which ships in the
+product image. The cost of leaving them is a few output tokens the model spends
+being ignored, and that is filed as **B-163** rather than paid now.
+
+### B-109's guard went red, which is the guard doing its job
+
+The regression run failed two end-to-end tests, and one of them is the test
+CLAUDE.md holds up as the model for a live-path proof:
+`test_the_colour_the_model_asked_for_reaches_the_chart_that_refuses_it` asserts a
+refusal code *only reachable if the model's series survived* `ChartAsk` → the
+tool → `decide` → the stored run. **This change made the model's series stop
+travelling, and the test said so immediately.**
+
+The property worth guarding was never *whose* choice it was — it was that the
+channel survives the whole chain rather than quietly becoming dead code again. So
+the subject moved and the proof got **stronger**: it now drives a result of a
+date, a name and a number, and asserts the stored run's spec **carries a colour
+encoding that was built**, rather than a refusal that implies one was seen. That
+is the *outlet A and outlet B* case, which is what the feature was for.
+
+The other failure was the same cause with a better outcome: an unchartable single
+count used to refuse with `no_such_column`, blaming a mistake the model made.
+The platform picks the axes now and never names a column that is not there, so it
+refuses with `unchartable_shape` and a sentence about the data — *a single figure
+is a sentence, not a picture*. A refusal that blames the right thing beats one
+that blames a mistake nobody can make any more.
+
+### And five of `decide`'s ten refusals are now unreachable (B-164)
+
+Named rather than left, because it is this project's characteristic defect
+arriving by our own hand. `shape_of` never proposes a mark outside the whitelist,
+a column the result lacks, a non-numeric `y`, too many categories, or a colour on
+an axis it already used — so those branches cannot be produced by a run.
+`too_many_points`, `types_not_recorded` and `unordered_line` remain genuinely
+reachable. The branches are **kept**, because `decide` is the last check before a
+spec is rendered in a reader's browser and `data.url` would be an exfiltration
+path — but the module docstring now says which half is belt and braces, so a
+later reader cannot mistake their tests for proof the live path works. That
+mistake is exactly what B-109 was filed for.
+
+### What this does not fix
+
+**Prose is still the only shape an answer body has.** The 24 figures came back as
+paragraphs because `charts.decide` covers the picture case and there is no table
+renderer at all — that is **B-158**, split out at the owner's direction, and this
+work package does not touch it.
+
+### Evidence
+
+* `tests/agent/test_shape.py` **12 passed**, including the two-series case and
+  `test_every_refusal_carries_a_reason`.
+* `charts._kind` became `charts.kind_of` — the only change to that module, and
+  its 41 tests are untouched and green.
+* `ruff`, `pyright` clean.
 
 ## WP13.14, part two — observed or modelled (D-060, B-157)
 

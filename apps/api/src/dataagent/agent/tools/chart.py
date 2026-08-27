@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from dataagent.agent.charts import Chart, ChartRequest, Frame, decide
+from dataagent.agent.shape import shape_of
 from dataagent.agent.tools.base import Tool, ToolContext, ToolError
 from dataagent.dal.artifacts import artifact_store
 from dataagent.db.models import QueryExecution, ResultArtifact
@@ -176,14 +177,31 @@ async def _create_chart_spec(context: ToolContext, params: BaseModel) -> BaseMod
             code="no_result",
         )
 
+    # **The platform chooses the form; the model chose the result** (WP13.20).
+    # `shape_of` reads the frame that actually came back and says what it should
+    # be drawn as — a date against a number is a line, a category against a
+    # number is a bar, and a spare category becomes a *series* rather than a
+    # second answer. Decided here because this is where the frame is already
+    # loaded, and reading it twice for a picture would be a round trip for
+    # nothing.
+    #
+    # **Overridden, not removed.** `ChartAsk` keeps its fields: narrowing a
+    # schema that is `extra="forbid"` is D-044's trap, and the cost of leaving
+    # them is a few tokens the model spends being ignored.
+    shape = shape_of(frame)
+    if not shape.draws:
+        return CreateChartOut(
+            declined=f"No chart was drawn: {shape.reason}.",
+            code="unchartable_shape",
+        )
     return CreateChartOut.of(
         decide(
             frame,
             ChartRequest(
-                mark=args.mark,
-                x=args.x,
-                y=args.y,
-                series=args.series,
+                mark=shape.mark,
+                x=shape.x,
+                y=shape.y,
+                series=shape.series or None,
                 title=args.title,
             ),
         )
