@@ -121,6 +121,93 @@ may be joined — and one more caveat the composer can attach: *the data diction
 says these join; we checked and found no unmatched values*, which is a different
 claim from either a foreign key or an inference.
 
+## D-058 — provenance decides which table is read, not only what the footnote says
+Date: 2026-08-27 · Phase: 13 · PR: this one (spec only; widens WP13.14)
+**Amends D-053.** This file is append-only and D-053 stands; what follows widens
+one of its four bullets and adds a fifth item. B-157 is the evidence, and it was
+found by asking the product two ordinary questions.
+
+Context: D-053 mapped `source_mode` to **"a composer caveat derived from what the
+run read"** — the seam D-050 built for inferred joins, no new concept, fully
+derivable. That reasoning is still correct and the mechanism is still the right
+one. **What it got wrong is the scope**, and the live run says so plainly.
+
+Asked for Outlet A's monthly sales, the deployed app answered with 24 figures
+from `fact_sale_monthly_history` — every row `source_mode = 'synthetic'`, every
+row `basis = 'back-cast from 2025 actuals at 78% of 2025 level'` — marked
+**answered**, **high confidence**, no caveat. It closed with *"The available
+monthly data covers January 2023 through December 2024"* while `fact_sale` sat
+unread with **112,327 rows, all `real`, covering all of 2025**. Asked next for
+October-December 2025 it **refused**, repeating that sentence. The answer was in
+8,962 real sale rows: MYR 99,336.20, 99,373.17 and 129,902.10.
+
+**The correction, stated plainly because it is the useful part.** A caveat fixes
+the fourth of four failures and leaves the first three untouched. Built as D-053
+specified, this run would have produced *a correctly-caveated wrong answer*, and
+then *a correctly-caveated wrong refusal* — **the worst outcome available here**,
+because a caveat on a refusal reads as diligence and a refusal closes the
+question. A footnote on a wrong table is worse than no footnote, since it buys
+the answer credibility it has not earned.
+
+Options: (a) build D-053's caveat and treat the table choice as a prompt
+problem; (b) widen the mapping so provenance reaches the decisions the platform
+already makes deterministically; (c) treat it as a planner-quality issue and
+tune.
+Decision: **(b)**, at the owner's direction (2026-08-27). `source_mode` becomes
+**three** things rather than one, and (a) is rejected for the reason above.
+
+* **A ranking input to table selection.** Where two tables can answer the same
+  question, a `real` table outranks a `derived` one, which outranks `synthetic`.
+  This is context, not a prohibition: the modelled table is still reachable for a
+  question only it can answer — 2023-2024 exists nowhere else — but it stops being
+  the default because its name matched a word in the question.
+* **The caveat D-053 specified**, unchanged, on the seam it named.
+* **A ban on silent substitution.** An answer that read a modelled table when a
+  `real` table covering the asked-for period existed is not a caveat case; it is
+  the wrong query, and the run should not reach the composer in that state.
+
+**And the coverage claim is its own fix, not part of this one** (owner,
+2026-08-27). *"The available monthly data covers January 2023 through December
+2024"* is a **statement about the database**, and the platform can check it: it
+is true of the one table queried and false of the source. This is the same class
+as the capability check — *a claim the platform can verify and didn't* — and it
+gets the same treatment: deterministic, computed from the catalog, not asked of
+the model and not overridable by it.
+
+The inputs are already stored and already exact. `CatalogColumn.min_val` and
+`.max_val` come from the engine rather than from a sample (**B-051** forbids a
+derived range) and are masked on the way in, so a coverage claim can be checked
+against what the catalog knows without touching the customer's database again.
+The check is: an answer asserting the limits of available data is compared with
+the profiled range of every candidate table, and a claim narrower than the source
+is a **finding**, not a footnote.
+
+Consequences: WP13.14 grows from four features to five and stops being *"four
+small features"* — the ranking input touches context assembly and the
+substitution ban touches the loop, so this is no longer only additive. That cost
+is accepted because the alternative is shipping the caveat and calling B-157
+closed. **A profile is now a precondition rather than a nicety**: an unprofiled
+source has no `min_val`, so the coverage check abstains, and abstaining must be
+visible rather than silent — the same rule D-031 set for embeddings.
+
+**What this does not fix, said here so it is not assumed.** Provenance ranking
+needs a `source_mode`-shaped column to exist. On a customer database without one
+the ranking has no input and the caveat has nothing to say, and the coverage
+check is the only one of the three that works everywhere. That is the honest
+limit: two of these three are MiseQ-shaped, and the general mechanism is the one
+that reads the catalog.
+
+**So the build order follows the generality, not the narrative** (owner,
+2026-08-27). The coverage check ships **first**, on its own, because it is the
+piece that works against any database and it needs nothing from `source_mode` at
+all. The ranking, the caveat and the substitution ban follow. **If anything has
+to be cut, the `source_mode`-specific halves are what gets cut** — the general
+mechanism is not the thing to trade away for a demo, and a work package that
+built the MiseQ-shaped parts first would leave exactly the wrong half standing
+when it ran out of room. This ordering is a decision, not a preference, and it is
+recorded here because the tempting order is the opposite one: `source_mode` is
+the more visible fix and the one the partner's contract asks for by name.
+
 ## D-057 — the join-import justification died when the schema declared the edges
 Date: 2026-08-27 · Phase: 13 · PR: this one (spec only; WP13.13 rescoped, not built)
 **Amends D-052.** This file is append-only and D-052 stays as written; what

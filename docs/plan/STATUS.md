@@ -28,17 +28,40 @@ Current position: **Phase 13 — the chat product. WP13.1a (#121), WP13.1b
                   *"Dev is current"* below for why three revisions in one hop
                   were safe, and for the warning that section used to carry and
                   had wrong.
-Next step:        **WP13.15 — the discovery version stamp (D-054, closes
-                  B-149).** Promoted ahead of WP13.12-13.14 for a reason that is
-                  not importance: all three add to what discovery writes, so all
-                  three land with the same defect unless this is in place first.
-                  Then **WP13.12 — the period-coverage check (D-051).** Asked *"sales
-                  last month"* on 2026-08-27 the deployed app resolved **July
-                  2026** against data ending **2025-12-31**, and the critic
-                  *requires* that empty range rather than merely permitting it.
-                  The platform already holds the coverage and renders it where it
-                  cannot win. **Nothing is built yet** — the three specs are this
-                  PR's deliverable.
+Next step:        **WP13.14 — the contract, and provenance that reaches the
+                  query (D-053 as widened by D-058, closes B-157).** First of
+                  three, and the only one producing **wrong numbers**: asked for
+                  monthly sales the deployed app answered from a synthetic
+                  back-cast with no caveat, then refused three months that
+                  `fact_sale` holds. `source_mode` appears **zero times** in
+                  `apps/api/src`. **D-053's mapping was too narrow, and D-058
+                  records the correction**: a caveat alone would have shipped a
+                  correctly-caveated wrong refusal, the worst outcome available —
+                  a caveat on a refusal reads as diligence, and a refusal closes
+                  the question. Provenance now reaches table selection and a
+                  substitution ban as well, and the **coverage claim is its own
+                  fix**, checked against `CatalogColumn.min_val`/`.max_val` the
+                  way the capability check is: a claim the platform can verify
+                  and didn't. **The coverage check builds first, alone**: it is
+                  the only piece that works on a database with no `source_mode`
+                  column, so if anything is cut it is the `source_mode`-shaped
+                  halves and never the general mechanism (owner, 2026-08-27).
+                  Then **WP13.20 — the answer's shape, chosen by the platform**,
+                  `series` rule first and **no `ChartAsk` narrowing** (D-044's
+                  warning: the platform overrides fields rather than removing
+                  them). The table renderer is split out as **B-158**.
+                  Then **WP13.21 — the trace spends what the events already
+                  carry**, web only, no new emit-time fields — the real *why*
+                  falls out of the two above as platform-computed reasons.
+                  **Still ahead of all three by merge order: WP13.15 — the
+                  discovery version stamp (D-054, closes B-149)**, because every
+                  one of them adds to what discovery writes. Then **WP13.12 — the
+                  period-coverage check (D-051/D-055)**, which is the other half
+                  of B-157's false-coverage failure: asked *"sales last month"* the
+                  app resolved **July 2026** against data ending **2025-12-31**.
+                  **WP13.13 is rescoped to the forbidden rows only (D-057)** — its
+                  join-import justification died when v6.4 declared the edges.
+                  **Nothing of the above is built yet.**
                   The pieces explicitly held back remain **system instructions,
                   tone, model selection and the answer-card polish
                   (B-046/047/048)** — named as next by the owner, not opened.
@@ -95,7 +118,11 @@ Last updated: 2026-08-27 by Claude Code (**MiseQ v6.4 loaded beside the live
               Found on the way: every login on that server could read another
               database's schema out of `pg_class` (**B-155**, closed on all three
               databases), and measured inference does not run on any source that
-              declares a key (**B-156**, open).
+              declares a key (**B-156**, open). **And the first two questions
+              asked of the new source both went wrong** — a synthetic back-cast
+              answered as measured fact with no caveat, then a refusal of three
+              months the real table holds (**B-157**, P1). `source_mode` appears
+              **zero times** in `apps/api/src`.
               Previously: **A priced model no role called, and a
               probe that could not have told you.** `gpt-5.6-terra` removed from
               dev; `/healthz` now resolves every role rather than checking that
@@ -385,6 +412,32 @@ made unnecessary is the correct response to that, not a loss.**
   **1,191 purchase rows** dated December 2024 against a 2025 calendar, so an inner
   join silently drops **8.7%** of purchases. Both disagreements become knowledge
   under WP13.14 rather than edges, and the framing has to survive the move.
+
+### The first two questions asked of it (B-157)
+
+The owner registered `miseq_v64` and asked two questions. Both went wrong, and
+the second is worse than the first.
+
+*"Monthly sales for whatever year of data we have"* returned 24 figures for 2023
+and 2024, marked **answered**, **high confidence**, no caveat. Every one of them
+is `source_mode = 'synthetic'`, `basis = 'back-cast from 2025 actuals at 78% of
+2025 level'`. The answer closed with *"The available monthly data covers January
+2023 through December 2024"* — while `fact_sale` sat unread with **112,327 rows,
+all `real`, covering all of 2025**.
+
+*"For Oct, nov, and dec 2025"* was then **refused**, on that same claim. The
+answer exists: MYR 99,336.20, 99,373.17 and 129,902.10, from 8,962 real sale
+rows. **The honest-refusal machinery worked perfectly on a false premise**, which
+is worse than a wrong answer, because a refusal also closes the question.
+
+**`source_mode` appears zero times in `apps/api/src`.** The platform has never
+read the column that says which rows are real — so the caveat could not have
+fired. But the caveat is the smallest of the four failures: table selection is
+unguided by provenance, and a claim about what data exists is never checked
+against the catalog. **D-053 said `source_mode` becomes a composer caveat; that
+would have fixed the footnote and left the wrong table, the false sentence and
+the wrong refusal untouched.** WP13.14 needs widening before it is built, and
+B-157 says how.
 
 ### Raised with the partner
 

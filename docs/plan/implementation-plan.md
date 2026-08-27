@@ -1082,36 +1082,135 @@ express.
 > an inner join drops **1,191 purchase rows** dated December 2024 against a 2025
 > calendar. Both become knowledge under WP13.14 rather than edges.
 
-### WP13.14 — playbook, data quality, the revenue rule, and source mode — `p13.14-miseq-contract`
-Implements **D-053**. Four small features, each landing where something already
-checks it.
+### WP13.14 — the contract, and provenance that reaches the query — `p13.14-miseq-contract`
+Implements **D-053** as widened by **D-058**. Closes **B-157**. **Build this
+first of the three** — it is the only one producing wrong numbers.
 
-- `v_question_playbook` → `verified_queries`. Twelve archetypes; the
-  `required_caveat` column has no home there and is carried as a limitation.
-- `meta_data_quality` → knowledge documents (27 rows). **Advisory by
-  construction** — L4, framed as the customer's records and not instructions —
-  and the PR must say so rather than imply the corpus enforces anything.
-- Rule 5 (`fact_sale` for revenue, never unioned with `fact_sale_line`) → a
-  semantic definition with required filters, which D-033's critic already checks.
-- `source_mode` → a composer caveat derived from the tables a run actually read,
-  on the seam D-050 built. An answer resting on `synthetic` or `derived` rows says
-  so because of what it read.
-- Deprecated objects (`map_ingredient_alias`, `fact_waste.stage`) are loaded and
-  **must not be reachable by a question**.
-- **Tests/Accept:** a definition test that the revenue rule blocks a union of the
-  two fact tables; a live-path test that a question answered from
-  `fact_sale_line` carries the modelled caveat in what the API returns; knowledge
-  retrieval over the real 27 rows. **No prompt-text assertions** — if a rule can
-  only be checked by reading the prompt, it is not in this work package.
+**No longer "four small features".** D-053 mapped `source_mode` to a composer
+caveat; B-157 showed that fixes the fourth of four failures and would have
+shipped *a correctly-caveated wrong refusal*. Two of the five items below are not
+additive.
+
+**Build in this order, and it is deliberately not the order of the narrative**
+(owner, 2026-08-27; D-058). The **coverage claim ships first and on its own**: it
+is the only piece that works against a database with no `source_mode` column, and
+it needs nothing from the other four. **If this work package runs out of room,
+the `source_mode`-specific halves are what gets cut** — never the coverage check.
+The tempting order is the opposite one, because `source_mode` is the more visible
+fix and the one the partner's contract asks for by name.
+
+1. **The coverage claim, checked against the catalog — the general mechanism
+   (D-058).** An answer asserting the limits of available data is compared with
+   `CatalogColumn.min_val`/`.max_val` — engine-supplied, exact (**B-051** forbids
+   a derived range), masked on the way in — across every **candidate** table, not
+   only the one queried. A claim narrower than the source is a **finding**.
+   Deterministic and not overridable by the model, for the reason the capability
+   check is not. **An unprofiled source abstains, visibly** (D-031's rule). Works
+   on any database, including one with no provenance column at all.
+2. **`source_mode` → a ranking input to table selection.** Where two tables can
+   answer the same question, `real` outranks `derived` outranks `synthetic`, as
+   **context, not a prohibition**: the modelled table stays reachable for a
+   question only it can answer, and stops being the default because its name
+   matched a word. Lands in `agent/context.py`, where the bundle is assembled.
+3. **`source_mode` → the composer caveat D-053 specified**, unchanged, on
+   `composer.limitations_for`'s existing `read` set — D-050's seam, three lines
+   above the inferred-join note.
+4. **`source_mode` → no silent substitution.** A run that read a modelled table
+   while a `real` table covering the asked-for period existed has run the wrong
+   query; it does not reach the composer in that state.
+5. `v_question_playbook` → `verified_queries`; `meta_data_quality` → knowledge
+   documents (27 rows, **advisory by construction**, L4); rule 5 (`fact_sale` for
+   revenue, never unioned with `fact_sale_line`) → a semantic definition with
+   required filters, which D-033's critic already checks. Deprecated objects
+   (`map_ingredient_alias`, `fact_waste.stage`) are loaded and **must not be
+   reachable by a question**.
+
+- **Tests/Accept:** the two B-157 questions, end to end, as the acceptance
+  criteria — *"monthly sales for whatever year of data we have"* must read
+  `fact_sale` and carry 2025, and *"Oct, Nov, Dec 2025"* must return
+  99,336.20 / 99,373.17 / 129,902.10 rather than refuse. A test that a run reading
+  `fact_sale_monthly_history` **for a question only it can answer** still answers,
+  and carries the modelled caveat in what the **API returns** (B-133's rule: assert
+  on `view`, not on the outcome object). A coverage-claim test where the queried
+  table is narrower than the source and the finding is what is asserted. **No
+  prompt-text assertions** — a rule checkable only by reading the prompt is not in
+  this work package.
+
+> **What this does not fix** (D-058): ranking needs a `source_mode`-shaped column
+> to exist. On a database without one, ranking has no input and the caveat has
+> nothing to say. Only the coverage check works everywhere.
 
 > **Not taken from the handoff** (owner, 2026-08-27, recorded in D-053): the
 > contract's control flow; the Competition UX disclosure; the
 > progressive-disclosure UX prescription, which conflicts with D-047; the "never
 > say" list as prompt text; the 15 SQLite views (**B-148**); and their
 > `postgres_schema.sql`, which we do not run — we derive the schema from the
-> SQLite, and their DDL declares **no primary keys at all** while the SQLite
-> carries 19 primary-key columns and 9 unique indexes. That contradiction was
-> raised with the partner in writing on 2026-08-27.
+> SQLite. **The primary-key contradiction that was raised with the partner is
+> resolved**: v6.3's DDL declared no primary keys while its SQLite carried 19, and
+> v6.4 regenerates the DDL with PK, NOT NULL and FK constraints. We still do not
+> run it, and their README now says that is fine.
+
+### WP13.20 — the answer's shape, chosen by the platform — `p13.20-answer-shape`
+Implements the owner's instruction of 2026-08-27. **Second of the three.**
+
+Twenty-four monthly figures arrived as two paragraphs of prose, and a
+two-outlet question would arrive as two answers. **Today the model chooses the
+form and the platform only validates it**: `ChartAsk` on `FinalizeIn` carries
+`of`, `mark`, `x`, `y` and `series`, all model-filled, and `charts.decide()`
+either builds a Vega-Lite spec or writes a refusal sentence. The owner's line is
+that the platform should choose the form from the **shape of the result**.
+
+- `agent/shape.py` (new), called where `charts.decide()` is called, taking the
+  masked `charts.Frame` that already exists. Rules are mechanical and read no
+  column names: one row and one column → a sentence; a temporal x with a numeric
+  y → **line**; a categorical x under `MAX_CATEGORIES` with a numeric y → **bar**
+  (preferred over line for categorical comparison, per the owner); two
+  categoricals and a numeric → **bar with `series`**; anything wider → declined
+  with the sentence `charts.decide()` already writes.
+- **The `series` rule is the cheap half and lands first.** `series` already
+  exists on `ChartAsk`, already survives to the spec, and is used by nothing —
+  so *outlet A and outlet B monthly* becomes **one chart with two series**
+  rather than two answers, with no schema change at all.
+- **`ChartAsk` is NOT narrowed** (owner, 2026-08-27). Making `mark`/`x`/`y`
+  platform-chosen means removing model-filled fields from a schema that is
+  `extra="forbid"`, and **D-044 is the warning**: deleting `FinalizeIn.answered`
+  broke three producers found separately over two hours, one of which ships in
+  the product image. The platform's choice **overrides** what the model sent;
+  the fields stay.
+- **Tests/Accept:** shape tests per rule, driven through `Frame` rather than by
+  calling the classifier directly. **Live-path proof**: a two-outlet monthly
+  question produces one run whose stored `chart` has a `series` encoding — asserted
+  on what the API returns, not on the tool's input. A categorical comparison
+  yields `bar` even when the model asked for `line`.
+- **The table renderer is out of scope and filed as B-158.** Bar-vs-line and
+  two-series working now beats waiting for a grid.
+
+### WP13.21 — the trace spends what the events already carry — `p13.21-trace-detail`
+Implements the owner's instruction of 2026-08-27. **Third of the three, web
+only, no API change.**
+
+`STEP_SENTENCES` covers 22 event types and the payloads are richer than the
+sentences spend. `context_selected` already carries `tables`, `restrictions`,
+`history_turns`, `definitions_applied` **and how many candidates there were to
+match**; `capability_checked` already carries `unreachable` and `comparable`
+pairs with the `via` table that makes each a chasm. So *what it considered* and
+*what it ruled out* are in the events and discarded at render time.
+
+- Widen the existing builders to spend the fields they already receive.
+  *"Considered 41 tables and selected 5."* *"Ruled out joining fact_sale and
+  fact_purchase — they share only dim_business."* *"Two definitions matched out
+  of eighteen."*
+- **No new emit-time fields** (owner, 2026-08-27). *Why* a table was picked is
+  not in any payload, and the only way to surface it today would be to smuggle
+  model reasoning into one. The real *why* falls out of **WP13.14**'s provenance
+  ranking and **WP13.20**'s shape decision as platform-computed reasons, and that
+  is the version worth showing.
+- **Tests/Accept:** `test_trace_vocabulary`'s both-ways assertion is unchanged
+  and must stay green — it parses `STEP_SENTENCES` by entry, so detail added
+  inside a builder does not touch it. `trace.test.tsx` sweeps every builder with
+  `{}` and with a full payload; a builder that reads a new field must not render
+  a bare fragment when the field is absent, which is the defect WP13.16 shipped
+  twice and caught itself.
 
 ---
 
