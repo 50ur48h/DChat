@@ -203,3 +203,28 @@ def test_the_planner_is_told_the_range_and_told_it_is_not_a_limit() -> None:
 
 def test_there_is_no_note_when_there_is_no_measurement() -> None:
     assert coverage_note(None) == ""
+
+
+def test_a_value_that_merely_starts_like_a_period_is_not_one() -> None:
+    """**Every cell of the answer's result passes through the parser**, not just
+    the date column — the check does not know which column is which, and asking
+    it to guess would be name-matching by another route.
+
+    So the pattern is anchored at both ends and the month is 01-12. The loose
+    version matched a prefix, which would have read an order code like
+    `2024-0012` as *"the year 2024, month 00"* and dragged a whole coverage
+    sentence along behind it.
+    """
+    period, _ = period_of_values(["INV-2024-01", "2024-0012", "2024-13", "ORD-99"], truncated=False)
+
+    assert period is None
+
+
+def test_a_real_period_beside_noise_is_still_found() -> None:
+    """The other half: anchoring must not make the parser so strict that a genuine
+    date column stops being read because the row it sits in also holds a code."""
+    period, _ = period_of_values(
+        ["ORD-99", "2025-03-04", "Harbour", "2025-07-01 00:00:00"], truncated=False
+    )
+
+    assert period == Period(earliest="2025-03", latest="2025-07")

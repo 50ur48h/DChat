@@ -1146,3 +1146,71 @@ async def test_an_unprofiled_source_abstains_where_a_reader_can_see_it(
     assert "not a limit on what you may ask" not in planning, (
         "a range was stated for a source whose columns nobody measured"
     )
+
+
+async def test_the_answer_records_which_period_it_was_about(
+    context: ToolContext, fake_llm: FakeLLM
+) -> None:
+    """The second half of the check, asserted on what the trace actually carries.
+
+    `answer_composed` carries `coverage` **whatever it says**, including that it
+    could not look. The fixture's answer counts shops and returns no period at
+    all, so this run abstains — and the assertion is that the abstention arrives
+    with a reason rather than as an absent key, because an absent key would make
+    this run and a checked one indistinguishable to anything reading the trace.
+    """
+    fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql")
+    fake_llm.script(_reflect(), role="plan")
+    fake_llm.script(_cites_the_execution, role="compose")
+    fake_llm.script(_passes(), role="critic")
+    run_id = await _run_for(context, "How many shops are there?")
+
+    await _execute(context, run_id)
+
+    payload = await _payload_of(context, run_id, "answer_composed")
+    assert "coverage" in payload, "the trace cannot say whether the period was checked"
+    coverage = payload["coverage"]
+    assert isinstance(coverage, dict)
+    assert coverage["status"] == "abstained"
+    assert coverage["reason"], "an abstention with no reason is a silence with a label on it"
+
+
+async def test_an_answer_whose_rows_are_a_period_is_compared_against_the_catalogue(
+    context: ToolContext, fake_llm: FakeLLM
+) -> None:
+    """**B-157's shape, end to end.**
+
+    `shops.opened_on` runs 2020-01-01 to 2024-05-05, so a profiled source records
+    that period — and an answer that selects those dates covers exactly it. The
+    verdict is `contained`, which is the quiet outcome and the one that must stay
+    quiet: a caveat here would be the padding that teaches people to skip
+    caveats.
+
+    Asserted on the trace payload rather than on the `Coverage` object, because
+    the object is a value in flight and the payload is what a person receives
+    (B-133's rule).
+    """
+    from dataagent.catalog import profiler
+
+    await profiler.profile(
+        org_id=context.org_id,
+        actor_user_id=context.actor_user_id,
+        data_source_id=context.data_source_id or uuid.uuid4(),
+    )
+    fake_llm.script(_plan("SELECT opened_on FROM shops"), role="sql")
+    fake_llm.script(_reflect(), role="plan")
+    fake_llm.script(_cites_the_execution, role="compose")
+    fake_llm.script(_passes(), role="critic")
+    run_id = await _run_for(context, "When did the shops open?")
+
+    outcome = await _execute(context, run_id)
+
+    payload = await _payload_of(context, run_id, "answer_composed")
+    coverage = payload["coverage"]
+    assert isinstance(coverage, dict)
+    assert coverage["status"] == "contained", coverage
+    assert coverage["answered"] == "2020-01 to 2024-05"
+    assert coverage["available"] == "2020-01 to 2024-05"
+    assert not any("outside the period" in note for note in outcome.limitations), (
+        "an answer inside the catalogue's range was caveated anyway"
+    )

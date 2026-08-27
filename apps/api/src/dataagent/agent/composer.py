@@ -28,9 +28,11 @@ evidence.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Final
+from typing import Final, cast
 
 from dataagent.agent.capability import decode_inferred_joins
+from dataagent.agent.coverage import Coverage, Period
+from dataagent.agent.coverage import limitation as coverage_limitation
 from dataagent.agent.critic import CriticVerdict
 from dataagent.agent.state import ExecutionRef, ResearchState
 from dataagent.agent.tools.finalize import FinalizeIn
@@ -198,6 +200,19 @@ def failure_detail(state: ResearchState) -> str:
     return failures[-1].error if failures else ""
 
 
+def _period(value: object) -> Period | None:
+    """A `Period` back out of the trace payload's ``"a to b"`` (or ``"a"``) form.
+
+    The state carries the payload rather than the object, for the reason
+    `capability["inferred"]` does: a checkpoint round-trips JSON, and a dataclass
+    that only exists in memory would be lost by an interrupted run coming back.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    earliest, _, latest = value.partition(" to ")
+    return Period(earliest=earliest, latest=latest or earliest)
+
+
 def limitations_for(
     state: ResearchState,
     verdict: CriticVerdict | None,
@@ -244,6 +259,29 @@ def limitations_for(
             f"catalog was built — so it reflects the data as it was then rather "
             f"than a rule the database enforces."
         )
+
+    # **What period this answer is actually about** (B-157, D-059). Straight
+    # after the join caveat, because the two are the same kind of doubt — a fact
+    # about the evidence behind an answer rather than about what the answer
+    # claims — and ahead of the critic's warnings for the same reason.
+    #
+    # **Only `outside` speaks here.** `contained` says nothing because there is
+    # nothing to say. `abstained` says nothing *on the answer card* while saying
+    # it loudly in the trace: a reader of an answer is owed caveats about their
+    # answer, and *"a check could not run"* is not one — it is the padding that
+    # teaches people to stop reading the caveats that matter. The two live in
+    # different places on purpose (owner, 2026-08-27).
+    coverage: object = state.capability.get("coverage")
+    if isinstance(coverage, dict):
+        stored = cast(dict[str, object], coverage)
+        verdict_of_period = Coverage(
+            status=str(stored.get("status", "")),
+            reason=str(stored.get("reason", "")),
+            answered=_period(stored.get("answered")),
+            available=_period(stored.get("available")),
+        )
+        if sentence := coverage_limitation(verdict_of_period):
+            notes.append(sentence)
 
     # **First, and ahead of the budget caveat** (D-034). This module used to take
     # warnings only, on the reasoning that a block either sent the run round

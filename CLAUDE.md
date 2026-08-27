@@ -188,6 +188,11 @@ against the model the product parses it into.
   is 18 files and 240 tests with `pnpm exec vitest run --no-file-parallelism`.
   Read the errors above the summary before believing the count, and cap
   parallelism rather than chasing the tests.
+  **And `--no-file-parallelism` is not always enough** — at 4.1 GB free it still
+  reported *"no tests"* with one worker error on 2026-08-27. `--pool=threads`
+  ran the same file to 48 passing tests in 6s. The forks pool spawns a process
+  per file and processes are what this host cannot afford; threads share one.
+  Reach for `--pool=threads` before concluding anything about the suite.
 - Git Bash rewrites any argument starting with `/` into a `C:\...` path, so a
   `docker exec … sh -c '/opt/…'` arrives as nonsense. Start such command strings
   with a word (`exec /opt/…`), as `ops/scripts/seed_mssql.sh` does.

@@ -70,11 +70,16 @@ __all__ = [
 #: `2020` to `2024` on a column called `qty` is not a period.
 TIME_TYPES: tuple[str, ...] = ("date", "timestamp", "datetime", "smalldatetime", "time")
 
-#: A year and a month at the start of a value, which is the finest grain both
-#: sides can honestly express. `2025-01-01`, `2025-01-01 00:00:00` and `2023-01`
-#: all reduce to the same thing; `opening`, `7.30 pm` and `Q1` reduce to nothing
-#: and are therefore never compared.
-_MONTH = re.compile(r"^(\d{4})-(\d{2})")
+#: A year and a month, which is the finest grain both sides can honestly express.
+#: `2025-01-01`, `2025-01-01 00:00:00` and `2023-01` all reduce to the same thing;
+#: `opening`, `7.30 pm` and `Q1` reduce to nothing and are never compared.
+#:
+#: **Anchored at both ends, and the month is 01-12** — the loose version matched a
+#: prefix, and every cell of the answer's result passes through here. An order
+#: code like `2024-0012` would have become "the year 2024, month 00" and dragged
+#: a coverage sentence with it. A value is a period or it is not; something that
+#: merely *starts* like one is not.
+_MONTH = re.compile(r"^(\d{4})-(0[1-9]|1[0-2])(?:-\d{2})?(?:[ T][\d:.+\-]*)?$")
 
 
 @dataclass(frozen=True, slots=True)
