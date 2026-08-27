@@ -121,6 +121,68 @@ may be joined — and one more caveat the composer can attach: *the data diction
 says these join; we checked and found no unmatched values*, which is a different
 claim from either a foreign key or an inference.
 
+## D-060 — provenance ranks among tables that could each answer, and the substitution ban becomes a caveat
+Date: 2026-08-28 · Phase: 13 · PR: this one · **Amends D-058**
+Two of D-058's three `source_mode` items are built as specified. The third is not,
+and both departures came from measuring the dataset rather than from taste.
+
+**The ranking is restricted to tables that offer measures, and the measurement is
+what decided it.** D-058 said *"where two tables can answer the same question,
+`real` outranks `derived` outranks `synthetic`."* The obvious implementation is a
+stable sort of the bundle by provenance. Measured on `miseq_v64`, that is wrong:
+`source_mode` splits the **dimensions** as sharply as the facts — `dim_calendar`,
+`dim_outlet`, `dim_item`, `dim_ingredient`, `dim_supplier`, `dim_business` and
+`dim_vertical` are `real`, while `dim_member`, `dim_weather`, `dim_waste_category`
+and `dim_industry_benchmark` are `synthetic`. Sorting the bundle would put **seven
+real dimensions ahead of `fact_waste` on a question about waste**, and with
+`CARDS_KEPT_IN_FULL` at five the one table that answers would lose its detail to
+`dim_vertical`, which has three rows.
+
+So the reordering is confined to cards that **offer measures** — `offers_measures`
+is already this platform's cheapest honest test for *could this table have
+answered the question* (B-093) — and the measure-bearing cards are re-laid into
+their own existing positions. A dimension never moves, membership never changes,
+and the only thing that changes is which of two tables that could both serve is
+seen first. Ties keep search order, because provenance is a nudge between equals
+and not a replacement for relevance.
+
+**The substitution ban is not built, and building it would have been a false
+block.** D-058 said a run that read a modelled table *"while a `real` table
+covering the asked-for period existed"* has run the wrong query and must not reach
+the composer. Two things are wrong with that as written.
+
+* **The asked-for period does not exist structurally.** This is the same wall
+  D-059 hit: `ExecutionRef` carries no period, `ResearchState` has no period
+  field, and the question's own range lives only in prose. The clause that makes
+  the ban safe is the clause that cannot be evaluated.
+* **Without it the ban fires on correct answers.** *"How much did we waste?"* is
+  answered from `fact_waste`, which is `synthetic`, and after B-159 raised the
+  card limit a real measure-bearing table is very often in the same bundle. A
+  block there refuses a question the data answers — the failure mode the owner
+  named as this component's characteristic one.
+Options: (a) build the ban without the period clause; (b) build the period clause
+first; (c) let the caveat carry it.
+Decision: **(c)**. The caveat already names the modelled tables an answer read,
+and **B-093's existing note already names the ones it did not** — *"the question
+also matched X — tables with figures it could have been answered from, and not
+read here."* The substitution case is therefore reported today by two sentences
+that were already there for other reasons. Sharpening B-093's sentence with
+provenance is filed as **B-161** rather than done here, because a second caveat
+saying nearly the same thing is how a reader learns to skip caveats.
+
+Consequences: `source_mode` is read from `CatalogColumn.top_values`, so this
+depends on a source having been **profiled** — a catalog alone gives nothing, the
+same precondition D-059 has. `PROVENANCE_COLUMN` is a **convention, not a
+discovery**: `inference.py` refuses to read a column name by construction and this
+module reads one on purpose, because a customer told us what it means. On a
+database without such a column every function here returns nothing and every
+caller carries on unchanged, which remains the honest limit D-058 named.
+
+**And an unlabelled table ranks with the observed ones**, which is worth stating
+because the opposite is tempting. Absence of a label is not evidence of
+modelling; demoting every unlabelled table would demote the whole of any database
+that does not use this convention, which is most of them.
+
 ## D-059 — the coverage check catches an answer outside the data, not a false claim about it
 Date: 2026-08-27 · Phase: 13 · PR: this one · **Amends D-058**
 D-058 said *"an answer asserting the limits of available data is compared with

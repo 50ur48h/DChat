@@ -527,3 +527,46 @@ def test_an_abstention_is_loud_in_the_trace_and_silent_on_the_answer_card() -> N
     }
 
     assert limitations_for(state, CriticVerdict(verdict="pass")) == ()
+
+
+def test_an_answer_that_read_a_modelled_table_says_so() -> None:
+    """**B-157's missing caveat**, and the narrowing that keeps it useful.
+
+    Only tables the run actually read are named. On a database where most tables
+    are modelled — MiseQ is 24 synthetic of 36 labelled — caveating everything
+    offered would put a warning on every answer, including the ones drawn
+    entirely from observed rows.
+    """
+    state = _state(_ref(), tables=["public.fact_sale_monthly_history"])
+    state.executions = [
+        ExecutionRef(
+            execution_id="e1",
+            row_count=24,
+            ok=True,
+            summary="rows",
+            tables=["public.fact_sale_monthly_history"],
+        )
+    ]
+    state.capability["provenance"] = {
+        "public.fact_sale_monthly_history": ["synthetic"],
+        "public.fact_sale": ["real"],
+    }
+
+    notes = limitations_for(state, CriticVerdict(verdict="pass"))
+
+    assert any("fact_sale_monthly_history" in note and "modelled" in note for note in notes)
+    assert not any("fact_sale," in note for note in notes), (
+        "a table the answer never read was caveated"
+    )
+
+
+def test_an_answer_drawn_from_observed_rows_carries_no_provenance_caveat() -> None:
+    state = _state(_ref(), tables=["public.fact_sale"])
+    state.executions = [
+        ExecutionRef(
+            execution_id="e1", row_count=3, ok=True, summary="rows", tables=["public.fact_sale"]
+        )
+    ]
+    state.capability["provenance"] = {"public.fact_sale": ["real"]}
+
+    assert limitations_for(state, CriticVerdict(verdict="pass")) == ()

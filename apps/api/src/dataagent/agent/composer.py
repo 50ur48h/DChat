@@ -34,6 +34,7 @@ from dataagent.agent.capability import decode_inferred_joins
 from dataagent.agent.coverage import Coverage, Period
 from dataagent.agent.coverage import limitation as coverage_limitation
 from dataagent.agent.critic import CriticVerdict
+from dataagent.agent.provenance import caveat as provenance_caveat
 from dataagent.agent.state import ExecutionRef, ResearchState
 from dataagent.agent.tools.finalize import FinalizeIn
 
@@ -259,6 +260,27 @@ def limitations_for(
             f"catalog was built — so it reflects the data as it was then rather "
             f"than a rule the database enforces."
         )
+
+    # **Which rows this answer is made of** (D-053, D-058, B-157). Ahead of the
+    # period note because it is the more fundamental doubt: *when* a figure is
+    # about matters less than *whether it was ever observed*. B-157's answer was
+    # wrong on both counts and carried neither.
+    #
+    # Narrowed to the tables the run actually read, like the join caveat above —
+    # a database where most tables are modelled would otherwise caveat every
+    # answer, including the ones drawn entirely from observed rows.
+    stated: object = state.capability.get("provenance")
+    if isinstance(stated, dict):
+        by_table = cast(dict[str, object], stated)
+        sentence = provenance_caveat(
+            {
+                table: [str(mode) for mode in cast(list[object], modes)]
+                for table, modes in by_table.items()
+                if table.split(".")[-1].lower() in read and isinstance(modes, list)
+            }
+        )
+        if sentence:
+            notes.append(sentence)
 
     # **What period this answer is actually about** (B-157, D-059). Straight
     # after the join caveat, because the two are the same kind of doubt — a fact
