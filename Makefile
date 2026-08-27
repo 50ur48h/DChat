@@ -123,11 +123,18 @@ secrets.key: ## Print a fresh LOCAL_SECRETS_KEY line to paste into .env
 # a minute, and needs Chromium (`pnpm --dir apps/web exec playwright install
 # chromium`) — a one-off, and the failure names the command if it is missing.
 #
+# **And `compile.web` belongs here for the same reason, learned the same way.**
+# CI's `web` job runs `lint`, `typecheck`, `test` **and then `next build`**; this
+# target ran the first three and stopped. WP13.16 went to CI green locally and
+# failed there on the production compile — the identical shape as the e2e
+# omission above, one step further down the same job. `build.web` is *not* this:
+# that target builds the Docker image, which CI does in a separate job.
+#
 # The compose smoke (`test.web.smoke`) is deliberately **not** here: it builds
 # images and seeds a database, which is minutes rather than a minute, and CI runs
 # it on its own job.
 .PHONY: preflight
-preflight: lint typecheck check.status check.backlog check.env check.infra test test.web.e2e ## Everything CI will run, in CI's order
+preflight: lint typecheck check.status check.backlog check.env check.infra test test.web.e2e compile.web ## Everything CI will run, in CI's order
 	@echo "Preflight clean. Safe to push."
 
 .PHONY: check.status
@@ -221,7 +228,7 @@ lint.seed: ## ruff check the seed scripts
 # ---------------------------------------------------------------------------
 # apps/web
 # ---------------------------------------------------------------------------
-.PHONY: install.web lint.web typecheck.web test.web test.web.e2e test.web.smoke web.dev build.web
+.PHONY: install.web lint.web typecheck.web test.web test.web.e2e test.web.smoke web.dev build.web compile.web
 install.web: ## Install web dependencies from the lockfile
 	$(PNPM_WEB) install --frozen-lockfile
 
@@ -242,6 +249,9 @@ test.web.smoke: .env ## Playwright: the whole product in a browser, on its own c
 
 web.dev: ## next dev on :3000
 	$(PNPM_WEB) dev
+
+compile.web: ## next build — the production compile CI runs after test.web
+	$(PNPM_WEB) build
 
 build.web: ## Build the production web image
 	docker build --target prod --build-arg NEXT_PUBLIC_API_URL=http://localhost:8000 --build-arg NEXT_PUBLIC_ENV=local -t dataagent-web:local $(WEB_DIR)

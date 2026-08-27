@@ -121,6 +121,70 @@ may be joined — and one more caveat the composer can attach: *the data diction
 says these join; we checked and found no unmatched values*, which is a different
 claim from either a foreign key or an inference.
 
+## D-055 — one vocabulary for a partial answer, and a refusal that records what it refused
+Date: 2026-08-27 · Phase: 13 · PR: this one (spec only; built as WP13.12)
+**Extends D-051 rather than replacing it.** This file is append-only, and none of
+D-051's coverage reasoning changes — what changes is that it acquires a second
+trigger and they are built once.
+
+Context: on dev, *"how to improve sales for outlet A"* was refused with a
+paragraph about missing causal inputs, having run **no query at all**. There is
+no causal-question rule anywhere in the API: that paragraph is the model's own
+prose. The planner's `sql` role returns `answerable: false` with a `reason`, and
+`loop.py` ends the run on the spot — no query, no iteration, no second attempt.
+
+Two things came out of diagnosing it.
+
+**The product already has the ending this needs, and the refusal path walks past
+it.** `run_state` (D-044) derives `partly` from two facts the model already
+reports: what backs its answer, and what it could not answer. *"Here is what
+December looked like; which actions would raise sales cannot be established from
+this data"* is exactly that shape. No new state, no migration, no UI work — the
+screen already renders "partly answered" and shows the caveat.
+
+**And the platform's own checks and the model's opinion are given the same
+finality, which they should not be.** The join-graph refusal three lines below
+`plan.answerable` is a fact about the schema the model cannot argue with;
+`plan.answerable` is a model's judgement about a question. The asymmetry is
+visible in the code: the capability branch writes `state.capability` and emits
+`capability_checked`; the model-judgement branch emits nothing and leaves prose.
+**In the trace the two are indistinguishable, and only one of them is a fact.**
+Options: (a) prompt the planner to answer descriptively where it can — which is
+enforcement by prompt, judged by the same model that just refused; (b) make a
+model-judgement refusal non-terminal, once, under platform control; (c) leave it.
+Decision: **(b)**, bounded, with three guards, and built as one mechanism with
+D-051's partial-coverage outcome because they resolve to the same two fields.
+
+* **Strictly bounded.** At most one retry, and only where nothing has executed
+  yet, so it cannot loop and cannot fire mid-investigation. **A capability
+  refusal stays terminal** — the platform's own facts are not sent back for a
+  second opinion.
+* **The guard is `unanswered`, not the answer.** A retried run must still name
+  the gap. *An honest refusal that becomes a padded non-answer is worse than the
+  refusal* (owner, 2026-08-27), so the acceptance test is not "it answered" but
+  "it answered **and** still said what it could not establish". A retry that
+  produces no citations falls back to `refused` through D-044's existing
+  derivation, with no special case written for it.
+* **The refusal is recorded structurally.** A model-judgement refusal carries
+  `reason` in `plan_created`'s payload beside the `answerable` it already emits —
+  a JSONB addition, so no migration and no new event type, and
+  `STEP_SENTENCES` can then say *why* the platform stopped rather than leaving
+  the reader to infer it from an absence.
+
+**On putting a model's sentence in a payload**, since WP13.16 has just drawn that
+line for the trace: architecture 10.3 forbids *raw model reasoning*, not every
+model-authored string. `plan_created.purpose` and `reflection.public_rationale`
+are both short, public, model-written and already there. `reason` sits on exactly
+that footing — a sentence written to be read by the person who asked — and not on
+the footing of chain-of-thought, which stays out.
+Consequences: one extra `sql`-role call on a genuine refusal, at the strong tier;
+the owner accepted that cost on 2026-08-27 explicitly. This is a **global**
+behaviour change to the honest-refusal path Phase 8's gate signed off on, and the
+thing that keeps it honest is the `unanswered` guard rather than the retry being
+rare. D-051's three coverage outcomes and this one share `partly` + `unanswered`,
+so the product grows one vocabulary rather than two — which is why WP13.12 builds
+both and why this entry exists instead of a separate work package.
+
 ## D-054 — a catalog is a function of the schema **and** of the logic that read it
 Date: 2026-08-27 · Phase: 13 · PR: this one (spec only; built as WP13.15)
 Context: D-050 shipped measured inference on 2026-08-26 and dev was deployed with

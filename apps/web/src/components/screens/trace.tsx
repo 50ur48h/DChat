@@ -26,8 +26,8 @@
  * be quietly dropped by a UI written to look good.
  *
  * **Names are ours, not the model's.** 10.3's payloads are built for eyes, but
- * its *type names* are machine names; a person watching should read "Running the
- * query", not `query_executed`. Anything unrecognised falls back to the raw type
+ * its *type names* are machine names; a person watching should read "Ran the query
+ * against your database", not `query_executed`. Anything unrecognised falls back to the raw type
  * rather than being hidden — a trace that silently omits an event it does not
  * know about is worse than one that shows an ugly word.
  */
@@ -39,30 +39,270 @@ import { useSession } from "@/lib/auth/session";
 
 import styles from "./trace.module.css";
 
-/** Plain words for 10.3's vocabulary. */
-const STEP_WORDS: Record<string, string> = {
-  run_started: "Started",
-  intent_classified: "Read the question",
-  context_selected: "Read the catalog",
-  capability_checked: "Checked what this database can answer",
-  plan_created: "Wrote a query",
-  step_started: "Next step",
-  tool_called: "Ran the query",
-  sql_validated: "Query checked",
-  sql_rejected: "Query refused",
-  query_executed: "Got results",
-  knowledge_consulted: "Read the organization's documents",
-  result_summarized: "Read the results",
-  finding_added: "Noted a finding",
-  hypothesis_updated: "Updated a hypothesis",
-  reflection: "Decided what to do next",
-  critic_verdict: "Checked the answer",
-  budget_warning: "Approaching a limit",
-  budget_exhausted: "Stopped at a limit",
-  answer_composed: "Wrote the answer",
-  run_finished: "Finished",
-  error: "Something went wrong",
+/**
+ * What each step did, and where it matters, why — in words a person who has
+ * never seen a database can read.
+ *
+ * **Built only from fields 10.3 already promises.** The temptation this creates
+ * is to enrich a payload with the model's own reasoning so the prose reads
+ * better, and that is the line: 10.3's payloads are *built for eyes*, never raw
+ * reasoning and never an unmasked value. Every sentence below is assembled from
+ * counts and short strings the event already carries — several of which nothing
+ * has ever rendered, which is where most of the improvement comes from rather
+ * than from new data.
+ *
+ * Each entry returns a **lead** and a **rest**. The lead is short and carries the
+ * tone colour, exactly as the previous vocabulary did — design.md rule 4 keeps
+ * colour a second cue, and a whole sentence set in green or red would make it the
+ * first one. Read together they are one sentence.
+ *
+ * A field that is absent renders as nothing rather than as `undefined`: a payload
+ * shape that changed should make the trace quieter, not wrong.
+ */
+type Payload = Record<string, unknown>;
+
+interface Step {
+  lead: string;
+  rest: string;
+}
+
+function str(payload: Payload, key: string): string | null {
+  const value = payload[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function num(payload: Payload, key: string): number | null {
+  const value = payload[key];
+  return typeof value === "number" ? value : null;
+}
+
+function list(payload: Payload, key: string): string[] {
+  const value = payload[key];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function totalsOf(payload: Payload): Payload {
+  const value = payload.totals;
+  return typeof value === "object" && value !== null ? (value as Payload) : {};
+}
+
+/** "1 row" / "3 rows", so no sentence ever says "1 rows". */
+function plural(count: number, one: string, many: string): string {
+  return `${count.toLocaleString()} ${count === 1 ? one : many}`;
+}
+
+function joinNames(names: string[], limit = 3): string {
+  const shown = names.slice(0, limit).join(", ");
+  return names.length > limit ? `${shown} and ${names.length - limit} more` : shown;
+}
+
+export const STEP_SENTENCES: Record<string, (payload: Payload) => Step> = {
+  run_started: () => ({ lead: "Picked up the question", rest: "" }),
+
+  intent_classified: () => ({
+    lead: "Worked out what kind of question this is",
+    rest: "so the right steps get chosen.",
+  }),
+
+  context_selected: (payload) => {
+    const tables = list(payload, "tables");
+    const definitions = list(payload, "definitions_applied");
+    const parts: string[] = [];
+    if (tables.length > 0) {
+      parts.push(`picked ${plural(tables.length, "table", "tables")} — ${joinNames(tables)}`);
+    }
+    if (definitions.length > 0) {
+      parts.push(`using your own definition of ${joinNames(definitions, 2)}`);
+    }
+    return {
+      lead: "Searched the catalogue for tables that fit the question",
+      rest: parts.length > 0 ? `and ${parts.join(", ")}.` : "",
+    };
+  },
+
+  capability_checked: (payload) => {
+    const unreachable = list(payload, "unreachable");
+    // The payload carries objects for these, so fall back to the count when the
+    // shape is not a plain list of names.
+    const blocked = unreachable.length > 0 ? joinNames(unreachable) : null;
+    if (payload.answerable === false) {
+      return {
+        lead: "Checked those tables can actually be linked",
+        rest: blocked
+          ? `— they cannot (${blocked}), and joining them anyway would invent rows rather than fail.`
+          : "— they cannot, and joining them anyway would invent rows rather than fail.",
+      };
+    }
+    return {
+      lead: "Checked those tables can actually be linked",
+      rest: "— they can, so the numbers will line up row for row.",
+    };
+  },
+
+  plan_created: (payload) => {
+    const purpose = str(payload, "purpose");
+    return {
+      lead: "Decided what to look up",
+      rest: purpose ? `— ${purpose}.` : "",
+    };
+  },
+
+  step_started: (payload) => {
+    const iteration = num(payload, "iteration");
+    return {
+      lead: "Started another round of work",
+      rest: iteration === null ? "" : `— step ${iteration}.`,
+    };
+  },
+
+  tool_called: () => ({ lead: "Reached for a tool", rest: "" }),
+
+  knowledge_consulted: (payload) => {
+    const term = str(payload, "term");
+    const passages = num(payload, "passages");
+    const parts = [
+      term ? `to see what "${term}" means here` : null,
+      passages === null ? null : `found ${plural(passages, "passage", "passages")}`,
+    ].filter((part): part is string => part !== null);
+    // **Empty means empty, not a full stop.** Joining and appending "." wrote a
+    // bare "." when the payload carried neither field — which is precisely the
+    // "quieter, not wrong" rule this module states, broken by the code that
+    // states it.
+    return {
+      lead: "Looked the wording up in your own documents",
+      rest: parts.length > 0 ? `${parts.join(", ")}.` : "",
+    };
+  },
+
+  sql_validated: () => ({
+    lead: "Checked the query was safe to run",
+    rest: "before sending it to the database.",
+  }),
+
+  sql_rejected: (payload) => {
+    const rule = str(payload, "rule");
+    return {
+      lead: "Refused the query before it ran",
+      rest: rule ? `— ${rule}. It was rewritten rather than sent.` : "and rewrote it instead.",
+    };
+  },
+
+  query_executed: (payload) => {
+    const rows = num(payload, "row_count");
+    const ms = num(payload, "duration_ms");
+    const masked = list(payload, "masked_columns");
+    const parts: string[] = [];
+    if (rows !== null) parts.push(`${plural(rows, "row", "rows")} came back`);
+    if (ms !== null) parts.push(`in ${ms.toLocaleString()} ms`);
+    if (masked.length > 0) {
+      parts.push(`with ${plural(masked.length, "column", "columns")} hidden by policy`);
+    }
+    return {
+      lead: "Ran the query against your database",
+      rest: parts.length > 0 ? `— ${parts.join(" ")}.` : "",
+    };
+  },
+
+  result_summarized: (payload) => {
+    const line = str(payload, "one_liner");
+    return { lead: "Read what came back", rest: line ? `— ${line}` : "" };
+  },
+
+  finding_added: (payload) => {
+    const statement = str(payload, "statement");
+    const support = list(payload, "support");
+    const backed = support.length > 0 ? ` Backed by ${plural(support.length, "query", "queries")}.` : "";
+    return {
+      lead: "Wrote down a conclusion",
+      rest: statement ? `— ${statement}${backed}` : backed.trim(),
+    };
+  },
+
+  hypothesis_updated: () => ({
+    lead: "Changed its mind about what to expect",
+    rest: "based on what the last query showed.",
+  }),
+
+  reflection: (payload) => {
+    const rationale = str(payload, "public_rationale");
+    const keepGoing = payload.continue === true;
+    return {
+      lead: keepGoing ? "Decided to keep looking" : "Decided it had enough to answer",
+      rest: rationale ? `— ${rationale}` : "",
+    };
+  },
+
+  critic_verdict: (payload) => {
+    const verdict = str(payload, "verdict");
+    const said: Record<string, string> = {
+      pass: "— it holds up.",
+      revise: "— it overstated something, so it was sent back.",
+      insufficient_evidence: "— there was not enough evidence behind it.",
+    };
+    return {
+      lead: "Checked the draft answer against the evidence",
+      rest: verdict ? (said[verdict] ?? `— ${verdict}.`) : "",
+    };
+  },
+
+  budget_warning: (payload) => {
+    const dimension = str(payload, "dimension");
+    return {
+      lead: "Getting close to a limit",
+      rest: dimension ? `— ${dimension} for this question.` : "set for this question.",
+    };
+  },
+
+  budget_exhausted: (payload) => {
+    const dimension = str(payload, "dimension");
+    const reason = str(payload, "reason");
+    return {
+      lead: "Stopped at a limit",
+      rest: `— ${reason ?? dimension ?? "this question's ceiling"}. The answer says what it did not reach.`,
+    };
+  },
+
+  answer_composed: (payload) => {
+    const limitations = num(payload, "limitations");
+    const caveats =
+      limitations && limitations > 0
+        ? ` with ${plural(limitations, "caveat", "caveats")} attached`
+        : "";
+    return { lead: "Wrote the answer", rest: `from what the queries returned${caveats}.` };
+  },
+
+  run_finished: (payload) => {
+    const totals = totalsOf(payload);
+    const queries = num(totals, "queries");
+    const calls = num(totals, "llm_calls");
+    const parts: string[] = [];
+    if (queries !== null) parts.push(plural(queries, "query", "queries"));
+    if (calls !== null) parts.push(plural(calls, "model call", "model calls"));
+    return {
+      lead: "Finished",
+      rest: parts.length > 0 ? `after ${parts.join(" and ")}.` : "",
+    };
+  },
+
+  error: (payload) => {
+    const message = str(payload, "safe_message");
+    return { lead: "Something went wrong", rest: message ? `— ${message}` : "" };
+  },
 };
+
+/**
+ * The sentence for one event.
+ *
+ * An unrecognised type falls back to its raw name rather than being hidden, for
+ * the reason the module docstring gives: a trace that silently omits a step is
+ * worse than an ugly one. `test_trace_vocabulary.py` is what keeps that fallback
+ * for events from a newer server rather than for events this repository added
+ * and forgot.
+ */
+export function sentence(event: RunEvent): Step {
+  const build = STEP_SENTENCES[event.type];
+  return build ? build(event.payload as Payload) : { lead: event.type, rest: "" };
+}
 
 /**
  * Which events are worth colouring, and why — never colour for interest.
@@ -80,68 +320,6 @@ const TONE_CLASS: Record<string, string | undefined> = {
   run_finished: styles.wordOk,
   error: styles.wordError,
 };
-
-function line(event: RunEvent): string {
-  /**
-   * One line of detail, taken only from fields 10.3 promises. Anything absent
-   * renders as nothing rather than as "undefined" — a payload shape that changed
-   * should make the trace quieter, not wrong.
-   */
-  const payload = event.payload;
-  const text = (key: string): string | null => {
-    const value = payload[key];
-    return typeof value === "string" && value.length > 0 ? value : null;
-  };
-  const count = (key: string): string | null => {
-    const value = payload[key];
-    return typeof value === "number" ? String(value) : null;
-  };
-
-  switch (event.type) {
-    case "context_selected": {
-      const tables = payload.tables;
-      return Array.isArray(tables) && tables.length > 0
-        ? `${tables.length} table${tables.length === 1 ? "" : "s"}: ${tables.join(", ")}`
-        : "";
-    }
-    case "capability_checked": {
-      const unreachable = payload.unreachable;
-      if (Array.isArray(unreachable) && unreachable.length > 0) {
-        return `cannot be joined — ${unreachable.join("; ")}`;
-      }
-      return "every table needed can be joined";
-    }
-    case "plan_created":
-      return text("purpose") ?? "";
-    case "step_started":
-      return count("iteration") ? `step ${count("iteration")}` : "";
-    case "sql_rejected":
-      return text("rule") ? `refused: ${text("rule")}` : "refused";
-    case "query_executed": {
-      const rows = count("row_count");
-      const ms = count("duration_ms");
-      return [rows ? `${rows} row${rows === "1" ? "" : "s"}` : null, ms ? `${ms} ms` : null]
-        .filter(Boolean)
-        .join(" · ");
-    }
-    case "result_summarized":
-      return text("one_liner") ?? "";
-    case "finding_added":
-      return text("statement") ?? "";
-    case "reflection":
-      return text("public_rationale") ?? "";
-    case "budget_warning":
-      return text("dimension") ? `${text("dimension")} is running low` : "";
-    case "budget_exhausted":
-      return text("reason") ?? text("dimension") ?? "";
-    case "error":
-      return text("safe_message") ?? "";
-    case "run_finished":
-      return text("status") ?? "";
-    default:
-      return "";
-  }
-}
 
 /**
  * Subscribe to a run's trace, replaying whatever came before.
@@ -308,7 +486,7 @@ export function Trace({
         <div className={styles.expanderClip}>
           <ol className={styles.steps}>
             {events.map((event, index) => {
-              const detail = line(event);
+              const step = sentence(event);
               // The last row carries the spinner only while the run is still
               // going. Once it has settled every step finished, so every one
               // of them gets a check.
@@ -337,10 +515,8 @@ export function Trace({
                       <path d="M20 6L9 17l-5-5" />
                     </svg>
                   )}
-                  <span className={TONE_CLASS[event.type] ?? styles.word}>
-                    {STEP_WORDS[event.type] ?? event.type}
-                  </span>
-                  {detail && <span className={styles.detail}>{detail}</span>}
+                  <span className={TONE_CLASS[event.type] ?? styles.word}>{step.lead}</span>
+                  {step.rest && <span className={styles.detail}>{step.rest}</span>}
                 </li>
               );
             })}
