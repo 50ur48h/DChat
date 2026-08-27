@@ -1230,8 +1230,14 @@ that the platform should choose the form from the **shape of the result**.
   two-series working now beats waiting for a grid.
 
 ### WP13.21 — the trace spends what the events already carry — `p13.21-trace-detail`
-Implements the owner's instruction of 2026-08-27. **Third of the three, web
-only, no API change.**
+Implements the owner's instruction of 2026-08-27. **Third of the three. Built.**
+
+> **One deviation from "web only, no API change".** B-160's fix needed the API
+> to say what the prompt *kept* rather than what the search returned, so
+> `render`'s ladder was extracted as `context.chosen` and `context_selected`
+> gained three counts. No new *judgement* is emitted — the counts are the
+> existing ladder's own output — but the claim "web only" was not true and is
+> corrected here rather than left in the plan.
 
 `STEP_SENTENCES` covers 22 event types and the payloads are richer than the
 sentences spend. `context_selected` already carries `tables`, `restrictions`,

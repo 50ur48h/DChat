@@ -86,8 +86,10 @@ __all__ = [
     "HistoryTurn",
     "KnowledgeFrame",
     "Layer",
+    "Layout",
     "VerifiedFrame",
     "build_context",
+    "chosen",
     "history_block",
     "render",
 ]
@@ -661,6 +663,29 @@ def _reference_body(
     return "\n\n".join(parts)
 
 
+@dataclass(frozen=True, slots=True)
+class Layout:
+    """What a prompt will actually carry, once the budget has had its say.
+
+    The counts are the point: *five tables in full and twenty in outline* is a
+    more useful thing for a person to read than *twenty-five tables*, and until
+    B-160 the trace could only say the second — and said it about the search's
+    result rather than the prompt's.
+    """
+
+    cards: tuple[TableCard, ...]
+    history: tuple[HistoryTurn, ...]
+    full_cards: int
+
+    @property
+    def in_full(self) -> int:
+        return min(self.full_cards, len(self.cards))
+
+    @property
+    def in_outline(self) -> int:
+        return len(self.cards) - self.in_full
+
+
 def render(bundle: ContextBundle) -> list[Message]:
     """Assemble the bundle into messages, dropping the least useful thing first.
 
@@ -698,6 +723,31 @@ def render(bundle: ContextBundle) -> list[Message]:
     ``PROTECTED_LAYERS``. The *thread* is not protected, even though it renders
     inside L5: it is context, not the thing being asked.
     """
+    layout = chosen(bundle)
+    layers = _layers(bundle, layout.cards, layout.history, full_cards=layout.full_cards)
+    if _tokens(layers) > bundle.token_budget:
+        raise ContextTooLargeError(
+            f"the platform rules and the question alone need {_tokens(layers)} tokens "
+            f"against a budget of {bundle.token_budget}"
+        )
+    return _messages(layers)
+
+
+def chosen(bundle: ContextBundle) -> Layout:
+    """Which rung of the ladder this bundle lands on, without rendering it.
+
+    **Split out of `render` so the trace can report what the model was actually
+    shown** (**B-160**). `context_selected` used to name the tables the *search*
+    returned, and this function is what the prompt *keeps* — the two differ
+    whenever the budget bites, and the event was the one a person reads. Two
+    consumers, one decision: a second implementation of the ladder would drift
+    from this one and the trace would go back to being confidently wrong.
+
+    Never raises. The degenerate case — nothing fits at all — is returned as an
+    empty layout, and `render` is where that becomes `ContextTooLargeError`,
+    because a caller asking *what will you show* should not fail on the way to
+    an answer about a prompt it was not going to send.
+    """
     # Descending, deduplicated: with five cards or fewer the middle rung is the
     # same prompt as the first, and trying it twice would be a second identical
     # token count rather than a second option.
@@ -705,14 +755,14 @@ def render(bundle: ContextBundle) -> list[Message]:
     for full_cards in rungs:
         layers = _layers(bundle, bundle.cards, bundle.history, full_cards=full_cards)
         if _tokens(layers) <= bundle.token_budget:
-            return _messages(layers)
+            return Layout(cards=bundle.cards, history=bundle.history, full_cards=full_cards)
 
     history = list(bundle.history)
     while history:
         history.pop(0)
         layers = _layers(bundle, bundle.cards, history, full_cards=0)
         if _tokens(layers) <= bundle.token_budget:
-            return _messages(layers)
+            return Layout(cards=bundle.cards, history=tuple(history), full_cards=0)
 
     # Best-first, so popping the tail drops the match the search was least
     # confident about — the cheapest thing to be wrong about.
@@ -721,15 +771,9 @@ def render(bundle: ContextBundle) -> list[Message]:
         cards.pop()
         layers = _layers(bundle, cards, (), full_cards=0)
         if _tokens(layers) <= bundle.token_budget:
-            return _messages(layers)
+            return Layout(cards=tuple(cards), history=(), full_cards=0)
 
-    layers = _layers(bundle, (), (), full_cards=0)
-    if _tokens(layers) > bundle.token_budget:
-        raise ContextTooLargeError(
-            f"the platform rules and the question alone need {_tokens(layers)} tokens "
-            f"against a budget of {bundle.token_budget}"
-        )
-    return _messages(layers)
+    return Layout(cards=(), history=(), full_cards=0)
 
 
 def _tokens(layers: Sequence[Layer]) -> int:

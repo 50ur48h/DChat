@@ -68,6 +68,7 @@ from dataagent.agent.context import (
     ContextBundle,
     HistoryTurn,
     build_context,
+    chosen,
     history_block,
 )
 from dataagent.agent.coverage import (
@@ -350,35 +351,6 @@ async def _investigate(
     ]
     state.as_of = bundle.as_of.isoformat()
     await _checkpoint(context, working)
-    await events.emit(
-        "context_selected",
-        {
-            "tables": list(bundle.table_names),
-            "restrictions": len(bundle.restrictions),
-            # How much of the thread this run was given, and whether the thread
-            # is what found the tables (D-029). Both belong in the trace: a
-            # follow-up answered from three turns of context is a different act
-            # from one answered cold, and nothing else would say which happened.
-            "history_turns": len(bundle.history),
-            # Which definitions governed this run, and how many there were to
-            # match (**B-087**). Emitted even when the list is empty, because an
-            # empty list beside a non-zero count is the whole finding.
-            "definitions_applied": list(state.applied_definitions),
-            "definitions_available": state.definitions_available,
-            "tables_found_via": "thread" if bundle.cards_from_thread else "question",
-            # Which arm of the card search reached each table (**B-018**).
-            # `tables_found_via` says which *words* chose them; this says by
-            # which *mechanism*, and a run whose tables all came from the
-            # lexical arm on a deployment that has an embedder is a retrieval
-            # regression with no other symptom.
-            "tables_found_by": {card.qualified: card.found_by for card in bundle.cards},
-            # In the trace because a person reading an answer about "last month"
-            # is owed the date that phrase was resolved against (D-027). It is
-            # also the only way to tell a stale answer from a wrong one.
-            "as_of": bundle.as_of.isoformat(),
-        },
-    )
-
     # The join graph, loaded once. The pairs that cannot be joined are told to
     # the planner **as fact** (4.3), so a well-behaved model avoids the dead end
     # rather than being caught in it — and the loop still checks every proposed
@@ -431,6 +403,46 @@ async def _investigate(
             modes=lambda card: provenance.get(card.qualified, ()),
             answers_questions=lambda card: offers_measures(card.card_text),
         ),
+    )
+
+    layout = chosen(bundle)
+    await events.emit(
+        "context_selected",
+        {
+            "tables": list(bundle.table_names),
+            # **What the prompt will carry, not what the search returned**
+            # (**B-160**). `render`'s ladder gives up cards when the budget
+            # bites, and this event is the one a person reads — so it asked
+            # `chosen` the same question the prompt will, rather than
+            # reporting a number that was true one step earlier. Emitted
+            # after the provenance reorder for the same reason: the order
+            # here is the order the model sees.
+            "tables_in_full": layout.in_full,
+            "tables_in_outline": layout.in_outline,
+            "tables_dropped": len(bundle.cards) - len(layout.cards),
+            "restrictions": len(bundle.restrictions),
+            # How much of the thread this run was given, and whether the thread
+            # is what found the tables (D-029). Both belong in the trace: a
+            # follow-up answered from three turns of context is a different act
+            # from one answered cold, and nothing else would say which happened.
+            "history_turns": len(bundle.history),
+            # Which definitions governed this run, and how many there were to
+            # match (**B-087**). Emitted even when the list is empty, because an
+            # empty list beside a non-zero count is the whole finding.
+            "definitions_applied": list(state.applied_definitions),
+            "definitions_available": state.definitions_available,
+            "tables_found_via": "thread" if bundle.cards_from_thread else "question",
+            # Which arm of the card search reached each table (**B-018**).
+            # `tables_found_via` says which *words* chose them; this says by
+            # which *mechanism*, and a run whose tables all came from the
+            # lexical arm on a deployment that has an embedder is a retrieval
+            # regression with no other symptom.
+            "tables_found_by": {card.qualified: card.found_by for card in bundle.cards},
+            # In the trace because a person reading an answer about "last month"
+            # is owed the date that phrase was resolved against (D-027). It is
+            # also the only way to tell a stale answer from a wrong one.
+            "as_of": bundle.as_of.isoformat(),
+        },
     )
 
     state.capability = {

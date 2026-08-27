@@ -173,3 +173,130 @@ describe("the period check is legible, including when it could not run", () => {
     expect(build("answer_composed", { limitations: 0 }).rest).not.toContain("period");
   });
 });
+
+describe("the trace spends what the events already carry", () => {
+  // WP13.21. Every field read below has been in the payload since long before
+  // the sentence said it out loud — "what it considered" and "what it ruled
+  // out" were being discarded at render time. No new emit-time field is read.
+
+  it("says how much of each table the model actually saw", () => {
+    // **B-160.** "25 tables" said nothing about detail, and it described the
+    // search's result rather than the prompt's.
+    const step = build("context_selected", {
+      tables: ["public.fact_sale", "public.dim_outlet", "public.dim_calendar"],
+      tables_in_full: 1,
+      tables_in_outline: 2,
+      tables_dropped: 0,
+    });
+
+    expect(step.rest).toContain("1 in full and 2 in outline");
+  });
+
+  it("says when a table matched and would not fit", () => {
+    const step = build("context_selected", {
+      tables: ["public.fact_sale"],
+      tables_in_full: 1,
+      tables_in_outline: 0,
+      tables_dropped: 3,
+    });
+
+    expect(step.rest).toContain("3 tables matched but would not fit");
+  });
+
+  it("says when the thread chose the tables rather than the question", () => {
+    const step = build("context_selected", {
+      tables: ["public.fact_sale"],
+      tables_found_via: "thread",
+    });
+
+    expect(step.rest).toContain("named no table of its own");
+  });
+
+  it("says how many tables were found by meaning rather than by wording", () => {
+    const step = build("context_selected", {
+      tables: ["public.fact_sale", "public.dim_outlet"],
+      tables_found_by: { "public.fact_sale": "vector", "public.dim_outlet": "lexical" },
+    });
+
+    expect(step.rest).toContain("1 of them was found by meaning");
+  });
+
+  it("tells no definitions matched apart from having no definitions", () => {
+    // **B-087's finding, said out loud.** An empty list beside a non-zero count
+    // is the whole point.
+    const none = build("context_selected", {
+      tables: ["public.fact_sale"],
+      definitions_applied: [],
+      definitions_available: 18,
+    });
+    const some = build("context_selected", {
+      tables: ["public.fact_sale"],
+      definitions_applied: ["net revenue"],
+      definitions_available: 18,
+    });
+
+    expect(none.rest).toContain("None of your 18 definitions matched");
+    expect(some.rest).toContain("1 of your 18 definitions applied");
+  });
+
+  it("mentions restricted columns and earlier turns when there are any", () => {
+    const step = build("context_selected", {
+      tables: ["public.fact_sale"],
+      restrictions: 2,
+      history_turns: 3,
+    });
+
+    expect(step.rest).toContain("2 columns are restricted");
+    expect(step.rest).toContain("3 earlier turns");
+  });
+
+  it("stays quiet about every count that is zero", () => {
+    // A sentence for each absent thing is how a reader learns to skip the panel.
+    const step = build("context_selected", {
+      tables: ["public.fact_sale"],
+      tables_dropped: 0,
+      restrictions: 0,
+      history_turns: 0,
+      definitions_available: 0,
+    });
+
+    expect(step.rest).not.toContain("would not fit");
+    expect(step.rest).not.toContain("restricted");
+    expect(step.rest).not.toContain("earlier turn");
+    expect(step.rest).not.toContain("definitions");
+  });
+
+  it("names what the capability check ruled out, not only that it ran", () => {
+    const step = build("capability_checked", {
+      answerable: true,
+      unreachable: ["fact_sale ↔ fact_purchase"],
+    });
+
+    expect(step.rest).toContain("Ruled out joining");
+    expect(step.rest).toContain("fact_sale ↔ fact_purchase");
+  });
+
+  it("says which pairs can only be compared, not joined", () => {
+    const step = build("capability_checked", {
+      answerable: true,
+      comparable: ["fact_sale ↔ fact_purchase via dim_business"],
+    });
+
+    expect(step.rest).toContain("compared side by side");
+  });
+
+  it("tells an unprofiled source apart from a checked one", () => {
+    // B-157/D-059: the key is present even when null, and the two must not read
+    // the same.
+    const known = build("capability_checked", {
+      answerable: true,
+      available_period: "2025-01 to 2025-12",
+    });
+    const unknown = build("capability_checked", { answerable: true, available_period: null });
+    const absent = build("capability_checked", { answerable: true });
+
+    expect(known.rest).toContain("2025-01 to 2025-12");
+    expect(unknown.rest).toContain("has been profiled");
+    expect(absent.rest).not.toContain("profiled");
+  });
+});

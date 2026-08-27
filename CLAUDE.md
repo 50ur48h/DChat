@@ -192,7 +192,11 @@ against the model the product parses it into.
   reported *"no tests"* with one worker error on 2026-08-27. `--pool=threads`
   ran the same file to 48 passing tests in 6s. The forks pool spawns a process
   per file and processes are what this host cannot afford; threads share one.
-  Reach for `--pool=threads` before concluding anything about the suite.
+  Reach for `--pool=threads` before concluding anything about the suite —
+  **but it is a better bet, not a fix.** The same command reported *"no tests"*
+  once on 2026-08-28 and then 52 passing on an immediate retry, with nothing
+  changed. **A bare retry is the cheapest diagnostic here**: a real failure
+  fails twice, and this one does not.
 - Git Bash rewrites any argument starting with `/` into a `C:\...` path, so a
   `docker exec … sh -c '/opt/…'` arrives as nonsense. Start such command strings
   with a word (`exec /opt/…`), as `ops/scripts/seed_mssql.sh` does.

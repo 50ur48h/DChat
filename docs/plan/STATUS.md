@@ -109,7 +109,17 @@ Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-28 by Claude Code (**The answer's shape is the platform's
+Last updated: 2026-08-28 by Claude Code (**The trace spends what the events
+              already carried.** The last of the owner's three. No new emit-time
+              field: `context_selected` has held `definitions_available`,
+              `tables_found_via`, `tables_found_by`, `restrictions` and
+              `history_turns` all along and said none of them. **B-160 closed by
+              refactoring rather than duplicating** — `render`'s ladder became
+              `context.chosen`, so the prompt and the trace are two consumers of
+              one decision. And the same defect turned up one field along: the
+              event was emitted *before* WP13.14's provenance reorder, so the
+              model saw one table order and the trace showed another.
+              Previously: **The answer's shape is the platform's
               choice now.** A date against a number is a line, a category against
               a number is a bar, and a spare category becomes a **series** — so
               *outlet A and outlet B monthly* is one chart with two lines rather
@@ -325,6 +335,53 @@ customer's data. It narrows to the owner's address plus Azure services once the
 swap is confirmed. Note the dev host's public address **changed mid-session**
 (171.79.38.47 → 103.168.16.2), so the rule has to be written from whatever it is
 on the day rather than from a value recorded here.
+
+## WP13.21 — the trace spends what the events already carry
+
+The last of the three the owner ordered. **Web only, no new emit-time field** —
+the real *why a table won* is not in any payload, and the only way to produce it
+today would be to smuggle model reasoning into one. The version worth showing
+falls out of WP13.14 and WP13.20 as platform-computed reasons.
+
+**The payloads were richer than the sentences.** `context_selected` has carried
+`definitions_available`, `tables_found_via`, `tables_found_by`, `history_turns`,
+`restrictions` and `as_of` since long before it said any of them out loud;
+`capability_checked` has carried the `comparable` pairs with the `via` table that
+makes each one a chasm. *What it considered* and *what it ruled out* were being
+discarded at render time.
+
+So the panel now says things like *"and picked 25 tables — 5 in full and 20 in
+outline"*, *"the question named no table of its own, so the earlier turns chose
+them"*, *"3 of them were found by meaning rather than by matching a word"*,
+*"None of your 18 definitions matched this question"* (B-087's finding, said out
+loud), and *"Ruled out joining fact_sale ↔ fact_purchase: the catalogue records no
+link."* Every count that is zero stays silent, because a sentence for each absent
+thing is how a reader learns to skip the panel.
+
+### B-160, and the same defect found one field along
+
+`context_selected` reported the tables the **search** returned; `render`'s ladder
+gives some up when the budget bites, and this event is the one a person reads.
+Fixed as a **refactor rather than a second implementation**: `render`'s ladder is
+now `context.chosen`, which returns the `Layout` the prompt will carry, and
+`render` and the trace are two consumers of one decision. A duplicate ladder
+would have drifted and the trace would be confidently wrong again.
+
+**And while fixing it, the same shape one field along.** The event was emitted
+*before* WP13.14's provenance reorder, so the table list it carried — which the
+panel renders in order, first three named — was the order from **before** the
+platform reordered it. The model saw one order and the trace showed another. The
+emit moved after the reorder.
+
+### Evidence
+
+* `trace.test.tsx` **62 passed**, including that every zero count stays quiet and
+  that an unprofiled source reads differently from a checked one.
+* `test_trace_vocabulary.py` **2 passed** — the both-ways assertion is untouched,
+  which is the guard that caught `knowledge_consulted` rendering raw for three
+  weeks.
+* `tests/agent/test_context.py` **19 passed** after the `chosen` extraction.
+* `tsc`, `eslint`, `ruff`, `pyright` clean.
 
 ## WP13.20 — the answer's shape, chosen by the platform
 
