@@ -903,6 +903,51 @@ the catalog, and the *control flow* is not taken at all (D-053).
 Ordered. WP13.12 first because it is the only one of the three that is currently
 producing a wrong answer rather than an absent one.
 
+### WP13.15 — a refresh notices that the platform changed — `p13.15-discovery-version-stamp`
+Implements **D-054**. Closes **B-149**; opens nothing it does not also file.
+
+**Ordered before WP13.12–13.14 if any of them ship first**, for a reason that is
+not about importance: every one of those three adds something to what discovery
+writes, so every one of them lands with the same defect unless this is in place.
+WP13.13 in particular would import a customer's join catalog into snapshots that
+no refresh will ever rebuild.
+
+- **The stamp.** `catalog_snapshots` gains the discovery-logic version that built
+  it (migration + model). One module-level constant is the source of truth;
+  `_unchanged` becomes *hashes match **and** stamp matches*. Comparable before
+  any scan, which is the whole point — the expensive output must never be
+  computed to decide whether to compute it.
+- **The reordering.** `_crawl` currently runs inference *before* `_store` decides
+  anything, so a no-op refresh scans 251 columns and up to 97 containment
+  queries against a customer's database and discards the lot. Split it: the
+  schema read stays where it is, the measurement sweep moves behind the change
+  decision. **Accept:** a refresh that finds nothing issues **no** counting or
+  containment query at all — asserted on the statements the connector was asked
+  for, not on elapsed time.
+- **`force`, as an escape hatch only.** An explicit parameter on the refresh
+  route, Contributor-gated like the route already is, audited as a distinct
+  action so a forced rebuild is visible in `audit_log` rather than looking like
+  an ordinary one. **It is not the mechanism** (D-054): a review that treats
+  `force` as the answer to "how does a new capability reach existing catalogs"
+  has read the decision backwards.
+- **Staleness is *not* in this work package** and the PR must say so. It is
+  **B-150**, it is a different problem, and the failure mode of quietly folding
+  it in is a stamp that is believed to guarantee freshness it cannot.
+
+**Tests/Accept:**
+- The stamp changes → a refresh with an identical schema rebuilds, and the new
+  snapshot carries inferred relationships the old one lacked. **This is the
+  regression test for B-149 and it must fail against today's code.**
+- The stamp matches and the schema matches → still skipped, still cheap, and the
+  no-query assertion above holds.
+- **Live-path proof** (CLAUDE.md): driven through `discover()` against the
+  `undeclared_customer_database` fixture, then read back through
+  `load_join_graph` — not by calling `_unchanged` directly. A test that proves
+  the comparison function returns False proves nothing about whether a catalog
+  ever gets rebuilt.
+- A test asserting **every** snapshot is written with a stamp, so the column
+  cannot start arriving null and turn the conjunction into a no-op.
+
 ### WP13.12 — the period a question asks for, checked against the data — `p13.12-period-coverage`
 Implements **D-051**. Closes nothing; this is a live defect found on the deployed
 dev app (*"sales last month"* → July 2026, against data ending 2025-12-31).

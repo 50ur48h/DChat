@@ -121,6 +121,85 @@ may be joined — and one more caveat the composer can attach: *the data diction
 says these join; we checked and found no unmatched values*, which is a different
 claim from either a foreign key or an inference.
 
+## D-054 — a catalog is a function of the schema **and** of the logic that read it
+Date: 2026-08-27 · Phase: 13 · PR: this one (spec only; built as WP13.15)
+Context: D-050 shipped measured inference on 2026-08-26 and dev was deployed with
+it on 2026-08-27. Clicking **Refresh catalog** on the MiseQ source answered *"No
+change. The catalog is still version 1, describing 29 tables."* — and no inferred
+relationship was written. The database had not changed; the platform had.
+
+**The finding is not the skip. It is that a stated invariant was quietly
+falsified by a feature, and nothing noticed.** `structural_hash` says, in its own
+docstring:
+
+> *"Everything WP4.1 stores about a table goes in, and nothing else does — so two
+> crawls that agree on this hash agree on every catalog row, and a refresh can
+> skip the table without hoping."*
+
+That was **true when it was written and correct as reasoning**. The hash covers
+table name, kind, comment, and every column's name, ordinal, type, nullability,
+primary-key flag and comment — which was exactly what a snapshot stored at WP4.1.
+D-050 then added something to the snapshot that is *not* a function of table
+shape, and the sentence became false three days later. Nothing failed, no test
+went red, and the only symptom was a feature that could never reach any catalog
+built before it.
+
+**And it is worse than a skip**, which is the part worth reading twice. Inference
+runs inside `_crawl`, and `_crawl` runs *before* `_store` decides whether anything
+changed. So the refresh opened the customer's database, scanned 251 columns for
+distinct counts, ran up to 97 containment scans — and then discarded every result
+because the hashes matched. The platform is paying the full price of the
+capability on every no-op refresh and storing none of it.
+Options: (a) a `force` flag, and rely on someone remembering; (b) fold the
+inference result into the change comparison; (c) stamp each snapshot with the
+discovery logic that built it, and treat a different stamp as a change.
+Decision: **(c), with (a) kept as an operator escape hatch and never as the
+mechanism.**
+
+(b) is tempting and wrong: the inferred edges are the *expensive* output, so
+comparing them means computing them, which is the cost this is trying not to pay
+twice. The stamp is comparable **before** any scan.
+
+(a) alone is the pattern this repository keeps filing bugs about — correctness
+that depends on a person remembering, on a path where forgetting is silent. It is
+genuinely useful for *"show me it working now"*, so it ships; it is not what makes
+the guarantee.
+
+**What the stamp is, precisely.** A snapshot records the version of the discovery
+logic that produced it. `_unchanged` becomes a conjunction: the schema hashes
+match **and** the stamp matches. Bumping the constant invalidates every existing
+catalog's skip exactly once, and the next refresh rebuilds with the current logic.
+The bump is one line, greppable, and visible in review — which is the strongest
+property available here, and worth stating plainly rather than overselling: **a
+capability whose author forgets to bump is exactly as invisible as today.** The
+stamp converts a permanent silent gap into a gap that lasts until someone bumps a
+constant, and that is a real improvement rather than a proof.
+Consequences: three things, kept separate because they expire differently.
+
+* **The sweep moves after the change decision** (WP13.15), so a no-op refresh
+  costs a schema read rather than a measurement run against someone's database.
+  This is a correctness-neutral change with a real operational cost attached to
+  *not* doing it.
+* **Staleness is not fixed by any of this and must not be sold as if it were**
+  (**B-150**). `structural_hash` deliberately excludes data — *"a table whose
+  contents changed has not changed shape"* — while an inferred edge is a claim
+  **about data**. An edge measured in January can be false in June with a
+  byte-identical schema, and both the hash and the stamp will match. That is a
+  different problem needing a different answer.
+* **The class has at least one other live instance** (**B-151**):
+  `inference.py` calibrates its confidence constants against
+  `capability.MIN_CONFIDENCE` in a **comment**, and nothing couples them. Raising
+  that threshold above 0.95 would silently drop every inferred edge out of the
+  join graph while discovery kept writing them and the catalog kept showing them.
+
+The wider question the owner asked — whether a documented invariant with nothing
+enforcing it has other instances — was **checked rather than assumed**, and the
+answer is reassuring about the habit and not about the exceptions.
+`TENANT_TABLES`, `EVENT_TYPES` and `OUTCOME_STATES` each have a test that counts
+them, and `RELATIONSHIP_KINDS` builds its own CHECK from one constant so it cannot
+drift. The two found without a counter are the two above. **The habit is sound;
+these are the gaps in it.**
+
 ## D-053 — their prose becomes an enforced object where it can be, and knowledge where it cannot
 Date: 2026-08-27 · Phase: 13 · PR: this one (spec only; built as WP13.14)
 Context: the rest of the MiseQ contract — `v_question_playbook` (12 archetypes),
