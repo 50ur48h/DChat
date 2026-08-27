@@ -276,12 +276,26 @@ the pattern is anchored so a nested object *inside* a builder (`said`, in
 
 ### Evidence
 
-* `make lint.web`, `make typecheck.web` green; `make test.web` **188 passed**.
+* `make lint.web`, `make typecheck.web` green; `make test.web` **236 passed**,
+  including a new `trace.test.tsx`.
+* **The first version of this vocabulary shipped a bug, and the guard exists
+  because of it.** `knowledge_consulted` joined two optional parts and appended a
+  full stop, so an event carrying neither rendered a bare `"."` — the module's own
+  *"quieter, not wrong"* rule, broken by the code that states it. The new test
+  sweeps **every** builder with an empty payload, which is the case no fixture
+  produces and no browser run exercises, and it was **run against the old code
+  first, where it fails on exactly that event by name**. A second defect went with
+  it: `step_started` tested a step number for truthiness, so step `0` would have
+  silently lost its detail.
 * `test_trace_vocabulary.py` green, both directions.
-* `make test.web.e2e` 14/16. **Both failures are B-140's signature** — they die
-  in `openConversation` on `getByLabel("Ask a question")` after `signIn`, before
-  reaching any trace assertion — and were re-run against `main` to confirm rather
-  than assumed.
+* `make test.web.e2e` **16/16**, and the way that number was reached is worth
+  keeping. One run gave 14/16, and the two failures were attributed to B-140 —
+  wrongly: both passed on `main`. The comparison that settled it had to be
+  like-for-like, because the first control ran two tests in isolation against a
+  full suite: `main` isolated 2/2, branch isolated 2/2, `main` full **16/16**,
+  branch full **14/16 then 16/16**. Four runs of five clean, and the one failure
+  timed out at sign-in without reaching a trace assertion. **One flaky run, not
+  proof of a flake** — recorded as the weaker claim on purpose.
 * Seven assertions in `e2e/conversation.spec.ts` and `e2e-compose/smoke.spec.ts`
   updated to the new sentences. `query_executed` must still appear **nowhere** on
   the page: the machine name never reaches a person.

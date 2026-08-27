@@ -96,7 +96,7 @@ function joinNames(names: string[], limit = 3): string {
   return names.length > limit ? `${shown} and ${names.length - limit} more` : shown;
 }
 
-const STEP_SENTENCES: Record<string, (payload: Payload) => Step> = {
+export const STEP_SENTENCES: Record<string, (payload: Payload) => Step> = {
   run_started: () => ({ lead: "Picked up the question", rest: "" }),
 
   intent_classified: () => ({
@@ -151,7 +151,7 @@ const STEP_SENTENCES: Record<string, (payload: Payload) => Step> = {
     const iteration = num(payload, "iteration");
     return {
       lead: "Started another round of work",
-      rest: iteration ? `— step ${iteration}.` : "",
+      rest: iteration === null ? "" : `— step ${iteration}.`,
     };
   },
 
@@ -160,13 +160,17 @@ const STEP_SENTENCES: Record<string, (payload: Payload) => Step> = {
   knowledge_consulted: (payload) => {
     const term = str(payload, "term");
     const passages = num(payload, "passages");
-    const found = passages === null ? "" : `found ${plural(passages, "passage", "passages")}`;
+    const parts = [
+      term ? `to see what "${term}" means here` : null,
+      passages === null ? null : `found ${plural(passages, "passage", "passages")}`,
+    ].filter((part): part is string => part !== null);
+    // **Empty means empty, not a full stop.** Joining and appending "." wrote a
+    // bare "." when the payload carried neither field — which is precisely the
+    // "quieter, not wrong" rule this module states, broken by the code that
+    // states it.
     return {
       lead: "Looked the wording up in your own documents",
-      rest: [term ? `to see what "${term}" means here` : null, found]
-        .filter(Boolean)
-        .join(", ")
-        .concat("."),
+      rest: parts.length > 0 ? `${parts.join(", ")}.` : "",
     };
   },
 
@@ -295,7 +299,7 @@ const STEP_SENTENCES: Record<string, (payload: Payload) => Step> = {
  * for events from a newer server rather than for events this repository added
  * and forgot.
  */
-function sentence(event: RunEvent): Step {
+export function sentence(event: RunEvent): Step {
   const build = STEP_SENTENCES[event.type];
   return build ? build(event.payload as Payload) : { lead: event.type, rest: "" };
 }
