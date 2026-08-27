@@ -1102,11 +1102,35 @@ fix and the one the partner's contract asks for by name.
 1. **The coverage claim, checked against the catalog — the general mechanism
    (D-058).** An answer asserting the limits of available data is compared with
    `CatalogColumn.min_val`/`.max_val` — engine-supplied, exact (**B-051** forbids
-   a derived range), masked on the way in — across every **candidate** table, not
-   only the one queried. A claim narrower than the source is a **finding**.
-   Deterministic and not overridable by the model, for the reason the capability
-   check is not. **An unprofiled source abstains, visibly** (D-031's rule). Works
-   on any database, including one with no provenance column at all.
+   a derived range), masked on the way in. A claim narrower than what those
+   ranges say is a **finding**. Deterministic and not overridable by the model,
+   for the reason the capability check is not. Works on any database, including
+   one with no provenance column at all.
+
+   * **The candidate set is the context bundle, not the catalog** (owner,
+     2026-08-27). Comparing against all 41 tables would flag claims that are true
+     about the tables actually in play, and **a false block is this component's
+     characteristic failure**. If the right table was never in the bundle, that is
+     a *retrieval* problem and surfaces as one (**B-159**) — never as a coverage
+     violation.
+   * **This alone closes B-157's two worst failures**, and the evidence is the
+     run's own: of the five tables it touched, `dim_calendar.cal_date` and
+     `fact_labour_shift.shift_date` both run **2025-01-01 to 2025-12-31** and
+     `fact_shrinkage_cause.month` runs **2025-01 to 2025-12**. *"The available
+     monthly data covers January 2023 through December 2024"* is false **about the
+     bundle the run had in front of it** — with no `fact_sale` needed and no
+     `source_mode` needed. The Oct-Dec 2025 refusal falls to the same check.
+   * **A period column that is text has no range at all, and that is deliberate.**
+     `profiler.wants_range` covers date/time/numeric only; free text gets no
+     min/max rather than a sampled one (**B-051**). `fact_sale_monthly_history.
+     year_month` and `fact_shrinkage_cause.month` are both **TEXT** holding
+     `'2023-01'`, so the profile stores nothing for exactly the columns whose
+     range the answer was quoting. The check survives here because
+     `dim_calendar.cal_date` is a real `date` — but a source whose every period
+     column is text leaves it **blind, and blind must abstain visibly** (D-031's
+     rule) rather than pass. Do not widen `wants_range` to text to fix this: that
+     reopens B-051.
+   * **An unprofiled source abstains, visibly**, for the same reason.
 2. **`source_mode` → a ranking input to table selection.** Where two tables can
    answer the same question, `real` outranks `derived` outranks `synthetic`, as
    **context, not a prohibition**: the modelled table stays reachable for a
