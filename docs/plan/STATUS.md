@@ -297,6 +297,84 @@ swap is confirmed. Note the dev host's public address **changed mid-session**
 (171.79.38.47 → 103.168.16.2), so the rule has to be written from whatever it is
 on the day rather than from a value recorded here.
 
+## B-159 — retrieval handed the model five tables out of forty-one
+
+B-157's wrong answer had a cause one layer further up, and the owner's call was
+to fix the cause before the symptom. `build_context` defaulted to **`limit=5`**
+and `runner.py` never overrode it, so a 41-table source offered the model **five
+cards** — and for *"tell me monthly wise for whatever year of data we have"*
+`fact_sale`, the only `real` sales table, was not one of them.
+
+**Reproduced before anything was changed**, by importing `build_card`,
+`semantic_role_of` and `_or_terms` and running both arms the way `search_cards`
+does — the lexical arm through PostgreSQL's own `ts_rank_cd`, the vector arm
+through the same `text-embedding-3-small` the deployment uses, merged by RRF at
+k=60:
+
+| arm | result |
+|---|---|
+| strict `websearch_to_tsquery` (AND) | matched **nothing** |
+| OR fallback (B-041) | 4 cards of 41, led by `fact_sale_monthly_history`; **`fact_sale` absent** |
+| vector | `fact_sale` at rank **8** of 25 |
+| merged (RRF) | `fact_sale` at **11**, and the bundle takes 5 |
+
+**The measurable signal already existed and was being drowned by the one that is
+not evidence.** RRF scores a card once per arm, so the three fallback hits — which
+appear in both arms — collect roughly double and are promoted above vector-only
+hits. `fact_sale_monthly_history` came first for having *"monthly"* in its name,
+which is the move `inference.py` refuses by construction: *"nothing here reads a
+column name."*
+
+### Two fixes, because one was not enough
+
+**The OR fallback does not vote when the vector arm returned anything.** B-041
+predates B-018's hybrid search: the fallback was written for the case where
+lexical matched nothing and there *was* nothing else to ask, and it keeps exactly
+that job. Both directions are asserted on `CardHit.found_by`, because only
+together do they say *when* it runs — with an embedder every hit is `vector`;
+with none the fallback still answers, which is the half that must not regress.
+
+**The card limit is no longer a constant tuned to a catalog size.** Measured on
+the real 41 cards: a full card is a median **195** tokens, a headline **68**, and
+**all 41 headline cards cost 2,805 of a 6,000 budget**. `limit=5` — chosen against
+thirteen-table demo catalogs — was not protecting the budget; it was discarding
+tables the budget had room for. Raised to `CANDIDATE_DEPTH` (25) and handed to
+`render`, which already measures. A number that scaled with catalog size would
+have been another guess.
+
+**And `render` gained the rung it lacked.** It went from *every card in full*
+straight to *every card as a headline*, so raising the limit on its own would have
+**taken detail away** from the SQL role in exchange for breadth: 25 full cards
+cost 5,822 tokens and do not fit. Five full beside twenty headlines cost about
+2,900 and do. The detail it already had is kept and the breadth is added beside
+it.
+
+### What this does not claim
+
+Even at vector rank 8, `fact_sale` is **not well retrieved**. The question was
+genuinely ambiguous — it said *"monthly"* and *"year"* — and
+`fact_sale_monthly_history` is honestly the nearest match to those words. Breaking
+that tie is provenance (D-058, WP13.14), and it can only do so once the table is
+in the bundle at all.
+
+**Retrieval's job is to put the right table in the bundle, not to pick the
+winner** (owner, 2026-08-27). A card search ranks by wording and by cosine
+distance, and neither is evidence about which table *answers* a question — they
+are evidence about which tables are worth showing the model and the deterministic
+checks. Choosing belongs to things that can justify a choice: the join graph, a
+semantic definition, provenance. Recorded in `context.py`'s own docstring, because
+the alternative is seductive: a similarity score is a number, and a number looks
+like a decision.
+
+### Evidence
+
+* `tests/agent/test_context.py` **19 passed**, including the new rung — and
+  proven against the defect: removing **only** the middle rung fails exactly one
+  test, on the assertion that expresses it, while the budget-fits-everything test
+  stays green.
+* `tests/catalog/test_card_embeddings.py` — the fallback's two directions.
+* `ruff`, `pyright` clean.
+
 ## MiseQ v6.4, 2026-08-27 — loaded beside the live source, and it deleted a work package
 
 The partner's third drop declares what the second only described: **57 foreign

@@ -23,6 +23,7 @@ import pytest
 
 from dataagent.agent.context import (
     CARD_HEADLINE_CHARS,
+    CARDS_KEPT_IN_FULL,
     PLATFORM_RULES,
     REFERENCE_FRAME,
     TODAY_RULE,
@@ -174,6 +175,58 @@ def test_cards_shrink_to_headlines_before_any_of_them_is_dropped() -> None:
     assert "public.stores" in system
     assert "public.staff" in system, "a card was dropped while another was still full-length"
     assert "…" in system, "nothing was shortened"
+
+
+def test_the_best_cards_keep_their_detail_while_the_rest_go_to_outline() -> None:
+    """**B-159**, and the rung this ladder did not have.
+
+    It went from every card in full straight to every card as a headline, which
+    is a false economy whenever the budget has room for a mixture — and at the
+    sizes this runs at, it does. Measured on the 41-table `miseq_v64` catalog: a
+    full card is a median 195 tokens and a headline 68, so five full plus twenty
+    headlines is about 2,900 against a budget of 6,000 while twenty-five in full
+    is 5,822 and does not fit.
+
+    Why it matters beyond tidiness: without this rung, raising the card limit
+    would have *taken detail away* from the SQL role in exchange for breadth. The
+    tables it could not see before are added beside the detail it already had,
+    rather than instead of it.
+
+    Each body carries a distinct tail, so "rendered in full" is a fact about that
+    card rather than about the prompt's length.
+    """
+    filler = "detail " * 100
+    cards = tuple(
+        _card(
+            f"t{index}", rank=1.0 - index / 100, body=f"t{index} is a table. {filler} TAIL{index}"
+        )
+        for index in range(8)
+    )
+
+    # Between "all eight in full" and "five in full, three in outline".
+    system = _system(ContextBundle(question="q", cards=cards, token_budget=_floor() + 1200))
+
+    for index in range(8):
+        assert f"public.t{index}" in system, f"t{index} was dropped rather than shortened"
+    for index in range(CARDS_KEPT_IN_FULL):
+        assert f"TAIL{index}" in system, f"t{index} lost its detail while a worse card kept theirs"
+    for index in range(CARDS_KEPT_IN_FULL, 8):
+        assert f"TAIL{index}" not in system, f"t{index} kept its detail past the cutoff"
+
+
+def test_a_budget_that_fits_everything_shortens_nothing() -> None:
+    """The middle rung is a fallback, not a policy. With room for every card in
+    full, the first rung still wins and no card is shortened — otherwise adding
+    the rung would have quietly capped detail on every small catalog."""
+    filler = "detail " * 20
+    cards = tuple(
+        _card(f"t{index}", body=f"t{index} is a table. {filler} TAIL{index}") for index in range(8)
+    )
+
+    system = _system(ContextBundle(question="q", cards=cards, token_budget=_floor() + 4000))
+
+    assert all(f"TAIL{index}" in system for index in range(8))
+    assert "…" not in system, "a card was shortened while the budget had room for all of them"
 
 
 def test_the_lowest_ranked_card_is_dropped_first_once_headlines_do_not_fit() -> None:

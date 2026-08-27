@@ -23,9 +23,22 @@ DAL refusing anything the catalog cannot ground.
 overflows silently drops something, and *which* something decides whether the
 answer is wrong or merely thinner. Cards shrink to their headline before any of
 them is dropped, because a model that cannot see a table will not ask about it —
-six tables in outline beat two in full. Only then are cards dropped, from the
-lowest search rank up. L0 and L5 are never touched, and an assembly that cannot
-fit even those raises rather than quietly losing a safety rule.
+six tables in outline beat two in full. Shrinking happens **in stages**: the best
+few keep their detail while the rest go to outline, and only if that still
+overflows does everything become an outline (**B-159**). Only then are cards
+dropped, from the lowest search rank up. L0 and L5 are never touched, and an
+assembly that cannot fit even those raises rather than quietly losing a safety
+rule.
+
+**Retrieval puts tables in the bundle; it does not pick the winner** (**B-159**).
+The card search ranks by wording and by cosine distance, and neither is evidence
+about which table *answers* the question — they are evidence about which tables
+are worth putting in front of the model and the deterministic checks. Choosing
+between them belongs to things that can justify a choice: the join graph, a
+semantic definition, provenance (D-058). This matters because the alternative is
+seductive — a similarity score is a number, and a number looks like a decision.
+On MiseQ that is exactly how a synthetic back-cast came first and the only real
+sales table was never shown at all.
 
 **L1, L2 and L3 have no store yet.** `agent_configs` and `skills` are in
 architecture 10.1 and 4.7, and no phase in the plan owns them (**B-038**). The
@@ -223,6 +236,27 @@ PROTECTED_LAYERS = ("L0", "L5")
 #: How much of a card survives the first squeeze: enough to know what the table
 #: is and what it joins to.
 CARD_HEADLINE_CHARS = 240
+
+#: How many cards survive the first squeeze **in full**, before the rest are cut
+#: to their headline. The rung `render` did not have (**B-159**): it went from
+#: every card in full straight to every card as a headline, which is a false
+#: economy once the budget has room for both. Measured on the 41-table `miseq_v64`
+#: catalog — a full card is a median **195** tokens and a headline **68**, so five
+#: full plus twenty headlines is about **2,900** against a budget of 6,000, while
+#: twenty-five in full is 5,822 and does not fit. The detailed cards the SQL role
+#: was already getting are kept, and the tables it could not see before are added
+#: beside them.
+CARDS_KEPT_IN_FULL = 5
+
+#: How many cards to ask the catalog for. **Not a constant tuned to a catalog
+#: size** (B-159): it is a ceiling, and `render` below decides how many actually
+#: survive by measuring them against the token budget. The old value was `5`,
+#: chosen against thirteen-table demo catalogs, and on a 41-table source it was
+#: handing the model **five tables out of forty-one** while the budget had room
+#: for every one of them in outline — all 41 headline cards cost 2,805 tokens of
+#: 6,000. A number that scales with the catalog would be another guess; the
+#: budget is the real constraint and it is already measured.
+DEFAULT_CARD_LIMIT = 25
 
 
 @dataclass(frozen=True, slots=True)
@@ -457,7 +491,7 @@ def _layers(
     cards: Sequence[TableCard],
     history: Sequence[HistoryTurn],
     *,
-    headline_only: bool,
+    full_cards: int,
 ) -> list[Layer]:
     """The six layers in precedence order, with the empty ones omitted.
 
@@ -544,7 +578,7 @@ def _layers(
             )
         )
 
-    reference = _reference_body(cards, bundle.restrictions, headline_only=headline_only)
+    reference = _reference_body(cards, bundle.restrictions, full_cards=full_cards)
     if reference:
         layers.append(Layer(tag="L4", title="Reference data", body=reference))
 
@@ -591,14 +625,24 @@ def _reference_body(
     cards: Sequence[TableCard],
     restrictions: Sequence[ColumnRestriction],
     *,
-    headline_only: bool,
+    full_cards: int,
 ) -> str:
+    """``full_cards`` is how many of ``cards``, best first, render in full.
+
+    A count rather than the boolean this took before (**B-159**). Both ends are
+    still reachable — ``len(cards)`` for all of them, ``0`` for none — and the
+    useful middle now exists.
+    """
     if not cards and not restrictions:
         return ""
 
     parts = [REFERENCE_FRAME]
     if cards:
-        parts.append("\n\n".join(card.render(headline_only=headline_only) for card in cards))
+        parts.append(
+            "\n\n".join(
+                card.render(headline_only=index >= full_cards) for index, card in enumerate(cards)
+            )
+        )
     if restrictions:
         denied = [r.qualified for r in restrictions if r.policy == "deny"]
         masked = [r.qualified for r in restrictions if r.policy == "mask"]
@@ -624,14 +668,25 @@ def render(bundle: ContextBundle) -> list[Message]:
     first:
 
     1. every card in full;
-    2. every card shrunk to its headline;
-    3. earlier turns dropped, oldest first;
-    4. headline cards dropped from the lowest rank up.
+    2. the best ``CARDS_KEPT_IN_FULL`` in full and the rest as headlines;
+    3. every card shrunk to its headline;
+    4. earlier turns dropped, oldest first;
+    5. headline cards dropped from the lowest rank up.
 
     **Shrinking comes before dropping**, and that is a judgement rather than an
     accident: for writing SQL, knowing that six tables exist and what each one
     joins to is worth more than knowing two of them in full and not knowing the
     rest are there. A model that cannot see a table will not ask about it.
+
+    **Step 2 is new (B-159) and it is the one that stops step 1 being a cliff.**
+    This went straight from every card in full to every card as a headline, which
+    is a false economy whenever the budget has room for a mixture — and at the
+    sizes this actually runs at, it does. Measured on the 41-table `miseq_v64`
+    catalog: five full cards cost 1,553 tokens of 6,000, twenty-five full cost
+    5,822 and do not fit, and five full beside twenty headlines cost about 2,900
+    and do. Without this rung, raising the card limit would have *taken detail
+    away* from the SQL role in exchange for breadth; with it, the detail it
+    already had is kept and the breadth is added beside it.
 
     **The thread goes before a card does** (**D-029**). A follow-up read without
     its history is a question the model may misunderstand; a question with no
@@ -643,15 +698,19 @@ def render(bundle: ContextBundle) -> list[Message]:
     ``PROTECTED_LAYERS``. The *thread* is not protected, even though it renders
     inside L5: it is context, not the thing being asked.
     """
-    for headline_only in (False, True):
-        layers = _layers(bundle, bundle.cards, bundle.history, headline_only=headline_only)
+    # Descending, deduplicated: with five cards or fewer the middle rung is the
+    # same prompt as the first, and trying it twice would be a second identical
+    # token count rather than a second option.
+    rungs = sorted({len(bundle.cards), min(CARDS_KEPT_IN_FULL, len(bundle.cards)), 0}, reverse=True)
+    for full_cards in rungs:
+        layers = _layers(bundle, bundle.cards, bundle.history, full_cards=full_cards)
         if _tokens(layers) <= bundle.token_budget:
             return _messages(layers)
 
     history = list(bundle.history)
     while history:
         history.pop(0)
-        layers = _layers(bundle, bundle.cards, history, headline_only=True)
+        layers = _layers(bundle, bundle.cards, history, full_cards=0)
         if _tokens(layers) <= bundle.token_budget:
             return _messages(layers)
 
@@ -660,11 +719,11 @@ def render(bundle: ContextBundle) -> list[Message]:
     cards = sorted(bundle.cards, key=lambda card: card.rank, reverse=True)
     while cards:
         cards.pop()
-        layers = _layers(bundle, cards, (), headline_only=True)
+        layers = _layers(bundle, cards, (), full_cards=0)
         if _tokens(layers) <= bundle.token_budget:
             return _messages(layers)
 
-    layers = _layers(bundle, (), (), headline_only=True)
+    layers = _layers(bundle, (), (), full_cards=0)
     if _tokens(layers) > bundle.token_budget:
         raise ContextTooLargeError(
             f"the platform rules and the question alone need {_tokens(layers)} tokens "
@@ -697,7 +756,7 @@ async def build_context(
     org_id: uuid.UUID,
     question: str,
     data_source_id: uuid.UUID | None = None,
-    limit: int = 5,
+    limit: int = DEFAULT_CARD_LIMIT,
     token_budget: int = DEFAULT_TOKEN_BUDGET,
     as_of: date | None = None,
     history: Sequence[HistoryTurn] = (),

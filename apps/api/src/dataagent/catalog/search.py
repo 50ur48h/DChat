@@ -39,6 +39,26 @@ The fallback is deliberately not the default. AND-first means a two-word search
 still means both words, which is what a person expects and what keeps precision
 where precision is available; OR is the answer to "this matched nothing", not a
 looser search everywhere.
+
+**And it is the answer only when there is nothing else to ask** (**B-159**). The
+paragraph above was written before the vector arm existed, and once it did the
+fallback stopped being a last resort and became a second opinion — a much worse
+one. Its ranking is word overlap, so a table wins on having a word of the
+question in its *name*, which is the one move `inference.py` refuses by
+construction. Worse than noise: `_merge` scores a card once per arm, so anything
+the fallback surfaced *and* the vector arm found scores roughly double and is
+promoted above vector-only hits. So the fallback now runs only when the vector
+arm produced nothing — no embedder, or no card embedded yet — which is exactly
+the situation B-041 described.
+
+**What retrieval is for, since B-159 turned on the distinction.** Its job is to
+put the right table *in the bundle*, not to pick the winner. A card search ranks
+by wording and by cosine distance, and neither is evidence about which table
+answers the question — they are evidence about which tables are worth showing the
+model and the checks. Choosing between them belongs to things that can justify a
+choice: the join graph, a semantic definition, provenance (D-058). Treating a
+similarity score as a decision because it has a number attached is how
+`fact_sale_monthly_history` came first.
 """
 
 from __future__ import annotations
@@ -218,12 +238,31 @@ async def search_cards(
             ]
 
         lexical = await rows(matching(_strict(text)))
-        if not lexical and terms:
+        semantic = await rows(nearest(vector)) if vector else []
+        if not lexical and terms and not semantic:
             # Nothing matched with every word required, which for a question is
             # the normal case rather than the exception (B-041). Ask again for
             # any word, and let the rank decide what is worth reading.
+            #
+            # **Only when there is no vector arm to ask instead** (B-159). B-041
+            # predates B-018's hybrid search: the fallback was written for the
+            # case where lexical found nothing and there *was* nothing else, and
+            # it keeps that job. With an embedder there is something else, ranked
+            # by cosine distance over the card's own prose — and the fallback's
+            # own ordering is word overlap with the table's name, which is not
+            # evidence about anything. Letting it into the merge does not merely
+            # add noise: RRF scores a card once per arm, so a card the fallback
+            # surfaced *and* the vector arm found collects roughly double, and
+            # the noise is promoted **above** vector-only hits.
+            #
+            # Measured on `miseq_v64` (B-159): for *"tell me monthly wise for
+            # whatever year of data we have"* the strict pass matched nothing,
+            # the fallback returned four cards led by `fact_sale_monthly_history`
+            # — a synthetic back-cast that won on having "monthly" in its name —
+            # and RRF pushed `fact_sale`, the only real sales table, from vector
+            # rank 8 down to merged rank 11. This is the failure `inference.py`
+            # refuses by construction: *"nothing here reads a column name."*
             lexical = await rows(matching(func.to_tsquery(CARD_TEXT_CONFIGURATION, terms)))
-        semantic = await rows(nearest(vector)) if vector else []
 
     return _merge(lexical, semantic)[:capped]
 
