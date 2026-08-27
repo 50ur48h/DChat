@@ -86,7 +86,17 @@ Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-27 by Claude Code (**A priced model no role called, and a
+Last updated: 2026-08-27 by Claude Code (**MiseQ v6.4 loaded beside the live
+              source, and it deleted a work package.** 57 declared foreign keys
+              and a unified `TEXT` outlet key mean **51 of the 63 column pairs**
+              `v_join_catalog` asserts are now constraints, so D-052's
+              justification for importing them is gone and WP13.13 is rescoped to
+              the rows a schema cannot express — the forbidden ones (D-057).
+              Found on the way: every login on that server could read another
+              database's schema out of `pg_class` (**B-155**, closed on all three
+              databases), and measured inference does not run on any source that
+              declares a key (**B-156**, open).
+              Previously: **A priced model no role called, and a
               probe that could not have told you.** `gpt-5.6-terra` removed from
               dev; `/healthz` now resolves every role rather than checking that
               *some* model exists, because dropping the only `mid` model made a
@@ -259,6 +269,129 @@ customer's data. It narrows to the owner's address plus Azure services once the
 swap is confirmed. Note the dev host's public address **changed mid-session**
 (171.79.38.47 → 103.168.16.2), so the rule has to be written from whatever it is
 on the day rather than from a value recorded here.
+
+## MiseQ v6.4, 2026-08-27 — loaded beside the live source, and it deleted a work package
+
+The partner's third drop declares what the second only described: **57 foreign
+keys**, 39 primary keys, `dim_outlet.outlet_key` unified to `TEXT`, and a
+`PRAGMA foreign_key_check` with no violations. Their contract was rewritten
+around our architecture rather than theirs — *"the LLM does not need to be the
+enforcement authority"* — which is the outcome D-051/052/053 were arguing for.
+
+**Loaded, not cut over.** `miseq_v64` and `miseq_v64_readonly` sit beside the
+untouched `fnb` and `miseq` on `pg-fnb-demo-sk`. The live source is unchanged: 29
+tables, `fact_sale` still 112,327 rows.
+
+| | old | live | new |
+|---|---|---|---|
+| database | `fnb` | `miseq` | `miseq_v64` |
+| read-only login | `fnb_readonly` | `miseq_readonly` | `miseq_v64_readonly` |
+| state | untouched, 35 objects | **untouched**, 29 tables | 41 tables, 794,582 rows |
+
+**Verified.** 41 of 41 table counts match the SQLite, checked twice — by the
+loader, and again over TLS 1.3 as `miseq_v64_readonly`. Net sales `3,625,180.34`
+and gross `3,666,161.95` match the source to the cent, `2025-01-01 .. 2025-12-31`.
+57 foreign keys and 39 primary keys landed. Writes refused **for permission
+reasons** rather than for a missing column, which is the trap the previous load
+walked into: `permission denied for table fact_sale`, `permission denied for
+schema public`, `must be owner`.
+
+**Nothing needed fixing, because it was checked before Azure was touched.** A
+preflight ran the loader's own translation over the file and asked the questions
+Postgres would ask: NULLs in a primary-key column (SQLite permits them and
+Postgres does not), duplicate keys, orphans, foreign keys whose two sides
+disagree on type after the text-to-date promotion. Zero problems, and all 16 date
+promotions land on both sides of every date foreign key.
+
+`v_join_catalog`, `v_question_playbook` and `meta_data_quality` are **base
+tables**, not views, so all three came across intact — 69 / 12 / 27 rows. The 15
+real views were skipped, which their README explicitly sanctions.
+
+### PUBLIC could connect to every database on that server (B-155)
+
+Measured rather than assumed: `miseq_v64_readonly` opened a connection to the
+live `miseq` and read **29 table names and 251 column names** out of `pg_class`.
+No data crossed — `permission denied for schema public` — and
+`information_schema` showed **zero** tables, because it filters by privilege.
+`pg_catalog` does not. **A probe that stopped at `information_schema` would have
+reported the databases isolated.**
+
+The cause is PostgreSQL's default grant of `CONNECT` and `TEMP` to `PUBLIC`, and
+`grant_readonly_role` revoking on the **role** — which never touches it while
+reading exactly like a lockdown. Closed on all three databases at the owner's
+instruction, with both halves proven: every foreign login now gets *User does not
+have CONNECT privilege*, and each database's own login still reads it
+(`miseq_readonly` → 112,327 rows, net sales 3,625,180.34). Checked before
+revoking, not after: no replication slots, walsenders or subscriptions, and no
+open sessions. **Not yet fixed in `load_sqlite.py`**, so the next database loaded
+will have the same default — B-155 is open for that.
+
+Second defect, same load: `FNB_DEMO_ADMIN_PASSWORD` and `MISEQ_READONLY_PASSWORD`
+were in `.env` and documented **nowhere**, against this repo's own rule. All
+three are now in `.env.example` and declared `HOST_ONLY` with reasons.
+
+### WP13.13's justification died, and that is the good outcome (D-057)
+
+D-052 argued for importing `v_join_catalog` on a measured number: **13 of 60**
+`ALLOWED` rows that measurement structurally could not reach — ten across a type
+family, three composite. **v6.4 declares all ten.** The type split was the
+partner's first fix, `dim_outlet` now has eleven foreign keys pointing into it,
+and WP13.13's acceptance criterion — *"`dim_outlet` reaches nine tables it cannot
+reach today"* — is met by the schema, with no import.
+
+Measured again rather than assumed: the 60 `ALLOWED` rows assert **63 column
+pairs, of which 51 are now declared foreign keys**. Of the 12 left, six are the
+`dim_weather` composite where neither column is unique alone, **one** is found by
+the product's own inference when it is actually run, and two are claims the data
+does not support. That number was **four** until the sweep ran — I had applied
+D-050's rules by hand and modelled neither the one-row-table exclusion nor the
+ambiguity rule. A close reading of an algorithm is not a run of it.
+
+So WP13.13 is **rescoped to the negative rows only** — one `DISALLOWED`, two
+`DEPRECATED`, six `READ-FIRST`. A foreign key says a join is *possible*; only the
+customer can say a join is *forbidden*, and `fact_sale ↔ fact_sale_line`
+(*summing both double-counts revenue*) is the row that matters. The migration
+shrinks to a **polarity** column; `RELATIONSHIP_KINDS` does not gain `imported`,
+and the precedence ladder goes with it.
+
+**The partner changed their data so our deterministic layer could do its job
+instead of asking us to move enforcement into a prompt. Deleting the work that
+made unnecessary is the correct response to that, not a loss.**
+
+### Two things the drop found in us
+
+* **Inference will not run on this source at all (B-156).** `discovery._crawl`
+  gates it on `if not relationships` — only where the engine declares nothing.
+  v6.4 declares 57 keys, so inference goes silent. Run by hand against the loaded
+  database with its caps lifted — a complete sweep, 201 pairs measured, 31 edges —
+  it connects **six table pairs the declared keys do not**, including
+  `dim_weather → dim_outlet` at coverage 1.00, which is what makes
+  weather-by-outlet reachable and which **neither** the schema **nor**
+  `v_join_catalog` states. Worse, the machinery for the mixed case **is already
+  written**: `infer_relationships` takes a `declared` parameter documented *"so
+  the same edge is never inferred twice"*, and its only caller passes `()`.
+  B-083's shape exactly.
+* **And measurement cannot stand in for declared keys, which is now measured
+  rather than argued.** The same sweep connects **25 of the 56 declared table
+  pairs**. The misses are structural: **`dim_ingredient` reaches twelve tables in
+  the declared graph and zero in the measured one**, because the nine-row
+  `dim_waste_category` sits inside it and wins on coverage. **B-146 predicted
+  exactly this and named the condition for seeing it** — *"the dataset that would
+  expose it is the next one, not this one"*. The next one is here. The two graphs
+  are complements, not substitutes.
+* **`v_join_catalog` disagrees with the data twice**, and importing it was the
+  mechanism that would have surfaced that. It marks `dim_calendar ↔
+  fact_purchase` `ALLOWED` while their own changelog declines the foreign key —
+  **1,191 purchase rows** dated December 2024 against a 2025 calendar, so an inner
+  join silently drops **8.7%** of purchases. Both disagreements become knowledge
+  under WP13.14 rather than edges, and the framing has to survive the move.
+
+### Raised with the partner
+
+The v6.3 primary-key contradiction is resolved: `db/postgres_schema.sql` is
+regenerated from v6.4 and now carries PK, NOT NULL and FK constraints. We still
+do not run it — the catalog is derived from the SQLite — and their README now
+says that is fine.
 
 ## WP13.19 — a model nothing called, and a probe that could not tell (D-056, B-154)
 

@@ -313,6 +313,17 @@ def grant_readonly_role(cursor: psycopg.Cursor[tuple[object, ...]], database: st
     cursor.execute(
         sql.SQL("REVOKE ALL ON DATABASE {} FROM {}").format(sql.Identifier(database), identifier)
     )
+    # **And from PUBLIC, which the line above does not touch** (B-155). PostgreSQL
+    # grants CONNECT and TEMP on every new database to PUBLIC, so revoking on the
+    # *role* leaves every login on the server able to open a connection to every
+    # database on it. No data crosses — `public` stays owner-only — but `pg_class`
+    # is not privilege-filtered the way `information_schema` is, so a neighbouring
+    # login can read the whole table and column list. Measured on the demo server
+    # on 2026-08-27: a freshly created read-only login read 29 table names and 251
+    # column names out of the customer database next door.
+    cursor.execute(
+        sql.SQL("REVOKE ALL ON DATABASE {} FROM PUBLIC").format(sql.Identifier(database))
+    )
     cursor.execute(
         sql.SQL("GRANT CONNECT ON DATABASE {} TO {}").format(sql.Identifier(database), identifier)
     )
