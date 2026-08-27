@@ -197,6 +197,17 @@ check is the only one of the three that works everywhere. That is the honest
 limit: two of these three are MiseQ-shaped, and the general mechanism is the one
 that reads the catalog.
 
+**So the build order follows the generality, not the narrative** (owner,
+2026-08-27). The coverage check ships **first**, on its own, because it is the
+piece that works against any database and it needs nothing from `source_mode` at
+all. The ranking, the caveat and the substitution ban follow. **If anything has
+to be cut, the `source_mode`-specific halves are what gets cut** — the general
+mechanism is not the thing to trade away for a demo, and a work package that
+built the MiseQ-shaped parts first would leave exactly the wrong half standing
+when it ran out of room. This ordering is a decision, not a preference, and it is
+recorded here because the tempting order is the opposite one: `source_mode` is
+the more visible fix and the one the partner's contract asks for by name.
+
 ## D-057 — the join-import justification died when the schema declared the edges
 Date: 2026-08-27 · Phase: 13 · PR: this one (spec only; WP13.13 rescoped, not built)
 **Amends D-052.** This file is append-only and D-052 stays as written; what

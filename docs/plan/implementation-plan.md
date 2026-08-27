@@ -1091,30 +1091,40 @@ caveat; B-157 showed that fixes the fourth of four failures and would have
 shipped *a correctly-caveated wrong refusal*. Two of the five items below are not
 additive.
 
-- **`source_mode` → a ranking input to table selection.** Where two tables can
-  answer the same question, `real` outranks `derived` outranks `synthetic`, as
-  **context, not a prohibition**: the modelled table stays reachable for a
-  question only it can answer, and stops being the default because its name
-  matched a word. Lands in `agent/context.py`, where the bundle is assembled.
-- **`source_mode` → the composer caveat D-053 specified**, unchanged, on
-  `composer.limitations_for`'s existing `read` set — D-050's seam, three lines
-  above the inferred-join note.
-- **`source_mode` → no silent substitution.** A run that read a modelled table
-  while a `real` table covering the asked-for period existed has run the wrong
-  query; it does not reach the composer in that state.
-- **The coverage claim, checked against the catalog (D-058, its own fix).** An
-  answer asserting the limits of available data is compared with
-  `CatalogColumn.min_val`/`.max_val` — engine-supplied, exact (**B-051**), masked
-  on the way in — across every candidate table, not only the one queried. A claim
-  narrower than the source is a **finding**. Deterministic, and not overridable by
-  the model, for the reason the capability check is not. **An unprofiled source
-  abstains, visibly** (D-031's rule).
-- `v_question_playbook` → `verified_queries`; `meta_data_quality` → knowledge
-  documents (27 rows, **advisory by construction**, L4); rule 5 (`fact_sale` for
-  revenue, never unioned with `fact_sale_line`) → a semantic definition with
-  required filters, which D-033's critic already checks. Deprecated objects
-  (`map_ingredient_alias`, `fact_waste.stage`) are loaded and **must not be
-  reachable by a question**.
+**Build in this order, and it is deliberately not the order of the narrative**
+(owner, 2026-08-27; D-058). The **coverage claim ships first and on its own**: it
+is the only piece that works against a database with no `source_mode` column, and
+it needs nothing from the other four. **If this work package runs out of room,
+the `source_mode`-specific halves are what gets cut** — never the coverage check.
+The tempting order is the opposite one, because `source_mode` is the more visible
+fix and the one the partner's contract asks for by name.
+
+1. **The coverage claim, checked against the catalog — the general mechanism
+   (D-058).** An answer asserting the limits of available data is compared with
+   `CatalogColumn.min_val`/`.max_val` — engine-supplied, exact (**B-051** forbids
+   a derived range), masked on the way in — across every **candidate** table, not
+   only the one queried. A claim narrower than the source is a **finding**.
+   Deterministic and not overridable by the model, for the reason the capability
+   check is not. **An unprofiled source abstains, visibly** (D-031's rule). Works
+   on any database, including one with no provenance column at all.
+2. **`source_mode` → a ranking input to table selection.** Where two tables can
+   answer the same question, `real` outranks `derived` outranks `synthetic`, as
+   **context, not a prohibition**: the modelled table stays reachable for a
+   question only it can answer, and stops being the default because its name
+   matched a word. Lands in `agent/context.py`, where the bundle is assembled.
+3. **`source_mode` → the composer caveat D-053 specified**, unchanged, on
+   `composer.limitations_for`'s existing `read` set — D-050's seam, three lines
+   above the inferred-join note.
+4. **`source_mode` → no silent substitution.** A run that read a modelled table
+   while a `real` table covering the asked-for period existed has run the wrong
+   query; it does not reach the composer in that state.
+5. `v_question_playbook` → `verified_queries`; `meta_data_quality` → knowledge
+   documents (27 rows, **advisory by construction**, L4); rule 5 (`fact_sale` for
+   revenue, never unioned with `fact_sale_line`) → a semantic definition with
+   required filters, which D-033's critic already checks. Deprecated objects
+   (`map_ingredient_alias`, `fact_waste.stage`) are loaded and **must not be
+   reachable by a question**.
+
 - **Tests/Accept:** the two B-157 questions, end to end, as the acceptance
   criteria — *"monthly sales for whatever year of data we have"* must read
   `fact_sale` and carry 2025, and *"Oct, Nov, Dec 2025"* must return

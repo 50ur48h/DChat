@@ -42,7 +42,10 @@ Next step:        **WP13.14 — the contract, and provenance that reaches the
                   substitution ban as well, and the **coverage claim is its own
                   fix**, checked against `CatalogColumn.min_val`/`.max_val` the
                   way the capability check is: a claim the platform can verify
-                  and didn't.
+                  and didn't. **The coverage check builds first, alone**: it is
+                  the only piece that works on a database with no `source_mode`
+                  column, so if anything is cut it is the `source_mode`-shaped
+                  halves and never the general mechanism (owner, 2026-08-27).
                   Then **WP13.20 — the answer's shape, chosen by the platform**,
                   `series` rule first and **no `ChartAsk` narrowing** (D-044's
                   warning: the platform overrides fields rather than removing
