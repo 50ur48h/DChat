@@ -1188,7 +1188,14 @@ fix and the one the partner's contract asks for by name.
 > run it, and their README now says that is fine.
 
 ### WP13.20 — the answer's shape, chosen by the platform — `p13.20-answer-shape`
-Implements the owner's instruction of 2026-08-27. **Second of the three.**
+Implements the owner's instruction of 2026-08-27. **Second of the three. Built.**
+
+> **Two scoping decisions taken while building, recorded here rather than left
+> to be discovered.** *Whether* to draw stays with the model — this chooses the
+> form, and a chart forced onto every answer is its own noise. And the shape
+> decision lives **inside the chart tool**, where the frame is already loaded;
+> reading the artifact a second time for a picture would be a round trip for
+> nothing. The ignored `ChartAsk` fields are **B-163**.
 
 Twenty-four monthly figures arrived as two paragraphs of prose, and a
 two-outlet question would arrive as two answers. **Today the model chooses the
