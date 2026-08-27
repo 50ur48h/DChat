@@ -135,9 +135,9 @@ test("the trace shows how the answer was worked out", async ({ page }) => {
   await expect(toggle).toBeVisible();
   await toggle.click();
 
-  await expect(page.getByText("Read the catalog")).toBeVisible();
-  await expect(page.getByText("Wrote a query")).toBeVisible();
-  await expect(page.getByText("Got results")).toBeVisible();
+  await expect(page.getByText("Searched the catalogue for tables that fit the question")).toBeVisible();
+  await expect(page.getByText("Decided what to look up")).toBeVisible();
+  await expect(page.getByText("Ran the query against your database")).toBeVisible();
   // The machine name never reaches a person.
   await expect(page.getByText("query_executed")).toHaveCount(0);
 });
@@ -156,7 +156,7 @@ test("a refresh mid-run replays the whole trace", async ({ page }) => {
 
   await expect(page.getByText(ANSWER)).toBeVisible({ timeout: 15_000 });
   await page.getByRole("button", { name: /Thought(\s+for\s+\d+\s+\w+)?$/ }).click();
-  await expect(page.getByText("Read the catalog")).toBeVisible();
+  await expect(page.getByText("Searched the catalogue for tables that fit the question")).toBeVisible();
   await expect(page.getByText("Finished")).toBeVisible();
 });
 

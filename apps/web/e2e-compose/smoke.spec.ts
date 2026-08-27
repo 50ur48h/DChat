@@ -317,9 +317,9 @@ test("the stack answers a question asked in a browser", async ({ page }) => {
   await test.step("open the trace", async () => {
     await page.getByRole("button", { name: /Thought(\s+for\s+\d+\s+\w+)?$/ }).first().click();
 
-    await expect(page.getByText("Read the catalog")).toBeVisible();
-    await expect(page.getByText("Wrote a query")).toBeVisible();
-    await expect(page.getByText("Got results")).toBeVisible();
+    await expect(page.getByText("Searched the catalogue for tables that fit the question")).toBeVisible();
+    await expect(page.getByText("Decided what to look up")).toBeVisible();
+    await expect(page.getByText("Ran the query against your database")).toBeVisible();
     await expect(page.getByText("Finished")).toBeVisible();
     // The machine name never reaches a person.
     await expect(page.getByText("query_executed")).toHaveCount(0);

@@ -903,6 +903,30 @@ the catalog, and the *control flow* is not taken at all (D-053).
 Ordered. WP13.12 first because it is the only one of the three that is currently
 producing a wrong answer rather than an absent one.
 
+### WP13.16 — the trace, in sentences — `p13.16-trace-in-sentences`
+Built 2026-08-27. The thinking panel read as a list of machine states — `Next
+step`, `Query checked`, `Noted a finding` — beside a terse fragment. It now reads
+as sentences that say what happened and, where it matters, why: *"Checked those
+tables can actually be linked — they can, so the numbers will line up row for
+row."*
+
+- `STEP_WORDS` (flat labels) becomes `STEP_SENTENCES`, a record of builders that
+  turn an event's payload into a lead and a continuation. The lead keeps the tone
+  colour, because design.md rule 4 makes colour a second cue and a whole sentence
+  in green would make it the first one.
+- **Built only from fields the events already carry**, several of which nothing
+  had ever rendered: `run_finished.totals` (queries, model calls),
+  `query_executed.masked_columns`, `context_selected.definitions_applied`,
+  `knowledge_consulted.term`/`passages`. **No payload was enriched** — 10.3's
+  payloads are built for eyes, and the temptation this work creates is to add the
+  model's reasoning so the prose reads better. That is the line.
+- `.detail` wraps instead of ellipsing: the old value was a fragment where
+  truncation lost a number, and half a sentence with an ellipsis is worse than
+  two lines.
+- **`test_trace_vocabulary.py` keeps both-ways coverage** against `EVENT_TYPES`,
+  which is the guard that caught `knowledge_consulted` rendering raw for three
+  weeks. Its parser follows the rename; the assertions do not move.
+
 ### WP13.15 — a refresh notices that the platform changed — `p13.15-discovery-version-stamp`
 Implements **D-054**. Closes **B-149**; opens nothing it does not also file.
 
@@ -979,6 +1003,36 @@ dev app (*"sales last month"* → July 2026, against data ending 2025-12-31).
   `view.answered`, the stored `outcome_state`, and the limitation text — not on
   an intermediate object. Golden eval **19** (*"empty-result honesty, future date
   range"*, §8 appendix D) is wired to this and must go from silent to explicit.
+
+
+**Also implements D-055 — the second trigger for the same vocabulary.** A period
+the data only partly covers and a question the planner judges unanswerable are
+different causes with the same honest shape: answer what is knowable, and say
+what is not. They are built together so the product grows one mechanism rather
+than two that drift.
+
+- A **model-judgement** refusal (`plan.answerable == false`) becomes
+  non-terminal, **once**, and only where nothing has executed yet: the platform
+  re-asks for what *is* observable about the question's subject. **A capability
+  refusal stays terminal** — the join graph is a fact about the schema, not an
+  opinion to appeal.
+- **The guard is `unanswered`.** A retried run must still name the gap; the
+  acceptance test is *"answered **and** still said what it could not
+  establish"*, never *"answered"*. A retry that comes back with no citations
+  falls through to `refused` by D-044's existing derivation, with no special case.
+- **The structured-refusal fix ships regardless of the retry** (owner,
+  2026-08-27). `plan_created` already emits `answerable`; it gains `reason`
+  beside it — JSONB, no migration, no new event type — so the trace can tell a
+  platform fact from a model's opinion. Today it cannot, and only one of them is
+  a fact.
+- **Tests/Accept:** the retry fires at most once and never after an execution;
+  a causal question against a descriptive dataset returns `outcome_state`
+  `partly` **with** citations **and** a non-empty `unanswered`, asserted on what
+  the route returns; a refusal whose retry adds nothing still returns `refused`;
+  and the refused-plan event carries a readable reason. **The regression test to
+  write first is the padded non-answer**: a retry that answers without naming the
+  gap must fail the suite, because that is the outcome this change could
+  plausibly produce and the one the owner ruled worse than the refusal.
 
 ### WP13.13 — the customer's join catalog, imported and measured — `p13.13-imported-joins`
 Implements **D-052**. Depends on WP13.12 only for merge order, not technically.

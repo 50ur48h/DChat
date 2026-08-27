@@ -86,7 +86,15 @@ Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-27 by Claude Code (**Dev is current at `4d4513f`, and the
+Last updated: 2026-08-27 by Claude Code (**The trace reads as sentences, and the
+              causal refusal is specified.** `STEP_SENTENCES` replaces flat labels,
+              built only from payload fields that already existed — several of
+              which nothing had rendered — with no payload enriched, which is the
+              line 10.3 draws. The vocabulary guard kept both-ways coverage,
+              verified by count: 21 against 21. Item 1 is **D-055**, folded into
+              WP13.12 rather than given its own package, because a partly-covered
+              period and an unanswerable question share one vocabulary.
+              Previously: **Dev is current at `4d4513f`, and the
               refresh could not see the capability it was deployed for.** A stated
               invariant — `structural_hash` covering *"everything the catalog
               stores about a table, and nothing else"* — was true when written and
@@ -229,6 +237,79 @@ customer's data. It narrows to the owner's address plus Azure services once the
 swap is confirmed. Note the dev host's public address **changed mid-session**
 (171.79.38.47 → 103.168.16.2), so the rule has to be written from whatever it is
 on the day rather than from a value recorded here.
+
+## WP13.16 — the trace, in sentences
+
+The thinking panel read as a list of machine states — `Next step`, `Query
+checked`, `Noted a finding` — each beside a terse fragment. It now reads as
+sentences that say what happened and, where it matters, why:
+
+> Checked those tables can actually be linked — they can, so the numbers will
+> line up row for row.
+
+> Ran the query against your database — 3 rows came back in 412 ms.
+
+> Finished after 1 query and 4 model calls.
+
+**Not one payload was enriched, and that was the constraint worth keeping.** The
+improvement is almost entirely fields the events already carried and nothing had
+ever rendered: `run_finished.totals` (queries, model calls, tokens),
+`query_executed.masked_columns`, `context_selected.definitions_applied`,
+`knowledge_consulted.term` and `passages`. Architecture 10.3's payloads are built
+for eyes, and the temptation this kind of work creates is to put the model's own
+reasoning in them so the prose reads better. That is the line, and it is named in
+the code rather than left to memory.
+
+`STEP_WORDS` became `STEP_SENTENCES`: a record of builders returning a **lead**
+and a **continuation**. The lead keeps the tone colour, because design.md rule 4
+makes colour a second cue and a whole sentence set in green would make it the
+first one. `.detail` now wraps instead of ellipsing — the old value was a
+fragment where truncation cost a number, and half a sentence with an ellipsis is
+worse than two lines.
+
+**The guard kept its assertions.** `test_trace_vocabulary.py` is what caught
+`knowledge_consulted` rendering raw for three weeks; its parser follows the
+rename and nothing else moves. Verified by counting rather than by a green tick:
+**21 keys parsed against 21 `EVENT_TYPES`, nothing missing, nothing extra** — and
+the pattern is anchored so a nested object *inside* a builder (`said`, in
+`critic_verdict`) cannot be misread as an event type.
+
+### Evidence
+
+* `make lint.web`, `make typecheck.web` green; `make test.web` **188 passed**.
+* `test_trace_vocabulary.py` green, both directions.
+* `make test.web.e2e` 14/16. **Both failures are B-140's signature** — they die
+  in `openConversation` on `getByLabel("Ask a question")` after `signIn`, before
+  reaching any trace assertion — and were re-run against `main` to confirm rather
+  than assumed.
+* Seven assertions in `e2e/conversation.spec.ts` and `e2e-compose/smoke.spec.ts`
+  updated to the new sentences. `query_executed` must still appear **nowhere** on
+  the page: the machine name never reaches a person.
+
+## Item 1, specified rather than built (D-055)
+
+*"How to improve sales for outlet A"* was refused with a paragraph about missing
+causal inputs, having run **no query at all**. There is no causal-question rule in
+the API — that paragraph is the model's own prose. `plan.answerable == false`
+ends the run at `loop.py`, immediately.
+
+**The product already has the ending this needs and the refusal path walks past
+it**: `run_state` derives `partly` from citations plus what could not be answered
+(D-044), which is exactly *"here is December; which actions would raise sales
+cannot be established"*. No new state, no migration, no UI work.
+
+**And a model's opinion is given the same finality as a platform fact.** The
+join-graph refusal three lines below is a fact about the schema; `plan.answerable`
+is a judgement about a question. The capability branch writes `state.capability`
+and emits an event; the model-judgement branch leaves prose. In the trace the two
+are indistinguishable, and only one of them is a fact — so `plan_created` gains a
+`reason` beside the `answerable` it already emits (JSONB, no migration).
+
+Bounded on the owner's terms: one retry, only before anything has executed,
+capability refusals stay terminal, and **the acceptance test is "answered *and*
+still named the gap"**, never "answered". *An honest refusal that becomes a padded
+non-answer is worse than the refusal* — which is why that is the first regression
+test WP13.12 must write.
 
 ## The refresh that could not see the new capability (D-054, B-149)
 

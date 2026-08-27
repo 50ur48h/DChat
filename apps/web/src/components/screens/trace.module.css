@@ -128,8 +128,12 @@
 
 .step {
   display: flex;
-  align-items: center;
-  gap: var(--s2);
+  /* **Top, not centre.** A step is a sentence now and a long one wraps to two
+     lines; centring would float the tick and the lead against the middle of the
+     block and break the left edge the list is read down. */
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 0 var(--s2);
   min-height: 28px;
   font-size: 12.5px;
   line-height: 20px;
@@ -138,6 +142,8 @@
 
 .tick {
   flex: 0 0 auto;
+  /* Aligned to the first line's optical centre now that a step can wrap. */
+  margin-top: 4px;
   color: var(--ink-subtle);
 }
 
@@ -145,6 +151,9 @@
   width: 12px;
   height: 12px;
   flex: 0 0 auto;
+  /* Matches `.tick`: it stands in for one on the row still running, so the two
+     must sit on the same line of a sentence that wraps. */
+  margin-top: 4px;
   border-radius: var(--radius-full);
   border: 1.5px solid var(--line-strong);
   border-top-color: var(--ink-muted);
@@ -187,9 +196,10 @@
   color: var(--ink-subtle);
   font-size: 11.5px;
   line-height: 18px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* **It wraps rather than ellipsing.** The old detail was a fragment — `3 rows
+     · 412 ms` — and truncating it lost a number. This is the second half of a
+     sentence, and half a sentence with an ellipsis is worse than two lines. */
+  overflow-wrap: anywhere;
 }
 
 @keyframes shimmer {

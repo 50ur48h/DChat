@@ -22,12 +22,25 @@ from dataagent.db.models import EVENT_TYPES
 
 TRACE = Path(__file__).resolve().parents[2] / "web" / "src" / "components" / "screens" / "trace.tsx"
 
+#: The record's entries sit at exactly one indent level, and the record itself
+#: ends at a `};` in the first column. Anchoring on both is what stops a nested
+#: object *inside* a builder — `said`, in `critic_verdict` — being read as an
+#: event type and failing the second assertion for no reason.
+END_OF_RECORD = "\n};"
+ENTRY = re.compile(r"^  ([a-z_]+):", re.M)
+
 
 def step_words() -> set[str]:
-    """The keys of `STEP_WORDS`, read out of the component that renders them."""
+    """The keys of `STEP_SENTENCES`, read out of the component that renders them.
+
+    **The name changed and the assertion did not.** WP13.16 replaced the flat
+    `STEP_WORDS` labels with `STEP_SENTENCES`, a record of builders that turn an
+    event's payload into a sentence — so the values are functions now, and the
+    keys are the one thing this file was ever about.
+    """
     source = TRACE.read_text(encoding="utf-8")
-    block = source.split("const STEP_WORDS", 1)[1].split("};", 1)[0]
-    return set(re.findall(r"^\s*([a-z_]+):", block, re.M))
+    block = source.split("const STEP_SENTENCES", 1)[1].split(END_OF_RECORD, 1)[0]
+    return set(ENTRY.findall(block))
 
 
 def test_every_event_type_has_a_word_for_a_person() -> None:
@@ -44,7 +57,7 @@ def test_every_event_type_has_a_word_for_a_person() -> None:
 
     assert missing == [], (
         "these event types will render as raw machine names: "
-        f"{missing}. Add a sentence to STEP_WORDS in {TRACE.name}."
+        f"{missing}. Add a sentence to STEP_SENTENCES in {TRACE.name}."
     )
 
 
@@ -57,6 +70,6 @@ def test_the_vocabulary_does_not_name_events_that_cannot_happen() -> None:
     unknown = sorted(step_words() - set(EVENT_TYPES))
 
     assert unknown == [], (
-        f"STEP_WORDS names events the schema does not allow: {unknown}. "
+        f"STEP_SENTENCES names events the schema does not allow: {unknown}. "
         "Either the CHECK constraint lost a type or the vocabulary invented one."
     )
