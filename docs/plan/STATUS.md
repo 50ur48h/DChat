@@ -276,8 +276,17 @@ the pattern is anchored so a nested object *inside* a builder (`said`, in
 
 ### Evidence
 
-* `make lint.web`, `make typecheck.web` green; `make test.web` **236 passed**,
-  including a new `trace.test.tsx`.
+* `make lint.web`, `make typecheck.web`, `make compile.web` green; `make test.web`
+  **236 passed**, including a new `trace.test.tsx`.
+* **`make preflight` did not run everything CI runs, and this PR proved it.** The
+  new test indexed `STEP_SENTENCES[type]` directly, which `noUncheckedIndexedAccess`
+  rejects — and it went to CI green locally because I ran lint and vitest after
+  adding the file and **skipped typecheck**. CI caught it in the `web` job's
+  *fourth* step, `next build`, which `preflight` never ran at all. That is the
+  same shape as the note already in the Makefile about `test.web.e2e` — a target
+  that says *"everything CI will run"* and prints *"safe to push"* while omitting
+  one of CI's steps. `compile.web` is now in `preflight`; `build.web` is a
+  different thing (the Docker image, a separate CI job).
 * **The first version of this vocabulary shipped a bug, and the guard exists
   because of it.** `knowledge_consulted` joined two optional parts and appended a
   full stop, so an event carrying neither rendered a bare `"."` — the module's own
