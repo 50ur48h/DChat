@@ -383,3 +383,68 @@ async def test_a_failed_query_embedding_falls_back_to_wording_rather_than_failin
 
     assert hits, "a failed query embedding took the whole search down with it"
     assert all(hit.found_by == "lexical" for hit in hits)
+
+
+async def test_a_loose_question_is_answered_by_meaning_and_not_by_word_overlap(
+    platform: URL, migrated_database: URL, isolated_customer_database: CustomerDatabase
+) -> None:
+    """**B-159.** The OR fallback does not vote once there is a vector arm.
+
+    B-041's fallback was written for a deployment where the strict pass matched
+    nothing and there *was* nothing else to ask. Once B-018 added the vector arm
+    it stopped being a last resort and became a second opinion — a much worse
+    one, because its ordering is word overlap, so a table wins on having a word
+    of the question in its **name**. That is the move `inference.py` refuses by
+    construction.
+
+    And it is worse than noise: `_merge` scores a card once per arm, so anything
+    the fallback surfaced *and* the vector arm found collects roughly double and
+    is promoted **above** vector-only hits. On MiseQ that pushed `fact_sale` —
+    the only real sales table — from vector rank 8 to merged rank 11, past a
+    bundle that takes five, while a synthetic back-cast came first for having
+    "monthly" in its name.
+
+    Asserted on `found_by`, which is the one field that says *which arm* answered:
+    with an embedder and a question the strict pass cannot match, every hit must
+    have come from meaning. Before this change the same call returned hits marked
+    `lexical` and `both`.
+    """
+    # Real vectors rather than the stub's zeros: a zero vector has no cosine
+    # distance, so a test resting on one would be resting on how NaN happens to
+    # sort. The query and the regions card share `unit(1)`, which makes the
+    # vector arm a real answer rather than an accident.
+    embedder = StubEmbedder(vector_for={"1999": unit(1), "region": unit(1)})
+    org_id, _ = await _catalogued(migrated_database, isolated_customer_database, embedder=embedder)
+
+    # "1999" appears in no card, so `websearch_to_tsquery`'s AND cannot match and
+    # the fallback is the only thing that could add a lexical hit.
+    hits = await search.search_cards(
+        org_id,
+        "How did our shops and regions look in 1999?",
+        embedder=embedder,
+        settings=build_settings(),
+    )
+
+    assert hits, "the vector arm must still answer a question the wording cannot"
+    assert all(hit.found_by == "vector" for hit in hits), (
+        f"the OR fallback voted anyway: {[(hit.table_name, hit.found_by) for hit in hits]}"
+    )
+
+
+async def test_without_an_embedder_the_or_fallback_still_answers(
+    platform: URL, migrated_database: URL, isolated_customer_database: CustomerDatabase
+) -> None:
+    """The other half of B-159, and the half that must not regress.
+
+    The fallback keeps the job B-041 gave it. A deployment with no embedding key
+    — or a catalog whose cards are not embedded yet — has nothing else to ask,
+    and a loose question there must still return candidates rather than the empty
+    catalog that cost the M7 gate. Both directions are asserted because only
+    together do they say *when* the fallback runs.
+    """
+    org_id, _ = await _catalogued(migrated_database, isolated_customer_database)
+
+    hits = await search.search_cards(org_id, "How did our shops and regions look in 1999?")
+
+    assert hits, "with no vector arm the fallback is the only thing that can answer"
+    assert all(hit.found_by == "lexical" for hit in hits)
