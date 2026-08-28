@@ -30,8 +30,15 @@ fi
 docker cp "$ROOT/ops/seed/provision_definitions.py" "$CONTAINER:/tmp/provision_definitions.py" >/dev/null
 docker cp "$FILE" "$CONTAINER:/tmp/definitions.json" >/dev/null
 
-# `exec` first: Git Bash rewrites a leading `/` into a Windows path.
-docker exec \
+# **Both halves of the Git Bash path rewrite, and they bite differently.**
+# CLAUDE.md records that a command string starting with `/` arrives inside the
+# container as a `C:\...` path, which is why the last line says `exec` first.
+# The same rewrite also hits the *value* of an `-e` flag:
+# `-e DEFINITIONS_FILE=/tmp/definitions.json` reached the container as
+# `C:/Users/.../Temp/definitions.json`, so the script died on a file the line
+# above had just put there. `MSYS_NO_PATHCONV` turns the conversion off for
+# this one call and is ignored by every shell that does not do it.
+MSYS_NO_PATHCONV=1 docker exec \
   -e DEFINITIONS_FILE=/tmp/definitions.json \
   -e DEFINITIONS_SOURCE="${SOURCE:-}" \
   -e DEMO_ORG_NAME="${DEMO_ORG_NAME:-Demo}" \

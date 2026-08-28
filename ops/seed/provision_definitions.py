@@ -42,23 +42,31 @@ SETUP_USER_EMAIL = "setup@localhost"
 async def _org_and_actor() -> tuple[uuid.UUID, uuid.UUID]:
     from sqlalchemy import text
 
-    from dataagent.db.session import engine
+    from dataagent.db.engine import build_engine
 
-    async with engine.begin() as connection:
-        org = (
-            await connection.execute(
-                text("SELECT id FROM organizations WHERE name = :n"), {"n": ORG_NAME}
-            )
-        ).scalar_one_or_none()
-        if org is None:
-            raise SystemExit(f"No organization called {ORG_NAME!r}. Run `make demo.setup` first.")
-        user = (
-            await connection.execute(
-                text("SELECT id FROM users WHERE email = :e"), {"e": SETUP_USER_EMAIL}
-            )
-        ).scalar_one_or_none()
-        if user is None:
-            raise SystemExit(f"No {SETUP_USER_EMAIL} user. Run `make demo.setup` first.")
+    engine = build_engine()
+    try:
+        async with engine.begin() as connection:
+            org = (
+                await connection.execute(
+                    text("SELECT id FROM organizations WHERE name = :n"), {"n": ORG_NAME}
+                )
+            ).scalar_one_or_none()
+            if org is None:
+                raise SystemExit(
+                    f"No organization called {ORG_NAME!r}. Run `make demo.setup` first."
+                )
+            user = (
+                await connection.execute(
+                    text("SELECT id FROM users WHERE email = :e"), {"e": SETUP_USER_EMAIL}
+                )
+            ).scalar_one_or_none()
+            if user is None:
+                raise SystemExit(f"No {SETUP_USER_EMAIL} user. Run `make demo.setup` first.")
+    finally:
+        # Disposed explicitly: this engine is built for two queries and the
+        # process goes on to open tenant sessions of its own.
+        await engine.dispose()
     return uuid.UUID(str(org)), uuid.UUID(str(user))
 
 

@@ -20,7 +20,18 @@
     "not proposed. Owner corrections applied the same day: waste_kg's caveat says",
     "what the number is good for rather than only what it is not, and the metric",
     "once called avoidable_waste is edible_waste, because the old name asserted",
-    "what its own caveat retracted."
+    "what its own caveat retracted.",
+    "",
+    "Synonyms are short phrases, not sample questions. matching() searches each",
+    "synonym as a contiguous whole-word phrase, so 'how much food are we throwing",
+    "away' only ever matches itself. The first seeding of this file was written the",
+    "wrong way and waste_by_cause matched NOTHING -- not 'what is causing our",
+    "wastage', not 'show me wastage by reason'. That is B-085 exactly, found by",
+    "running matching() against real phrasings rather than by reading the list.",
+    "",
+    "edible_waste's synonyms are deliberately tighter than the rest, because it is",
+    "the one that BINDS: a false match makes the critic enforce edible_flag = 1 on",
+    "a question that was never about edibility."
   ],
   "definitions": [
     {
@@ -28,16 +39,17 @@
       "kind": "metric",
       "description": "Food thrown away, by weight in kilograms. fact_waste.waste_kg is already the portion-to-kilogram conversion: it agrees with sum(qty * dim_uom_factor.kg_per_portion) to within 0.04 kg across all 11,747 rows, so never re-apply the factor and never sum qty across ingredient categories, which measures nothing.",
       "expression": "sum(fact_waste.waste_kg)",
-      "caveat": "Read this as an order of magnitude, not a measurement: the whole table is scaled from a single measured day (3.398 kg) by category rates. What does hold is composition -- which cause and which outlet dominate, and their share of the total -- so compare the parts rather than quoting the whole. Do not present it as the actual waste of the business, and do not read a trend from it over time. 883.74 kg of the 5,528.50 total comes from two ingredient categories whose portion-to-kilogram factor is flagged unusable.",
+      "caveat": "Read this as an order of magnitude, not a measurement: the whole table is scaled from a single measured day (3.398 kg) by category rates. What does hold is composition -- which cause dominates, and its share of the total -- so compare the parts rather than quoting the whole. Comparing outlets needs one more step: they are not observed for equal periods (365 days at one, 160 at another), so divide by observed days or the least-recorded outlet looks like the thriftiest. Do not present the total as the actual waste of the business, and do not read a trend from it over time. 883.74 kg of the 5,528.50 comes from two ingredient categories whose portion-to-kilogram factor is flagged unusable.",
       "synonyms": [
         "waste",
+        "wastage",
+        "wastes",
         "food waste",
         "total waste",
-        "wastage",
-        "how much waste",
-        "how much food are we throwing away",
-        "waste in kg",
-        "waste weight"
+        "waste kg",
+        "waste weight",
+        "thrown away",
+        "throwing away"
       ],
       "required_filters": []
     },
@@ -48,14 +60,23 @@
       "expression": "sum(fact_waste.waste_kg) grouped by fact_waste.waste_cause",
       "caveat": "Group by waste_cause, never by stage. The two columns share a vocabulary and disagree by up to 30 percent -- prep_trim is 2,634 kg by stage against 2,360 kg by cause -- so the same question answered from the wrong column gives a different number with no sign that anything went wrong. waste_cause is authoritative; stage is retained only for backward compatibility. This split is the most defensible thing in the waste data: the shares hold even though the absolute total does not.",
       "synonyms": [
-        "why is there waste",
-        "waste reasons",
+        "waste cause",
         "waste causes",
-        "what causes waste",
-        "biggest source of waste",
+        "cause of waste",
+        "causes of waste",
+        "causing waste",
+        "causing our waste",
+        "causing our wastage",
+        "waste reason",
+        "waste reasons",
+        "reason for waste",
+        "reasons for waste",
+        "waste by cause",
+        "waste by reason",
+        "wastage by reason",
         "waste breakdown",
-        "where is waste coming from",
-        "reason for waste"
+        "biggest source of waste",
+        "where waste comes from"
       ],
       "required_filters": []
     },
@@ -67,11 +88,13 @@
       "caveat": "Edible means it was still fit to serve, not that it could realistically have been sold. Trim and preparation loss is largely inherent even where the flag says edible, so this is not a figure of recoverable money and not a target to drive to zero. It inherits the whole-table limit as well: scaled from one measured day, so use it as a share of total waste rather than as an absolute.",
       "synonyms": [
         "edible waste",
-        "waste that was still good",
-        "food thrown away that was fit to eat",
         "edible food waste",
-        "how much of our waste was edible",
-        "still fit to serve"
+        "edible",
+        "inedible",
+        "fit to serve",
+        "still good",
+        "avoidable waste",
+        "preventable waste"
       ],
       "required_filters": [
         {
@@ -92,12 +115,14 @@
       "caveat": "The two halves of this ratio are not equally sound: sales are observed and waste is modelled from a single day, so it is a comparison instrument, not an efficiency measurement. Use it to rank outlets against each other; do not quote it as the waste rate of the business and do not track it over time. Per outlet it must be read per observed day -- coverage runs from 365 days at one outlet to 160 at another, so a straight comparison makes the least-observed outlet look like the thriftiest.",
       "synonyms": [
         "waste rate",
+        "waste intensity",
         "waste per sales",
         "waste against sales",
-        "waste relative to revenue",
-        "waste efficiency",
-        "how bad is our waste",
-        "waste as a share of sales"
+        "waste vs sales",
+        "waste relative to sales",
+        "waste per revenue",
+        "waste as a share of sales",
+        "waste ratio"
       ],
       "required_filters": []
     },
@@ -111,11 +136,11 @@
         "revenue",
         "sales",
         "net sales",
+        "net revenue",
         "turnover",
         "total sales",
-        "how much did we sell",
-        "net revenue",
-        "sales value"
+        "sales value",
+        "how much did we sell"
       ],
       "required_filters": []
     },
@@ -127,10 +152,12 @@
       "caveat": "Outlets are not observed for equal periods, and nothing else in the waste data says so. Any per-outlet total or ranking has to be divided by this, or read alongside it -- outlet 5 has 160 observed days against 365 at outlet 2, so on raw totals it looks like the best performer when it is mostly the least recorded.",
       "synonyms": [
         "observed days",
+        "waste days",
         "days of waste data",
-        "waste coverage",
-        "how many days of data",
+        "days recorded",
         "recording coverage",
+        "waste coverage",
+        "coverage days",
         "how complete is the waste data"
       ],
       "required_filters": []
