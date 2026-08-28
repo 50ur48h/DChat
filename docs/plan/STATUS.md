@@ -37,8 +37,19 @@ Next step:        **WP13.23 — the MiseQ metric definitions, in review with the
                   *"2,634 vs 2,360"* their `meta_data_quality` row cites.
                   Definitions carry a `caveat` that reaches the reader (D-065,
                   revision 0033) rather than only the prompt.
-                  **Waste valued in RM is not among them, and that is the
-                  finding rather than a gap** (B-168): `fact_waste` has no money
+                  **Seven now, not six: `waste_value_rm` was added on
+                  2026-08-28** when the owner registered a Neon database
+                  carrying the same v6.4 data plus the 15 views — 56 tables
+                  against 41, every base figure re-verified and identical.
+                  `v_waste_valued` supplies the valuation chain honestly, so the
+                  metric binds `value_is_available = 1` and its caveat states
+                  all three coverage figures the customer's own
+                  `waste_valuation_resolved` rule demands — **and they
+                  disagree**: 61% of rows, 6 of 9 categories, but **9.2% by
+                  weight**, because `ayam` is ~70% of all waste and is unpriced.
+                  Row coverage flatters the number; weight coverage is the
+                  honest one.
+                  **The reason it was absent is still worth reading** (B-168): `fact_waste` has no money
                   column at all, `v_waste_valued` is one of B-148's un-imported
                   views, and the base-table route needs the `erp_keys` join whose
                   measured error is **-53% to +706%** (B-162). There is no honest
