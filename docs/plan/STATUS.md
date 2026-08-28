@@ -345,6 +345,55 @@ swap is confirmed. Note the dev host's public address **changed mid-session**
 (171.79.38.47 → 103.168.16.2), so the rule has to be written from whatever it is
 on the day rather than from a value recorded here.
 
+## The retry that could not change anything (B-167)
+
+D-055 shipped and the deployed app refused the waste question **exactly as
+before** — no supporting query, same shape, same paragraph about causal models.
+
+**The retry fired. It just could not do anything.** Its precondition is
+`not state.executions`; `_progress_so_far` returns `""` under exactly that
+condition; and `repair_of` was `_progress_so_far(state) or None`. So the second
+planner call got **byte-identical input to the first**. The two guards were the
+same condition, and the mechanism was structurally incapable of changing the
+attempt.
+
+`state.judgement_reason` was written on every retry and **read by nothing** —
+B-083's shape, committed inside the change meant to improve refusals, under a
+docstring claiming it was *"kept because the retried answer must still name that
+gap"*.
+
+### The test proved a different claim from the one it made
+
+It scripted the fake to refuse once and then succeed. That proves *the loop
+continues after a judged refusal*. It was written to prove *the retry changes the
+attempt* — and **the harness supplied from outside the very thing the product was
+failing to supply.**
+
+Same class as `llm_calls == 1` standing in for *no compose call*, one PR earlier:
+an assertion that holds for a reason other than the one it names. Two in two
+changes is a pattern, and the tell is the same both times — the assertion is
+about something adjacent to the claim.
+
+The replacement scripts the fake to **refuse both times** and asserts the second
+prompt differs from the first and carries the model's own reason. No script can
+fake that on the product's behalf. Against the shipped code it fails with *"the
+second attempt was given byte-identical input to the first"*.
+
+### The fix
+
+`_nearest_question_ask` renders `NEAREST_QUESTION_RULE` into `repair_of` for the
+one attempt that follows the refusal — gated on `not state.executions` as well as
+the flag, so it does not trail through an investigation that got going. The rule
+asks for **the nearest question the data does support**, and its last paragraph
+holds the owner's line in the prompt as well as in the derivation: *do not pad a
+refusal into an answer*.
+
+**It is prompt text and not enforcement**, said where a reader will meet it. What
+decides the ending is unchanged — `composer.run_state` derives the outcome from
+what was cited and what was left unanswered (D-044), and a retried attempt that
+cites nothing is still `refused`. The retry changes what is **asked**, and only
+that.
+
 ## WP13.12 — the period a question asks for, and a refusal that gets one more look
 
 Two triggers, one vocabulary, as D-051 and D-055 asked. **Both were verified
