@@ -543,8 +543,21 @@ async def test_a_run_whose_every_query_failed_refuses_instead_of_describing_the_
 async def test_a_question_the_catalog_cannot_answer_refuses_without_querying(
     context: ToolContext, fake_llm: FakeLLM, wired: URL
 ) -> None:
-    """`answerable=false` is believed, because the model has just been shown the
-    catalog — and it saves a refusal round trip through the DAL."""
+    """`answerable=false` is believed **on the second telling**, and it still costs
+    no query and no composing call.
+
+    **D-055 changed the first half of this test's premise and not the second.**
+    A model-judgement refusal now gets one more look from a standing start, so
+    the planner is asked twice — the cost the owner accepted explicitly on
+    2026-08-27 — and a model that refuses twice is believed. What has not changed
+    is the thing this test is actually about: no statement reaches the DAL and
+    the composer is never called.
+
+    `llm_calls` used to carry that claim as `== 1`, which was a **proxy** — it
+    conflated *how many planner calls* with *whether a composing call happened*,
+    and the retry pulled those apart. Asserted separately now, so the next change
+    to either one cannot quietly satisfy the other.
+    """
     fake_llm.script(
         _plan("SELECT 1", answerable=False, reason="There is no revenue column anywhere."),
         role="sql",
@@ -555,8 +568,10 @@ async def test_a_question_the_catalog_cannot_answer_refuses_without_querying(
 
     assert outcome.state in {"refused", "partly"}
     assert outcome.status == "completed"
-    assert outcome.llm_calls == 1, "a refusal should not pay for a composing call"
-    assert outcome.iterations == 1
+    # Two planner calls: the judgement and its one permitted second look (D-055).
+    assert outcome.llm_calls == 2
+    assert not fake_llm.prompts(role="compose"), "a refusal paid for a composing call"
+    assert outcome.iterations == 2
     view = await runs.get_run(org_id=context.org_id, run_id=run_id)
     assert view.answer == "There is no revenue column anywhere."
 

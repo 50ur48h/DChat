@@ -197,6 +197,20 @@ against the model the product parses it into.
   once on 2026-08-28 and then 52 passing on an immediate retry, with nothing
   changed. **A bare retry is the cheapest diagnostic here**: a real failure
   fails twice, and this one does not.
+- **A test that ERRORs in setup with `ALTER ROLE dataagent_app` is the fixture
+  racing itself, not your change.** `dataagent_app` is a **cluster-wide** role and
+  every test-database fixture alters it during setup, so concurrent setups collide
+  on one catalog row and whichever loses raises `InternalError`. Same root fact
+  that nearly rewrote the live `miseq_readonly` password on the demo server: *a
+  PostgreSQL role is server-wide, not per-database.*
+  **The tell is which tests, not how many.** Four sweeps on 2026-08-28 errored on
+  eleven different tests and **no test errored twice**, while the one genuine
+  FAILED appeared in every run. A code defect is deterministic and picks the same
+  victims; a moving cast is a resource collision. So: **errors that move are the
+  machine, a failure that repeats is the code** — and re-run the errored test
+  alone before believing anything about it. What must not happen is what happened
+  here first: waving away a whole run because part of it was environmental, and
+  taking a real failure down with it.
 - **`pytest tests/a tests/b` can fail to collect, and it is not the tests.**
   Every `conftest.py` is the module `conftest`, so two suites in one invocation
   race for the name and whichever loses gets the other's fixtures — seen on
