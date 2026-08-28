@@ -197,6 +197,15 @@ against the model the product parses it into.
   once on 2026-08-28 and then 52 passing on an immediate retry, with nothing
   changed. **A bare retry is the cheapest diagnostic here**: a real failure
   fails twice, and this one does not.
+- **`pytest tests/a tests/b` can fail to collect, and it is not the tests.**
+  Every `conftest.py` is the module `conftest`, so two suites in one invocation
+  race for the name and whichever loses gets the other's fixtures — seen on
+  2026-08-28 as `ImportError: cannot import name 'Tenant' from 'conftest'` on
+  five files in `tests/runs` when they were run beside `tests/dal`. **B-074 is
+  the entry that explains it** and it reads as a note about *writing* fixtures;
+  it is also a rule about *invoking* pytest. Run the suites as separate
+  invocations, which is what CI does, and do not go looking for a product change
+  that broke five unrelated files at once.
 - Git Bash rewrites any argument starting with `/` into a `C:\...` path, so a
   `docker exec … sh -c '/opt/…'` arrives as nonsense. Start such command strings
   with a word (`exec /opt/…`), as `ops/scripts/seed_mssql.sh` does.

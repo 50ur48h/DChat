@@ -45,7 +45,7 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Self, cast
+from typing import Any, Final, Self, cast
 
 import asyncpg
 
@@ -155,7 +155,10 @@ class PostgresConnector:
         return (self._password, self._host, self._username, self._database)
 
     def _fail(self, error: Exception) -> ConnectorError:
-        return ConnectorError(sanitize_exception(error, known=self._known()))
+        return ConnectorError(
+            sanitize_exception(error, known=self._known()),
+            statement_fault=_statement_fault(error),
+        )
 
     async def _open(self, *, read_only: bool) -> AsyncpgConnection:
         settings = {"application_name": APPLICATION_NAME}
@@ -472,6 +475,37 @@ def _version(facts: dict[str, object]) -> str | None:
     # "PostgreSQL 16.4 (Debian …) on x86_64…" — the first two words are the part
     # anyone reads, and the rest names the host's architecture.
     return " ".join(raw.split()[:2])
+
+
+#: SQLSTATE classes where the *statement* was rejected rather than the
+#: connection lost — the cases one rewrite can fix, and where PostgreSQL usually
+#: says how.
+#:
+#: * ``42`` syntax error or access rule violation: an undefined function
+#:   (``42883``, the one that ended a live run), an undefined column, a type
+#:   mismatch. The engine names the identifier or the types.
+#: * ``22`` data exception: a division by zero, a cast that will not parse.
+#:   Fixable with ``NULLIF`` or a different cast.
+_STATEMENT_FAULT_CLASSES: Final = ("42", "22")
+
+#: Inside ``42`` and deliberately excluded. **Insufficient privilege is not a
+#: statement to rewrite**: the login lacks a right, and asking a model to try
+#: again is asking it to probe someone else's permissions until something works.
+_NOT_A_REWRITE: Final = frozenset({"42501"})
+
+
+def _statement_fault(error: Exception) -> bool:
+    """Whether rewriting the SQL could plausibly fix this.
+
+    **A timeout is deliberately not one**, though a narrower query would fix it.
+    `57014` means the statement was too expensive, and answering that with
+    another attempt spends more of the customer's database to learn the same
+    thing; the budget is the honest signal there, and it already exists.
+    """
+    if not isinstance(error, asyncpg.PostgresError):
+        return False
+    state = _sqlstate(error)
+    return state[:2] in _STATEMENT_FAULT_CLASSES and state not in _NOT_A_REWRITE
 
 
 def _sqlstate(error: asyncpg.PostgresError) -> str:
