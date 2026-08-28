@@ -282,6 +282,24 @@ def limitations_for(
         if sentence:
             notes.append(sentence)
 
+    # **The part of the question this data does not reach** (D-051). Ahead of
+    # the answer's own period note, because it is about the *question* rather
+    # than about what came back — a reader who asked for four months and got two
+    # needs that sentence before any other.
+    asked: object = state.coverage.get("verdict")
+    overlap: object = state.coverage.get("overlap")
+    held: object = state.coverage.get("held")
+    if asked == "partial" and isinstance(overlap, list) and isinstance(held, list):
+        window = [str(end) for end in cast(list[object], overlap)]
+        bounds = [str(end) for end in cast(list[object], held)]
+        if len(window) == 2 and len(bounds) == 2:
+            notes.append(
+                f"This answer covers {window[0]} to {window[1]}, which is the part of the "
+                f"period asked about that this database holds — it runs {bounds[0]} to "
+                f"{bounds[1]}. The rest of the period asked for is not missing from the "
+                f"answer; it is not in the data."
+            )
+
     # **What period this answer is actually about** (B-157, D-059). Straight
     # after the join caveat, because the two are the same kind of doubt — a fact
     # about the evidence behind an answer rather than about what the answer

@@ -543,8 +543,21 @@ async def test_a_run_whose_every_query_failed_refuses_instead_of_describing_the_
 async def test_a_question_the_catalog_cannot_answer_refuses_without_querying(
     context: ToolContext, fake_llm: FakeLLM, wired: URL
 ) -> None:
-    """`answerable=false` is believed, because the model has just been shown the
-    catalog — and it saves a refusal round trip through the DAL."""
+    """`answerable=false` is believed **on the second telling**, and it still costs
+    no query and no composing call.
+
+    **D-055 changed the first half of this test's premise and not the second.**
+    A model-judgement refusal now gets one more look from a standing start, so
+    the planner is asked twice — the cost the owner accepted explicitly on
+    2026-08-27 — and a model that refuses twice is believed. What has not changed
+    is the thing this test is actually about: no statement reaches the DAL and
+    the composer is never called.
+
+    `llm_calls` used to carry that claim as `== 1`, which was a **proxy** — it
+    conflated *how many planner calls* with *whether a composing call happened*,
+    and the retry pulled those apart. Asserted separately now, so the next change
+    to either one cannot quietly satisfy the other.
+    """
     fake_llm.script(
         _plan("SELECT 1", answerable=False, reason="There is no revenue column anywhere."),
         role="sql",
@@ -555,8 +568,10 @@ async def test_a_question_the_catalog_cannot_answer_refuses_without_querying(
 
     assert outcome.state in {"refused", "partly"}
     assert outcome.status == "completed"
-    assert outcome.llm_calls == 1, "a refusal should not pay for a composing call"
-    assert outcome.iterations == 1
+    # Two planner calls: the judgement and its one permitted second look (D-055).
+    assert outcome.llm_calls == 2
+    assert not fake_llm.prompts(role="compose"), "a refusal paid for a composing call"
+    assert outcome.iterations == 2
     view = await runs.get_run(org_id=context.org_id, run_id=run_id)
     assert view.answer == "There is no revenue column anywhere."
 
@@ -1268,3 +1283,65 @@ async def test_sql_the_engine_rejects_is_corrected_rather_than_giving_up(
     assert outcome.state == "answered", (
         f"the run gave up on an error the engine explained how to fix: {outcome.answer}"
     )
+
+
+# ---------------------------------------------------------------------------
+# A model's judgement is not a platform fact (D-055)
+# ---------------------------------------------------------------------------
+
+
+async def test_a_judged_refusal_gets_one_more_attempt_before_it_stands(
+    context: ToolContext, fake_llm: FakeLLM
+) -> None:
+    """**The second screenshot's failure.**
+
+    Asked *"can food waste be reduced to increase revenue?"* the deployed app
+    refused with no query run — and the refusal's first clause, *"the reference
+    data contains no food-waste records"*, was false: the turn before had just
+    answered from `fact_waste`. `plan.answerable == false` ended the run on the
+    spot, giving a model's opinion about a question the same finality as the join
+    graph's verdict about a schema. Only one of those is a fact the model cannot
+    argue with.
+
+    One retry, from a standing start only. Asserted on the run's ending and on
+    the trace carrying `retrying`, because a retry nobody can see in the trace is
+    a cost with no account of itself.
+    """
+    fake_llm.script(
+        _plan("SELECT 1", answerable=False, reason="no link between waste and revenue"),
+        role="sql",
+        times=1,
+    )
+    fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql")
+    fake_llm.script(_reflect(), role="plan")
+    fake_llm.script(_cites_the_execution, role="compose")
+    fake_llm.script(_passes(), role="critic")
+    run_id = await _run_for(context, "can waste be reduced to increase revenue?")
+
+    outcome = await _execute(context, run_id)
+
+    assert outcome.state == "answered", f"the judged refusal was still terminal: {outcome.answer}"
+    events = await read_events(org_id=context.org_id, run_id=run_id)
+    retried = [e for e in events if e.type == "plan_created" and e.payload.get("retrying")]
+    assert len(retried) == 1, "the retry left no trace of itself"
+    assert retried[0].payload.get("reason") == "no link between waste and revenue", (
+        "the first refusal's reason was not recorded, so nothing can check that the "
+        "retried answer still names the gap"
+    )
+
+
+async def test_a_judged_refusal_is_retried_once_and_not_twice(
+    context: ToolContext, fake_llm: FakeLLM
+) -> None:
+    """The bound, and the reason it is on the state rather than in a local: an
+    interrupted run that comes back must not quietly buy a second retry."""
+    fake_llm.script(_plan("SELECT 1", answerable=False, reason="cannot be established"), role="sql")
+    fake_llm.script(_reflect(), role="plan")
+    fake_llm.script(_passes(), role="critic")
+    run_id = await _run_for(context, "can waste be reduced to increase revenue?")
+
+    outcome = await _execute(context, run_id)
+
+    assert outcome.state == "refused", "a model that refuses twice must be believed"
+    events = await read_events(org_id=context.org_id, run_id=run_id)
+    assert len([e for e in events if e.type == "plan_created" and e.payload.get("retrying")]) == 1

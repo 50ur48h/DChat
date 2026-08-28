@@ -345,6 +345,74 @@ swap is confirmed. Note the dev host's public address **changed mid-session**
 (171.79.38.47 → 103.168.16.2), so the rule has to be written from whatever it is
 on the day rather than from a value recorded here.
 
+## WP13.12 — the period a question asks for, and a refusal that gets one more look
+
+Two triggers, one vocabulary, as D-051 and D-055 asked. **Both were verified
+against the running code before anything was written**, and one of them turned
+out worse than the spec said.
+
+### The critic was punishing the honest answer
+
+D-051 predicted a false block. Reproduced with the real `stated_range` and
+`covered_by`:
+
+| the query | `covered_by` |
+|---|---|
+| narrowed to where the data ends — `2025-11-01`, `2026-01-01` | **False → BLOCKED** |
+| runs past the end of the data — `2025-11-01`, `2026-03-01` | True → passes |
+
+So a run that stopped where the data stopped was blocked, while one that queried
+months that do not exist passed. **The rule rewarded overstating a range.**
+`_range_matches` now judges against the window that exists, which is also what
+the coverage note tells the planner to do — the two have to agree, or the
+platform instructs the model to narrow and then blocks it for narrowing.
+
+### One note, not two
+
+D-059 already put *"the dated columns run 2025-01 to 2025-12"* into the
+capability note. WP13.12 wanted *"you asked for July 2026; this data ends
+2025-12-31"*. Those are different facts competing for the same L0 slot, so
+`coverage_note` says the specific one when a period was named and the general one
+otherwise — shipping both would be the padding that teaches people to skip the
+layer. Asserted as a test.
+
+**A precision split, deliberately**: this comparison is at **day** granularity
+and D-059's is at **months**. Both sides here are real dates; there, an answer's
+own rows can hold a text period like `2023-01`. Rounding this one to months would
+call a question about December covered by data that stops on the 15th.
+
+### `none` does not end the run (D-064)
+
+D-051 said it should. Built as written it would be a block on questions the data
+answers: the profiler gives **no range to a text column** (B-051), so
+`fact_sale_monthly_history.year_month` is invisible and a question about 2024
+resolves to `none` against a database holding it. **B-157 inverted.** `none`
+drives the strongest wording in the note instead, and `state.coverage` carries
+the verdict so the ending can use it the day the blind spot closes.
+
+### D-055 — a model's judgement gets one more look
+
+`plan.answerable == false` ended the run with no query run, giving a model's
+opinion about a question the same finality as the join graph's verdict about a
+schema. That is what refused *"can food waste be reduced to increase revenue?"*
+while `fact_waste` sat in its own bundle — and the refusal's first clause, *"the
+reference data contains no food-waste records"*, was false.
+
+**One retry, from a standing start only.** Bounded by `state.executions` being
+empty so it cannot fire mid-investigation, and by `retried_judgement` so it
+cannot fire twice — on the state rather than in a local, so an interrupted run
+cannot quietly buy a second one. A **capability** refusal stays terminal: the
+platform's own facts are not sent back for a second opinion. The first refusal's
+reason is recorded, so the retried answer can be checked against the gap it was
+supposed to keep naming.
+
+### Evidence
+
+* `test_coverage.py` **28**, `test_critic.py` **25** including the reproduction
+  turned into a regression test and its opposite direction, `test_runner.py`
+  two end-to-end retry tests.
+* `ruff`, `pyright` clean.
+
 ## The run that died on an error the database explained (D-062, B-165)
 
 Asked *"for Oct, nov and dec 2025"* on the deployed app, the run ended after one

@@ -13,9 +13,11 @@ from __future__ import annotations
 
 from dataagent.agent.coverage import (
     Period,
+    asked_for,
     available_period,
     coverage_note,
     describe,
+    held_days,
     limitation,
     period_of_values,
 )
@@ -228,3 +230,83 @@ def test_a_real_period_beside_noise_is_still_found() -> None:
     )
 
     assert period == Period(earliest="2025-03", latest="2025-07")
+
+
+# ---------------------------------------------------------------------------
+# The period a question asked for (D-051)
+# ---------------------------------------------------------------------------
+
+
+def test_a_question_inside_the_data_is_covered() -> None:
+    assert (
+        asked_for(("2025-03-01", "2025-04-01"), ("2025-01-01", "2025-12-31")).verdict == "covered"
+    )
+
+
+def test_a_question_reaching_past_the_end_keeps_the_part_that_exists() -> None:
+    verdict = asked_for(("2025-11-01", "2026-03-01"), ("2025-01-01", "2025-12-31"))
+
+    assert verdict.verdict == "partial"
+    assert verdict.overlap == ("2025-11-01", "2025-12-31")
+
+
+def test_a_question_entirely_outside_the_data_is_none() -> None:
+    """*"Sales last month"* asked on 2026-08-28 resolves to July 2026 against
+    data ending 2025-12-31 — the live defect D-051 was filed for."""
+    assert asked_for(("2026-07-01", "2026-08-01"), ("2025-01-01", "2025-12-31")).verdict == "none"
+
+
+def test_a_question_naming_no_period_does_not_fire() -> None:
+    """The common case, and the safe one: most questions name no period, and a
+    check that fired on them would caveat every answer."""
+    assert asked_for(None, ("2025-01-01", "2025-12-31")).verdict == "unknown"
+
+
+def test_an_unprofiled_source_cannot_judge_a_period() -> None:
+    assert asked_for(("2025-03-01", "2025-04-01"), None).verdict == "unknown"
+
+
+def test_the_held_window_is_days_not_months() -> None:
+    """**Why this comparison is finer than the answer-window one.** Both sides
+    here are real dates, and rounding to months would call a question about
+    December covered by data that stops on the 15th."""
+    held = held_days([("date", "2025-01-01", "2025-12-15")])
+
+    assert held == ("2025-01-01", "2025-12-15")
+    assert asked_for(("2025-12-01", "2026-01-01"), held).verdict == "partial"
+
+
+def test_a_text_period_column_contributes_no_days_either() -> None:
+    assert held_days([("text", "2023-01", "2024-12")]) is None
+
+
+def test_the_note_names_both_periods_when_none_of_it_exists() -> None:
+    note = coverage_note(
+        None, asked_for(("2026-07-01", "2026-08-01"), ("2025-01-01", "2025-12-31"))
+    )
+
+    assert "2026-07-01" in note and "2025-12-31" in note
+    assert "not report a zero" in note, "a zero and an absence are different answers"
+
+
+def test_the_note_tells_the_planner_that_narrowing_is_correct() -> None:
+    """The instruction has to agree with what the critic will accept, or the
+    platform tells the model to narrow and then blocks it for narrowing."""
+    note = coverage_note(
+        None, asked_for(("2025-11-01", "2026-03-01"), ("2025-01-01", "2025-12-31"))
+    )
+
+    assert "not a compromise" in note
+
+
+def test_one_note_rather_than_two_when_a_period_was_named() -> None:
+    """The general fact and the specific one compete for the same L0 slot, and
+    shipping both is the padding that teaches people to skip the layer."""
+    general = coverage_note(Period(earliest="2025-01", latest="2025-12"), None)
+    specific = coverage_note(
+        Period(earliest="2025-01", latest="2025-12"),
+        asked_for(("2026-07-01", "2026-08-01"), ("2025-01-01", "2025-12-31")),
+    )
+
+    assert "dated columns" in general
+    assert "dated columns" not in specific, "both sentences were rendered at once"

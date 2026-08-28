@@ -74,12 +74,14 @@ from dataagent.agent.context import (
 from dataagent.agent.coverage import (
     Coverage,
     Period,
+    asked_for,
     available_period,
     coverage_note,
     describe,
+    held_days,
     period_of_values,
 )
-from dataagent.agent.critic import CriticVerdict
+from dataagent.agent.critic import CriticVerdict, stated_range
 from dataagent.agent.loop import LoopOutcome, research
 from dataagent.agent.provenance import modes_of
 from dataagent.agent.provenance import reorder as provenance_order
@@ -373,14 +375,28 @@ async def _investigate(
     # block is this component's characteristic failure (owner, 2026-08-27).
     offered = set(bundle.table_names)
     catalog = await active_catalog(context.org_id, source_id)
-    available = available_period(
-        [
-            (column.data_type, column.min_val, column.max_val)
-            for table in catalog.tables
-            if f"{table.schema_name}.{table.table_name}" in offered
-            for column in table.columns
-        ]
+    dated = [
+        (column.data_type, column.min_val, column.max_val)
+        for table in catalog.tables
+        if f"{table.schema_name}.{table.table_name}" in offered
+        for column in table.columns
+    ]
+    available = available_period(dated)
+    # **The period this question asked for, against the period the data holds**
+    # (D-051). `stated_range` is the critic's own resolver, reused rather than
+    # reimplemented: the check and the critic must agree on one period or the
+    # critic will block the answer this check asked for.
+    wanted = stated_range(state.question, bundle.as_of)
+    asked = asked_for(
+        None if wanted is None else (wanted.start.isoformat(), wanted.end.isoformat()),
+        held_days(dated),
     )
+    state.coverage = {
+        "verdict": asked.verdict,
+        "asked": list(asked.asked) if asked.asked else None,
+        "held": list(asked.held) if asked.held else None,
+        "overlap": list(asked.overlap) if asked.overlap else None,
+    }
     # **Which rows are observed and which are modelled** (D-053, D-058, B-157).
     # Measured from what the profiler already wrote, never asked of a model.
     provenance = {
@@ -510,7 +526,7 @@ async def _investigate(
     # Last of the notes, because it is the only one that is not about a join —
     # and it is a fact rather than an instruction, so it reads better after the
     # rules than in front of them.
-    if period_note := coverage_note(available):
+    if period_note := coverage_note(available, asked):
         notes.append(period_note)
     if notes:
         bundle = bundle.with_capability_note(" ".join(notes))
@@ -661,6 +677,11 @@ async def _validate(
         # bundle, rather than re-read here: the critic must judge the same
         # definitions the planner was shown.
         definitions=bundle.definitions_applied,
+        # What the data holds, so the range rule judges against the period that
+        # exists rather than the one the question named (D-051). Read off the
+        # state the capability step wrote, so the critic and the planner were
+        # told the same thing.
+        held=_held_window(state),
     )
     deterministic = critic.check(draft, evidence)
 
@@ -995,6 +1016,15 @@ async def _coverage_for(
     return describe(
         answered=answered, available=period, reason=reason or (why if not values else "")
     )
+
+
+def _held_window(state: ResearchState) -> tuple[str, str] | None:
+    """The inclusive window the data holds, off the state the capability step wrote."""
+    held: object = state.coverage.get("held")
+    if not isinstance(held, list):
+        return None
+    ends = [str(end) for end in cast(list[object], held)]
+    return (ends[0], ends[1]) if len(ends) == 2 else None
 
 
 async def _write_ending(

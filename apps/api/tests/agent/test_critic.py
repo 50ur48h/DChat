@@ -64,6 +64,7 @@ def _evidence(
     statements: dict[str, str] | None = None,
     previews: tuple[tuple[str, str], ...] = (),
     question: str | None = None,
+    held: tuple[str, str] | None = None,
 ) -> Evidence:
     return Evidence(
         question=question if question is not None else state.question,
@@ -71,6 +72,7 @@ def _evidence(
         state=state,
         statements=statements or {},
         previews=previews,
+        held=held,
     )
 
 
@@ -321,3 +323,73 @@ def test_no_model_and_no_findings_is_a_pass_that_says_nobody_looked() -> None:
 
     assert verdict.verdict == "pass"
     assert verdict.consulted_model is False
+
+
+# ---------------------------------------------------------------------------
+# The range rule, judged against the period that exists (D-051)
+# ---------------------------------------------------------------------------
+
+
+def test_an_answer_narrowed_to_where_the_data_ends_is_not_blocked() -> None:
+    """**This rule used to punish the honest answer.**
+
+    Reproduced before it was fixed: a question spanning 2025-11-01 to 2026-02-28
+    against data ending 2025-12-31 has one correct query — the one that stops
+    where the data does. That query failed `covered_by` and was **blocked**,
+    while a query that ran past the end of the data passed. So the check rewarded
+    overstating a range and refused the answer that did not.
+
+    It now judges against the window that exists, which is also what the coverage
+    note tells the planner to do — the two have to agree, or the platform
+    instructs the model to narrow and then blocks it for narrowing.
+    """
+    state = _state(question="revenue between 2025-11-01 and 2026-02-28")
+    draft = _draft(answer="Revenue was 12.")
+    evidence = _evidence(
+        state,
+        statements={
+            "e1": "SELECT sum(total) FROM orders WHERE d >= '2025-11-01' AND d < '2026-01-01'"
+        },
+        held=("2025-01-01", "2025-12-31"),
+    )
+
+    findings = check(draft, evidence)
+
+    assert not [f for f in findings if f.rule == "range_matches"], (
+        f"the narrowed answer was blocked: {[f.detail for f in findings]}"
+    )
+
+
+def test_an_answer_that_runs_past_the_end_of_the_data_is_still_judged() -> None:
+    """The other direction, and the half that must not regress: narrowing the
+    *target* must not become a licence to miss the part that does exist."""
+    state = _state(question="revenue between 2025-11-01 and 2026-02-28")
+    draft = _draft(answer="Revenue was 12.")
+    evidence = _evidence(
+        state,
+        statements={
+            "e1": "SELECT sum(total) FROM orders WHERE d >= '2025-12-01' AND d < '2026-01-01'"
+        },
+        held=("2025-01-01", "2025-12-31"),
+    )
+
+    findings = check(draft, evidence)
+
+    assert [f for f in findings if f.rule == "range_matches"], (
+        "a query covering only December was accepted for a question about November too"
+    )
+
+
+def test_with_nothing_profiled_the_rule_behaves_exactly_as_before() -> None:
+    """`held=None` is every source nobody has profiled, and this change must not
+    alter what they see."""
+    state = _state(question="revenue between 2025-11-01 and 2026-02-28")
+    draft = _draft(answer="Revenue was 12.")
+    evidence = _evidence(
+        state,
+        statements={
+            "e1": "SELECT sum(total) FROM orders WHERE d >= '2025-11-01' AND d < '2026-01-01'"
+        },
+    )
+
+    assert [f for f in check(draft, evidence) if f.rule == "range_matches"]
