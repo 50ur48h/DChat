@@ -1330,6 +1330,75 @@ async def test_a_judged_refusal_gets_one_more_attempt_before_it_stands(
     )
 
 
+async def test_the_second_attempt_is_asked_something_different(
+    context: ToolContext, fake_llm: FakeLLM
+) -> None:
+    """**The property the first version of this test could not see** (B-167).
+
+    That test scripted the fake to refuse once and then succeed, and passed —
+    proving the loop *continues* after a judged refusal. It said nothing about
+    whether the retry *changes* anything, because the harness supplied from
+    outside the very thing the product was failing to supply. It did not: the
+    retry's precondition is that nothing has executed, `_progress_so_far` returns
+    `""` under exactly that condition, and the second planner call received
+    byte-identical input to the first.
+
+    So this fake **refuses both times** and never changes its mind. What is
+    asserted is a property of the product — that the second prompt differs from
+    the first and carries the reason the model gave for refusing — which no
+    script can fake on its behalf.
+    """
+    fake_llm.script(
+        _plan("SELECT 1", answerable=False, reason="no causal model links waste to revenue"),
+        role="sql",
+    )
+    fake_llm.script(_reflect(), role="plan")
+    fake_llm.script(_passes(), role="critic")
+    run_id = await _run_for(context, "can waste be reduced to increase revenue?")
+
+    outcome = await _execute(context, run_id)
+
+    planning = fake_llm.prompts(role="sql")
+    assert len(planning) == 2, f"the planner was asked {len(planning)} times, not twice"
+    assert planning[0] != planning[1], (
+        "the second attempt was given byte-identical input to the first, so the "
+        "retry cannot change anything — B-167 exactly"
+    )
+    assert "no causal model links waste to revenue" in planning[1], (
+        "the model's own reason for refusing was not carried into the second ask"
+    )
+    assert "nearest question" in planning[1], "the instruction that makes a retry worth it"
+    # And a model that refuses twice is still believed: this is prompt text, not
+    # enforcement, and D-044's derivation decides the ending.
+    assert outcome.state == "refused"
+
+
+async def test_the_retry_instruction_is_gone_once_a_query_has_run(
+    context: ToolContext, fake_llm: FakeLLM
+) -> None:
+    """It applies to the attempt that follows the refusal and does not trail
+    through the rest of an investigation that got going."""
+    fake_llm.script(
+        _plan("SELECT 1", answerable=False, reason="cannot be established"), role="sql", times=1
+    )
+    fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql", times=1)
+    fake_llm.script(_plan("SELECT count(*) AS n FROM regions"), role="sql")
+    fake_llm.script(_reflect(done=False), role="plan", times=1)
+    fake_llm.script(_reflect(), role="plan")
+    fake_llm.script(_cites_the_execution, role="compose")
+    fake_llm.script(_passes(), role="critic")
+    run_id = await _run_for(context, "how many shops are there?")
+
+    await _execute(context, run_id)
+
+    planning = fake_llm.prompts(role="sql")
+    assert len(planning) >= 3
+    assert "nearest question" in planning[1], "the retry's own attempt lost the instruction"
+    assert "nearest question" not in planning[2], (
+        "the instruction trailed into an iteration that had already run a query"
+    )
+
+
 async def test_a_judged_refusal_is_retried_once_and_not_twice(
     context: ToolContext, fake_llm: FakeLLM
 ) -> None:

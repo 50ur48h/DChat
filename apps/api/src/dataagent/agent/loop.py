@@ -663,8 +663,63 @@ async def _next_step(
         run_id=context.run_id,
         actor_user_id=context.actor_user_id,
         settings=settings,
-        repair_of=_progress_so_far(state) or None,
+        # Two different things reach the planner through one parameter: where
+        # the investigation has got to, and — for the single attempt after a
+        # judged refusal — what to try instead. Joined rather than one replacing
+        # the other, because a retry that had already run queries needs both.
+        repair_of="\n\n".join(
+            part for part in (_progress_so_far(state), _nearest_question_ask(state)) if part
+        )
+        or None,
     )
+
+
+#: What the one permitted second look actually **asks for** (D-055).
+#:
+#: **This is prompt text, and it is not enforcement.** Nothing here binds the
+#: model, and a reader should not mistake it for a rule the platform checks. What
+#: decides the outcome is unchanged: `composer.run_state` derives `answered` /
+#: `partly` / `refused` from what the run cited and what it said it could not
+#: establish (D-044), and a retried attempt that cites nothing still ends as a
+#: refusal with no special case written for it. The retry changes **what is
+#: asked**, and only that.
+#:
+#: The last paragraph is the owner's line held in the prompt as well as in the
+#: derivation — *an honest refusal that becomes a padded non-answer is worse than
+#: the refusal* — because the failure this rule risks is the one it must not
+#: cause.
+NEAREST_QUESTION_RULE = """You judged this question unanswerable, and gave this reason:
+
+    {reason}
+
+That may well be right about the question exactly as it was asked. Before
+refusing, answer the nearest question this data *does* support — what can be
+measured, what it costs, where it concentrates, how large it is — and say plainly
+what you still cannot establish. Someone who asks whether X causes Y is usually
+better served by what is measurable about X and Y, clearly labelled as not being
+the causal answer, than by nothing at all.
+
+If there is genuinely no such question, refuse again and name the gap. Do not pad
+a refusal into an answer: an answer with nothing behind it is worse than the
+refusal you already wrote."""
+
+
+def _nearest_question_ask(state: ResearchState) -> str:
+    """The retry's instruction, for the one attempt that follows the refusal.
+
+    **The bug this exists to fix was that the retry asked the same question
+    again.** `_progress_so_far` returns `""` when nothing has executed, and the
+    retry's own precondition is that nothing has — so the second planner call
+    received byte-identical input to the first and refused identically. The
+    mechanism was structurally incapable of changing anything (**B-167**).
+
+    Gated on `not state.executions` as well as on the flag, so it applies to
+    exactly the attempt that follows the refusal and does not trail through the
+    rest of an investigation that got going.
+    """
+    if not state.retried_judgement or state.executions or not state.judgement_reason:
+        return ""
+    return NEAREST_QUESTION_RULE.format(reason=state.judgement_reason.strip())
 
 
 def _progress_so_far(state: ResearchState) -> str:
