@@ -1214,3 +1214,57 @@ async def test_an_answer_whose_rows_are_a_period_is_compared_against_the_catalog
     assert not any("outside the period" in note for note in outcome.limitations), (
         "an answer inside the catalogue's range was caveated anyway"
     )
+
+
+async def test_sql_the_engine_rejects_is_corrected_rather_than_giving_up(
+    context: ToolContext, fake_llm: FakeLLM
+) -> None:
+    """**The class of failure that ended a live run after one query.**
+
+    On the MiseQ source a run died on `function round(double precision, integer)
+    does not exist`, an error whose own HINT reads *"You might need to add
+    explicit type casts."* Every `ConnectorError` was reported to the loop as
+    unfixable by rewriting, so the one thing that would have worked was the one
+    thing it was told not to do.
+
+    The statement here is a different member of the same class — comparing a
+    date to a number, which the catalog check passes because both identifiers
+    exist and the engine then rejects on types. That substitution is deliberate:
+    the *exact* `round` failure is asserted in
+    `tests/connectors/test_postgres_connector.py`, against a real engine and
+    without the validator in the way, because **the validator rewrites some
+    `round` shapes and not others** — `ROUND(CAST(x AS DOUBLE PRECISION), 2)` it
+    fixes, `ROUND(SUM(money_column), 2)` it cannot, having no column types to
+    reason from. Reproducing that here would test sqlglot's inference rather
+    than the loop's decision.
+
+    What this asserts is the loop's decision: given an error the engine
+    explained, does the run try again or give up?
+    """
+    # `times=1`, or the first script matches every call and the loop re-proposes
+    # the same statement — which its own duplicate-query rule then skips, and
+    # the test would be measuring that instead of the repair.
+    fake_llm.script(
+        _plan("SELECT count(*) AS n FROM shops WHERE opened_on > 2021"), role="sql", times=1
+    )
+    fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql")
+    # The loop reflects after a refusal too, so the first reflection must not
+    # end the run — otherwise this would be testing  rather than the
+    # repair.
+    fake_llm.script(_reflect(done=False), role="plan", times=1)
+    fake_llm.script(_reflect(), role="plan")
+    fake_llm.script(_cites_the_execution, role="compose")
+    fake_llm.script(_passes(), role="critic")
+    run_id = await _run_for(context, "How many shops are there?")
+
+    outcome = await _execute(context, run_id)
+
+    types = await _types(context, run_id)
+    assert types.count("sql_rejected") == 1, (
+        f"the engine did not reject the first statement, so this test is not "
+        f"exercising the repair path: {types}"
+    )
+    assert "query_executed" in types, "the corrected attempt never ran"
+    assert outcome.state == "answered", (
+        f"the run gave up on an error the engine explained how to fix: {outcome.answer}"
+    )

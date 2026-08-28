@@ -71,7 +71,24 @@ class ConnectorError(Exception):
     Connectors raise only this. The driver's own exception is *not* chained:
     ``raise ... from error`` would keep the unsanitized text in ``__cause__``,
     where the next traceback to be printed would put a DSN in a log file.
+
+    ``statement_fault`` says which of two unrelated things happened, because the
+    caller has to treat them differently and could not tell them apart. *The
+    database could not be reached* is unfixable by rewriting the SQL. *The
+    database rejected this SQL* usually is — and the engine generally says how.
+    Treating both as unfixable is what ended a live run after one query on
+    ``function round(double precision, integer) does not exist``, whose own HINT
+    read *"You might need to add explicit type casts"*.
+
+    Each connector decides, because the evidence is dialect-specific: PostgreSQL
+    has SQLSTATE, SQL Server has error numbers. **The default is False**, so a
+    connector that has not been taught keeps today's behaviour rather than
+    silently gaining a retry loop.
     """
+
+    def __init__(self, message: str, *, statement_fault: bool = False) -> None:
+        super().__init__(message)
+        self.statement_fault = statement_fault
 
 
 @final

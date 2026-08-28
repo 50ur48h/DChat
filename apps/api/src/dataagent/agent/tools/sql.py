@@ -153,8 +153,19 @@ async def _run_sql(context: ToolContext, params: BaseModel) -> BaseModel:
         raise ToolError(str(error), code="no_catalog") from error
     except ConnectorError as error:
         # Already sanitized by the connector: names what failed, never an
-        # address or a credential. Not repairable by rewriting the SQL.
-        raise ToolError(str(error), code="engine_error") from error
+        # address or a credential.
+        #
+        # **Repairable exactly when the statement was at fault.** This used to
+        # be unconditionally false, and the comment said "not repairable by
+        # rewriting the SQL" — true of a database that cannot be reached, false
+        # of one that rejected the SQL and said why. A live run ended after a
+        # single query on `function round(double precision, integer) does not
+        # exist`, whose own HINT was *"You might need to add explicit type
+        # casts"*: the fix was in the error message and the loop was told not to
+        # try. The connector decides, because the evidence is dialect-specific.
+        raise ToolError(
+            str(error), code="engine_error", repairable=error.statement_fault
+        ) from error
 
     frame = execution.frame
 

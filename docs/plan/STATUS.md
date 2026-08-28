@@ -109,7 +109,16 @@ Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-28 by Claude Code (**The trace spends what the events
+Last updated: 2026-08-28 by Claude Code (**A run died on an error the database
+              explained how to fix.** Every `ConnectorError` was reported to the
+              loop as unfixable by rewriting — true of a database that is down,
+              false of one that rejected the statement, and the two had never
+              been told apart. Classified by SQLSTATE now, with privilege and
+              timeout deliberately excluded (D-062). **The first regression test
+              passed without the engine rejecting anything**, because the
+              validator already rewrites some `round` shapes and not others
+              (B-165) — green over a path that never ran.
+              Previously: **The trace spends what the events
               already carried.** The last of the owner's three. No new emit-time
               field: `context_selected` has held `definitions_available`,
               `tables_found_via`, `tables_found_by`, `restrictions` and
@@ -335,6 +344,75 @@ customer's data. It narrows to the owner's address plus Azure services once the
 swap is confirmed. Note the dev host's public address **changed mid-session**
 (171.79.38.47 → 103.168.16.2), so the rule has to be written from whatever it is
 on the day rather than from a value recorded here.
+
+## The run that died on an error the database explained (D-062, B-165)
+
+Asked *"for Oct, nov and dec 2025"* on the deployed app, the run ended after one
+query:
+
+> `UndefinedFunctionError: function round(double precision, integer) does not
+> exist` · **HINT: You might need to add explicit type casts.**
+
+**The loop was told not to try again.** `agent/tools/sql.py` turned every
+`ConnectorError` into a `ToolError` with `repairable` at its default of False,
+under a comment reading *"Not repairable by rewriting the SQL"* — true of a
+database that is down, false of one that parsed the statement and rejected it,
+and the two had never been told apart.
+
+Systemic rather than unlucky: `load_sqlite.py` maps SQLite `REAL` to `double
+precision`, so every money column in a loaded source is one, and
+`ROUND(SUM(amount), 2)` is the most natural thing a model writes.
+
+`ConnectorError` now carries `statement_fault`; PostgreSQL sets it from SQLSTATE
+class `42` or `22`; the tool passes it through. **Two exclusions inside those
+classes are the interesting part**: `42501` insufficient privilege, because
+retrying is probing someone's permissions rather than fixing SQL, and `57014`
+timeout, because another attempt spends more of the customer's database to learn
+the same thing and the budget already says it.
+
+### The reproduction went wrong first, and that is worth reading
+
+The first regression test used `ROUND(CAST(id AS DOUBLE PRECISION), 2)` and
+**passed without the engine rejecting anything** — green over a path that never
+ran, which is B-109's shape appearing in a test instead of in product code.
+
+The cause is **B-165**: the validator's sqlglot round-trip already rewrites
+`ROUND(x, n)` into `ROUND(CAST(x AS DECIMAL), n)` *when it can infer `x` is a
+double*. `ROUND(CAST(id AS DOUBLE PRECISION), 2)` and `ROUND(SQRT(id), 2)` are
+both silently corrected; `ROUND(SUM(net_amt), 2)` is not, because sqlglot has no
+column types and `SUM` of an unknown column is unknown. **So the product is
+inconsistently protected from this error**, which makes it look random from
+outside — worse than being uniformly exposed.
+
+The test now drives a different member of the same class — a date compared to a
+number, which the catalog check passes and the engine rejects on types — and the
+exact `round` failure is asserted at the connector, against a real engine, with
+the validator out of the way. Proven against the defect: reverting only the
+`repairable` argument fails it on *"the corrected attempt never ran"*.
+
+### A correction to a merged decision (D-063)
+
+D-060 gave two reasons for not building the substitution ban, and **the first was
+wrong**: it said the asked-for period does not exist structurally.
+`critic.stated_range(question, as_of)` resolves exactly that, has since Phase 9,
+and **WP13.12's own spec says to reuse it** — so the plan and the decision
+contradicted each other and the decision was the one at fault. Found while
+reading WP13.12 to start it.
+
+D-060's outcome is unchanged, because its second reason carries it alone: the ban
+would be a false block. And D-059's narrower claim — that an answer's *assertion
+about what data exists* is only in prose — is a different thing and still holds.
+Recorded as an entry rather than edited away, because the wrong sentence was
+load-bearing in two places and a reader who believed it would conclude the
+platform cannot know what period a question asked about. It can.
+
+### One thing the fixture taught me
+
+`FakeLLM.script(times=None)` means **unlimited**, so the first scripted plan
+matched every call, the loop re-proposed the identical statement, and its own
+duplicate-query rule skipped execution. The test was measuring that rather than
+the repair. `times=1` is the documented idiom and the docstring says so; I had
+not read it.
 
 ## WP13.21 — the trace spends what the events already carry
 

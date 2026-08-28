@@ -317,3 +317,76 @@ async def test_closing_twice_is_harmless(customer_database: CustomerDatabase) ->
 
     await connector.aclose()
     await connector.aclose()
+
+
+# ---------------------------------------------------------------------------
+# Which failures one rewrite could fix
+# ---------------------------------------------------------------------------
+
+
+async def test_a_statement_the_engine_rejects_is_marked_as_the_statement_s_fault(
+    customer_database: CustomerDatabase,
+) -> None:
+    """**The defect that ended a live run after one query.**
+
+    `round(double precision, integer)` does not exist in PostgreSQL — only
+    `round(numeric, int)` does — and the engine's own HINT says *"You might need
+    to add explicit type casts."* Every `ConnectorError` used to be reported as
+    unfixable by rewriting, so the loop was told not to try, and the fix was
+    sitting in the error message.
+
+    Asserted against a real database rather than a fake SQLSTATE, because what
+    is being claimed is that **this** engine reports **this** mistake in a way
+    the classifier recognises.
+    """
+    async with customer_database.reader() as connector:
+        with pytest.raises(ConnectorError) as caught:
+            await connector.execute(
+                _forge("SELECT round(id::double precision, 2) AS x FROM shops"),
+                ExecLimits(max_rows=10, timeout_seconds=10.0),
+            )
+
+    assert caught.value.statement_fault, (
+        "an error the engine itself explains how to fix was reported as unfixable"
+    )
+
+
+async def test_a_database_that_cannot_be_reached_is_not_the_statement_s_fault(
+    customer_database: CustomerDatabase,
+) -> None:
+    """The other half, and the half that must not regress. Rewriting the SQL
+    cannot fix a login that is wrong, so a run that keeps trying would spend its
+    whole budget learning what the first attempt already knew — which is the
+    rule WP7.2b set and this change must not weaken."""
+    broken = PostgresConnector(
+        host=customer_database.host,
+        port=customer_database.port,
+        database=customer_database.database,
+        username=customer_database.reader_username,
+        password=WRONG_LOGIN,
+        tls_mode="prefer",
+    )
+    async with broken:
+        with pytest.raises(ConnectorError) as caught:
+            await broken.list_schemas()
+
+    assert not caught.value.statement_fault
+
+
+async def test_an_error_carries_no_sqlstate_into_its_message(
+    customer_database: CustomerDatabase,
+) -> None:
+    """The classification is a flag, not a wider message. `ConnectorError`'s
+    whole contract is that what leaves the connector is sanitized, and a change
+    that started appending engine internals to it would be widening that hole
+    for the sake of a boolean."""
+    async with customer_database.reader() as connector:
+        with pytest.raises(ConnectorError) as caught:
+            await connector.execute(
+                _forge("SELECT round(id::double precision, 2) AS x FROM shops"),
+                ExecLimits(max_rows=10, timeout_seconds=10.0),
+            )
+
+    message = str(caught.value)
+    assert customer_database.host not in message
+    assert customer_database.reader_password not in message

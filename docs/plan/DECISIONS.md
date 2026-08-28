@@ -121,6 +121,103 @@ may be joined — and one more caveat the composer can attach: *the data diction
 says these join; we checked and found no unmatched values*, which is a different
 claim from either a foreign key or an inference.
 
+## D-063 — correction: the asked-for period does exist, and D-060 said it did not
+Date: 2026-08-28 · Phase: 13 · PR: this one · **Corrects D-060**
+D-060 gave two reasons for not building D-058's substitution ban. **The first one
+is wrong.** It said:
+
+> *"The asked-for period does not exist structurally. This is the same wall D-059
+> hit: `ExecutionRef` carries no period, `ResearchState` has no period field, and
+> the question's own range lives only in prose."*
+
+`critic.stated_range(question, as_of)` resolves the period a question names, has
+done since Phase 9, and is tested. **WP13.12's own spec says to reuse it** —
+*"the range comes from `critic.stated_range` — reused, not reimplemented"* — so
+the plan I wrote says the opposite of the decision I wrote, and the decision is
+the one that is wrong. Found while reading WP13.12 to start it.
+
+**What D-059 claimed is narrower and stands.** That entry is about a *coverage
+claim* — an answer's assertion about what data exists at all — which is genuinely
+only in prose. `stated_range` gives the period a question **asked for**, which is
+a different thing from an answer's statement about the database's limits. The
+built check is unaffected: it compares the window a result covered against the
+window the catalog records, and neither side was ever going to come from
+`stated_range`.
+
+**And D-060's conclusion stands on its second reason alone**, which is why this is
+a correction rather than a reversal. The substitution ban would be a **false
+block**: *"how much did we waste?"* is answered from `fact_waste`, which is
+`synthetic`, and after B-159 raised the card limit a `real` measure-bearing table
+is often in the same bundle. Blocking there refuses a question the data answers,
+which the owner named as this component's characteristic failure. That argument
+never needed the period clause.
+Decision: **D-060's outcome is unchanged**; its first supporting argument is
+withdrawn. WP13.12 proceeds as its spec was already written, with
+`critic.stated_range` as the input.
+
+**Why this is worth an entry rather than a quiet edit.** The claim was load-bearing
+in two places — it is why the substitution ban was dropped and part of why the
+coverage check was narrowed — and a reader who took it at face value would
+conclude the platform cannot know what period a question asked about. It can. A
+decision record that quietly loses a wrong sentence teaches nobody which of its
+neighbours to re-check.
+
+## D-062 — a database that cannot be reached and a statement it rejected are not the same failure
+Date: 2026-08-28 · Phase: 13 · PR: this one
+Context: a live run against the MiseQ source ended after **one query** on
+`UndefinedFunctionError: function round(double precision, integer) does not
+exist`, an error carrying PostgreSQL's own HINT — *"You might need to add
+explicit type casts."* The fix was in the error message and the loop was told not
+to try.
+
+`agent/tools/sql.py` turned **every** `ConnectorError` into a `ToolError` with
+`repairable` left at its default of False, under a comment reading *"Not
+repairable by rewriting the SQL."* That sentence is true of a database that is
+down, out of connections or refusing the login. It is false of a database that
+parsed the statement and rejected it — which is most of what a model gets wrong,
+and the case the engine explains.
+
+**And it is systemic rather than unlucky.** `load_sqlite.py` maps SQLite `REAL`
+to `double precision`, so every money column in a loaded customer database is one
+and `ROUND(SUM(amount), 2)` is the most natural thing a model writes.
+Options: (a) special-case `round`; (b) make every `ConnectorError` repairable;
+(c) let the connector classify, because the evidence is dialect-specific.
+Decision: **(c)**. `ConnectorError` gains `statement_fault`, the PostgreSQL
+connector sets it from SQLSTATE, and the tool passes it through as `repairable`.
+**The default is False**, so a connector nobody has taught keeps today's
+behaviour rather than silently gaining a retry loop.
+
+**What counts, and the two exclusions that are the interesting part.**
+Class `42` (syntax error or access rule violation — undefined function, undefined
+column, type mismatch) and class `22` (data exception — division by zero, a cast
+that will not parse). Both are cases where the engine names the identifier or the
+types, which is what one corrected attempt needs.
+
+* **`42501`, insufficient privilege, is excluded** though it is inside class 42.
+  The login lacks a right; asking a model to try again is asking it to probe
+  somebody else's permissions until something works, and that is a different
+  activity from fixing SQL.
+* **`57014`, statement timeout, is excluded** though a narrower query would
+  genuinely fix it. The statement was too expensive, and answering that with
+  another attempt spends more of the customer's database to learn the same
+  thing. The budget is the honest signal there and it already exists.
+
+**Nothing new bounds the retries**, and that is deliberate: `loop.research`
+already refuses to re-propose a statement whose `sql_hash` it has seen, and the
+iteration budget already ends a run that keeps failing differently. A third
+ceiling would be a ceiling nobody could reason about.
+
+Consequences: a run that would have refused now spends one more planner call and
+one more query when the engine rejects a statement — the cost WP7.2b's single
+repair was designed around, arriving at the case it was meant for. The comment
+that made this wrong is replaced with the distinction rather than deleted, because
+*"not repairable by rewriting"* is still true of half of what it covered.
+
+**And a related inconsistency, found while reproducing this** (**B-165**): the
+validator's sqlglot round-trip already rewrites *some* `round` shapes and not
+others, so the product is inconsistently protected from exactly this error. That
+makes it look random from outside, which is worse than being uniformly exposed.
+
 ## D-061 — a view that pre-joins is not the same as a view that knows something
 Date: 2026-08-28 · Phase: 13 · PR: this one (decision recorded; the import is WP13.13's)
 Context: the partner reports the waste refusal as unintended and names
