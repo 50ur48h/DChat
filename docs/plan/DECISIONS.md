@@ -4,6 +4,34 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-065 — a definition carries a caveat, and the caveat reaches the reader
+Date: 2026-08-28 · Phase: 13 · PR: WP13.23
+Context: a definition had three outputs and none of them reached whoever reads
+the answer. `description` and `expression` are prose for the prompt;
+`required_filters` is structure for the critic; and `state.applied_definitions`
+was used in the composer **only to suppress** the unverified-definition caveat,
+so a matched definition produced no caveat of its own. That is fine for a metric
+whose meaning is a formula. It is not fine for one whose meaning includes a limit
+on what may be claimed — MiseQ's waste figures are scaled from a single measured
+day, and a total presented without that is a number the data does not support.
+Options: (a) put the limit in `description`, where the model sees it; (b) a
+`caveat` column that the composer emits and the screens show; (c) leave it to
+whoever writes the question.
+Decision: (b), with the migration (revision 0033), on the owner's reasoning:
+*"prose-only would recreate D-053's mistake in reverse — a caveat that reaches
+the model and not the reader is the shape we keep filing."* (a) is D-053's error
+with the sign flipped: the model can drop the sentence and nothing contradicts
+it. So `caveat` travels the whole way — import mapping, proposal review, edit
+form, version history, and `limitations_for`, ahead of the provenance and period
+notes because it is the definition's own statement about itself.
+Consequences: `SemanticDefinition` and `SemanticDefinitionVersion` gain a
+nullable `caveat`; `ImportIn` gains `caveat_column`; `CreateDefinitionIn` and
+`UpdateDefinitionIn` gain `caveat` with `expression`'s null-versus-absent rule;
+`DefinitionOut`, `ProposalOut` and `VersionOut` carry it; the definitions screen
+shows it on proposals and on definitions in force, and can edit it. Nullable
+because most metrics are only a formula, and a column that always wants filling
+would make every metric sound uncertain.
+
 ## D-051 — a relative period is resolved against the clock, and the platform checks the data can answer it
 Date: 2026-08-27 · Phase: 13 · PR: this one (spec only; built as WP13.12)
 Context: asked *"what were the sales last month"* on 2026-08-27 against the MiseQ

@@ -188,6 +188,14 @@ export interface SemanticDefinition {
   kind: string;
   description: string;
   expression: string | null;
+  /**
+   * What an answer resting on this definition must say, or null.
+   *
+   * The one field here that reaches the *reader*. `description` and
+   * `expression` are prose for the prompt and bind nothing, so a limit stated
+   * only there is one a model can drop with nothing to contradict it.
+   */
+  caveat: string | null;
   required_filters: RequiredFilter[];
   synonyms: string[];
   binds: boolean;
@@ -210,6 +218,7 @@ export interface DefinitionVersion {
   name: string;
   description: string;
   expression: string | null;
+  caveat: string | null;
   required_filters: RequiredFilter[];
   synonyms: string[];
   /** active | retired — a definition's last version is the one that retired it. */
@@ -230,6 +239,7 @@ export interface DefinitionProposal {
   name: string;
   description: string;
   expression: string | null;
+  caveat: string | null;
   synonyms: string[];
   provenance: Record<string, unknown>;
 }
@@ -679,6 +689,7 @@ export function isSemanticDefinition(value: unknown): value is SemanticDefinitio
     typeof value.kind === "string" &&
     typeof value.description === "string" &&
     isNullableString(value.expression) &&
+    isNullableString(value.caveat) &&
     Array.isArray(value.required_filters) &&
     value.required_filters.every(isRequiredFilter) &&
     isStringArray(value.synonyms) &&
@@ -695,6 +706,7 @@ export function isDefinitionVersion(value: unknown): value is DefinitionVersion 
     typeof value.name === "string" &&
     typeof value.description === "string" &&
     isNullableString(value.expression) &&
+    isNullableString(value.caveat) &&
     Array.isArray(value.required_filters) &&
     value.required_filters.every(isRequiredFilter) &&
     isStringArray(value.synonyms) &&
@@ -711,6 +723,7 @@ export function isDefinitionProposal(value: unknown): value is DefinitionProposa
     typeof value.name === "string" &&
     typeof value.description === "string" &&
     isNullableString(value.expression) &&
+    isNullableString(value.caveat) &&
     isStringArray(value.synonyms) &&
     isRecord(value.provenance)
   );

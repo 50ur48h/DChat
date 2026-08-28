@@ -98,3 +98,17 @@
   color: var(--danger-text, #b42318);
   font-size: var(--text-sm);
 }
+
+/* The one field on a definition that reaches whoever reads the answer, so it
+   is set apart from the prose rather than sitting inside it. Warm rather than
+   red: a caveat is what makes a number usable, not a warning that it is broken. */
+.caveat {
+  margin: 0.5rem 0 0;
+  padding: 0.55rem 0.7rem;
+  border-left: 3px solid var(--peach, #e8a87c);
+  background: var(--surface-muted, rgba(232, 168, 124, 0.08));
+  border-radius: 0 6px 6px 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--text-secondary, inherit);
+}

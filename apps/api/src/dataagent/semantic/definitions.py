@@ -156,6 +156,12 @@ class Definition:
     expression: str | None = None
     required_filters: tuple[RequiredFilter, ...] = ()
     synonyms: tuple[str, ...] = ()
+    #: What this definition makes the **answer** say (revision 0033). The prompt
+    #: gets `description`, the critic gets `required_filters`, and before this
+    #: there was nowhere for a limit on what may be *claimed* — so a rule like
+    #: *"never label SUM(value_myr) as total waste cost"* reached the model and
+    #: stopped there. None for most definitions, which is the honest default.
+    caveat: str | None = None
     #: Which state of this definition the caller is holding (B-088). Defaulted
     #: because most callers reason about what a metric means rather than about
     #: which edit said so; the ones that have to cite it read it here.
@@ -254,6 +260,7 @@ async def create(
     description: str,
     required_filters: Sequence[dict[str, object]] = (),
     expression: str | None = None,
+    caveat: str | None = None,
     synonyms: Sequence[str] = (),
     kind: str = "metric",
     status: str = STATUS_ACTIVE,
@@ -284,6 +291,7 @@ async def create(
         kind=kind,
         description=description.strip(),
         expression=expression,
+        caveat=(caveat.strip() or None) if caveat else None,
         required_filters=tuple(RequiredFilter.of(dict(item)) for item in required_filters),
         synonyms=tuple(word.strip() for word in synonyms if word.strip()),
     )
@@ -298,6 +306,7 @@ async def create(
             kind=definition.kind,
             description=definition.description,
             expression=definition.expression,
+            caveat=definition.caveat,
             required_filters=_filters_json(definition.required_filters),
             synonyms=list(definition.synonyms),
             status=status,
@@ -378,6 +387,7 @@ class Version:
     name: str
     description: str
     expression: str | None
+    caveat: str | None
     required_filters: tuple[RequiredFilter, ...]
     synonyms: tuple[str, ...]
     status: str
@@ -432,6 +442,7 @@ def record_version(
             kind=row.kind,
             description=row.description,
             expression=row.expression,
+            caveat=row.caveat,
             required_filters=list(row.required_filters),
             synonyms=list(row.synonyms),
             status=row.status,
@@ -447,6 +458,7 @@ async def update(
     definition_id: uuid.UUID,
     description: str | None = None,
     expression: str | Keep | None = KEEP,
+    caveat: str | Keep | None = KEEP,
     synonyms: Sequence[str] | None = None,
     required_filters: Sequence[Mapping[str, object]] | None = None,
     actor_user_id: uuid.UUID | None = None,
@@ -493,6 +505,8 @@ async def update(
             edited = replace(edited, description=description.strip())
         if not isinstance(expression, Keep):
             edited = replace(edited, expression=expression)
+        if not isinstance(caveat, Keep):
+            edited = replace(edited, caveat=caveat)
         if synonyms is not None:
             edited = replace(
                 edited, synonyms=tuple(word.strip() for word in synonyms if word.strip())
@@ -511,6 +525,7 @@ async def update(
             for field, before, after in (
                 ("description", current.description, edited.description),
                 ("expression", current.expression, edited.expression),
+                ("caveat", current.caveat, edited.caveat),
                 ("synonyms", current.synonyms, edited.synonyms),
                 ("required_filters", current.required_filters, edited.required_filters),
             )
@@ -524,6 +539,7 @@ async def update(
 
         row.description = edited.description
         row.expression = edited.expression
+        row.caveat = edited.caveat
         row.synonyms = list(edited.synonyms)
         row.required_filters = _filters_json(edited.required_filters)
         row.updated_at = datetime.now(UTC)
@@ -683,6 +699,7 @@ async def versions_for(org_id: uuid.UUID, definition_id: uuid.UUID) -> tuple[Ver
             name=row.name,
             description=row.description,
             expression=row.expression,
+            caveat=row.caveat,
             required_filters=tuple(_readable_filters(row.required_filters)),
             synonyms=tuple(str(word) for word in row.synonyms),
             status=row.status,
@@ -721,6 +738,7 @@ def _definition_of(row: SemanticDefinition) -> Definition:
         kind=row.kind,
         description=row.description,
         expression=row.expression,
+        caveat=row.caveat,
         required_filters=tuple(filters),
         synonyms=tuple(str(word) for word in row.synonyms),
         version=row.version,

@@ -261,6 +261,20 @@ def limitations_for(
             f"than a rule the database enforces."
         )
 
+    # **What the definitions this run applied make the answer say** (revision
+    # 0033). First, because a limit on what may be *claimed* outranks every note
+    # about how the claim was reached: MiseQ's own words are *"never label
+    # SUM(value_myr) as total restaurant waste cost"*, and a reader who takes the
+    # number away without that sentence has the wrong number.
+    #
+    # Narrowed to the definitions the run actually applied — `state` carries only
+    # those — so a catalogue of definitions cannot caveat an answer none of them
+    # touched.
+    for name in state.applied_definitions:
+        sentence = state.definition_caveats.get(name, "").strip()
+        if sentence:
+            notes.append(f"{name}: {sentence}")
+
     # **Which rows this answer is made of** (D-053, D-058, B-157). Ahead of the
     # period note because it is the more fundamental doubt: *when* a figure is
     # about matters less than *whether it was ever observed*. B-157's answer was

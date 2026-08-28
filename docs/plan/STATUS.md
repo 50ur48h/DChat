@@ -28,7 +28,28 @@ Current position: **Phase 13 — the chat product. WP13.1a (#121), WP13.1b
                   *"Dev is current"* below for why three revisions in one hop
                   were safe, and for the warning that section used to carry and
                   had wrong.
-Next step:        **WP13.14 — the contract, and provenance that reaches the
+Next step:        **WP13.23 — the MiseQ metric definitions, in review with the
+                  owner and approved with two corrections (2026-08-28).** Six,
+                  every figure computed against `miseq_v64` before its sentence
+                  was written, and two of them cross-checked against MiseQ's own
+                  published numbers: `stage=prep_trim` is **2,634.32 kg** and
+                  `waste_cause=prep_trim` is **2,360.22 kg**, which is the
+                  *"2,634 vs 2,360"* their `meta_data_quality` row cites.
+                  Definitions carry a `caveat` that reaches the reader (D-065,
+                  revision 0033) rather than only the prompt.
+                  **Waste valued in RM is not among them, and that is the
+                  finding rather than a gap** (B-168): `fact_waste` has no money
+                  column at all, `v_waste_valued` is one of B-148's un-imported
+                  views, and the base-table route needs the `erp_keys` join whose
+                  measured error is **-53% to +706%** (B-162). There is no honest
+                  Food Variance either — it needs a theoretical-cost baseline
+                  this dataset does not contain, so no future import supplies it.
+                  Two owner corrections are applied: `waste_kg`'s caveat now says
+                  what the number **is** good for (composition and shares) rather
+                  than only what it is not, and `avoidable_waste` is renamed
+                  **`edible_waste`**, because the old name asserted what its own
+                  caveat retracted.
+                  Then **WP13.14 — the contract, and provenance that reaches the
                   query (D-053 as widened by D-058, closes B-157).** First of
                   three, and the only one producing **wrong numbers**: asked for
                   monthly sales the deployed app answered from a synthetic
@@ -109,7 +130,22 @@ Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-28 by Claude Code (**A run died on an error the database
+Last updated: 2026-08-28 by Claude Code (**A definition can now say what an
+              answer using it must admit, and the sentence reaches the reader.**
+              A definition had three outputs and none of them did: `description`
+              and `expression` are prose for the prompt, `required_filters` is
+              structure for the critic, and `applied_definitions` was read in the
+              composer only to *suppress* a caveat. So a metric whose meaning
+              includes a limit on what may be claimed had nowhere to put it —
+              which is D-053's mistake with the sign flipped, and the owner named
+              it as such: *"a caveat that reaches the model and not the reader is
+              the shape we keep filing."* `caveat` travels the whole way now
+              (D-065): import mapping, proposal review, edit form, version
+              history, and `limitations_for`. **The test that proves it drives
+              the route the screen calls**, not the service — the bug it would
+              have missed was real, since `accept()` rebuilt its returned
+              `Definition` field by field and silently omitted the new one.
+              Previously: **A run died on an error the database
               explained how to fix.** Every `ConnectorError` was reported to the
               loop as unfixable by rewriting — true of a database that is down,
               false of one that rejected the statement, and the two had never

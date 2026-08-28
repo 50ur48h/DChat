@@ -236,6 +236,7 @@ export interface Api {
       description_column: string;
       expression_column?: string | undefined;
       synonyms_column?: string | undefined;
+      caveat_column?: string | undefined;
     },
   ): Promise<DefinitionProposal[]>;
   /**

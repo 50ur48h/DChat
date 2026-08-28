@@ -109,16 +109,19 @@ async def _metric_table(customer: CustomerDatabase) -> None:
                     "  metric_key text PRIMARY KEY,"
                     "  definition_text text,"
                     "  formula text,"
-                    "  also_called text)"
+                    "  also_called text,"
+                    "  caution text)"
                 )
             )
             await connection.execute(text(f"DELETE FROM {BOOK}"))
             await connection.execute(
                 text(
-                    f"INSERT INTO {BOOK} (metric_key, definition_text, formula, also_called) "
+                    f"INSERT INTO {BOOK} "
+                    "(metric_key, definition_text, formula, also_called, caution) "
                     "VALUES ('stock_value', "
                     "'Total price of everything we list, excluding samples.', "
-                    "'sum(products.price)', 'stock value, listed value')"
+                    "'sum(products.price)', 'stock value, listed value', "
+                    "'Samples are excluded, so this understates what is on the shelf.')"
                 )
             )
             await connection.execute(text(f"GRANT SELECT ON {BOOK} TO {customer.reader_username}"))
@@ -337,6 +340,52 @@ async def test_a_table_name_that_is_not_a_bare_identifier_is_refused_before_any_
 
     assert status == 400
     assert "table name" in body["detail"]
+
+
+async def test_an_imported_caveat_survives_acceptance_and_reaches_the_wire(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """The whole travel, because every stop on it could drop the sentence.
+
+    `caveat` exists to be *read by a person*, so a test that stops at the
+    service proves the half that was never in doubt. This drives the route the
+    Admin screen calls: the customer's own column becomes a `ColumnMapping`,
+    becomes a row, becomes a `ProposalOut` the reviewer reads *before* blessing
+    it, survives `accept` — which built its returned `Definition` field by field
+    and silently omitted this one — and is still there on the definitions list.
+
+    Break any link and this goes red. A test on `Definition.caveat` alone would
+    have stayed green through the `accept` bug (B-133's lesson).
+    """
+    await _metric_table(isolated_customer_database)
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+    sentence = "Samples are excluded, so this understates what is on the shelf."
+
+    _, proposed = await api.call(
+        "POST", f"{base}/import", "alice", {**_import_body(), "caveat_column": "caution"}
+    )
+    # The reviewer has to see what they are about to bless.
+    assert proposed[0]["caveat"] == sentence
+
+    _, accepted = await api.call("POST", f"{base}/{proposed[0]['id']}/accept", "alice", {})
+    assert accepted["caveat"] == sentence
+
+    _, listed = await api.call("GET", base, "alice")
+    assert [row["caveat"] for row in listed if row["name"] == "stock_value"] == [sentence]
+
+
+async def test_an_unmapped_caveat_column_leaves_the_definition_without_one(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """Most metrics are just a formula and should not be made to sound uncertain."""
+    await _metric_table(isolated_customer_database)
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+
+    _, proposed = await api.call("POST", f"{base}/import", "alice", _import_body())
+
+    assert proposed[0]["caveat"] is None
 
 
 async def test_a_second_import_does_not_re_propose_what_is_already_known(

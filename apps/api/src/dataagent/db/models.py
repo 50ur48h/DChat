@@ -1414,6 +1414,17 @@ class SemanticDefinition(Base):
     synonyms: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
+    #: What this definition makes the **answer** say, or None (revision 0033).
+    #: `description` reaches the prompt and `required_filters` reaches the
+    #: critic; before this there was nowhere for a limit on what may be *claimed*
+    #: to go. MiseQ's own words are the case: *"never label SUM(value_myr) as
+    #: total restaurant waste cost"* is not a filter and not a formula, and a
+    #: model that dropped it would have been contradicted by nothing.
+    #:
+    #: Null for most definitions, deliberately. A metric that is simply a formula
+    #: should not be made to sound uncertain by a column that always wants
+    #: filling — an empty list of caveats is the common case and a good one.
+    caveat: Mapped[str | None] = mapped_column(Text)
     #: Where it came from, when it was not typed (B-059, WP10.2d), so drift in
     #: the customer's own table is visible rather than silently stale.
     provenance: Mapped[dict[str, object] | None] = mapped_column(JSONB)
@@ -1488,6 +1499,9 @@ class SemanticDefinitionVersion(Base):
     synonyms: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
+    #: Mirrored from the live row (revision 0033), because a version that could
+    #: not say what the answer was told is not a record of what bound a query.
+    caveat: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     #: What put it into this state: created, accepted, updated or retired.
     change: Mapped[str] = mapped_column(String(20), nullable=False)

@@ -115,6 +115,15 @@ class DefinitionOut(BaseModel):
     kind: str
     description: str
     expression: str | None = None
+    caveat: str | None = Field(
+        default=None,
+        description=(
+            "What an answer resting on this definition must say. Reaches the "
+            "reader, not only the model: `description` and `expression` inform "
+            "the prompt and bind nothing, so a limit stated only there is one a "
+            "model can drop and nothing contradicts (D-053, facing the other way)."
+        ),
+    )
     required_filters: list[RequiredFilterModel] = Field(default_factory=list[RequiredFilterModel])
     synonyms: list[str] = Field(default_factory=list[str])
     binds: bool = Field(
@@ -140,6 +149,7 @@ class DefinitionOut(BaseModel):
             kind=definition.kind,
             description=definition.description,
             expression=definition.expression,
+            caveat=definition.caveat,
             required_filters=[
                 RequiredFilterModel(
                     table=item.table, column=item.column, op=item.op, values=list(item.values)
@@ -165,6 +175,7 @@ class ProposalOut(BaseModel):
     name: str
     description: str
     expression: str | None = None
+    caveat: str | None = None
     synonyms: list[str] = Field(default_factory=list[str])
     provenance: dict[str, object] = Field(default_factory=dict[str, object])
 
@@ -175,6 +186,7 @@ class ProposalOut(BaseModel):
             name=proposal.name,
             description=proposal.description,
             expression=proposal.expression,
+            caveat=proposal.caveat,
             synonyms=list(proposal.synonyms),
             provenance=dict(proposal.provenance),
         )
@@ -184,6 +196,16 @@ class CreateDefinitionIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     description: str = Field(min_length=1, max_length=4000)
     expression: str | None = Field(default=None, max_length=4000)
+    caveat: str | None = Field(
+        default=None,
+        max_length=4000,
+        description=(
+            "What an answer resting on this definition must say. Reaches the "
+            "reader, not only the model: `description` and `expression` inform "
+            "the prompt and bind nothing, so a limit stated only there is one a "
+            "model can drop and nothing contradicts (D-053, facing the other way)."
+        ),
+    )
     synonyms: list[str] = Field(
         default_factory=list[str],
         description="What people actually type. `net_revenue` is not one of them.",
@@ -209,6 +231,15 @@ class ImportIn(BaseModel):
     expression_column: str | None = None
     synonyms_column: str | None = Field(
         default=None, description="Comma-separated in the customer's own cell"
+    )
+    caveat_column: str | None = Field(
+        default=None,
+        description=(
+            "A column saying what an answer using this metric must disclose. "
+            "MiseQ's `meta_data_quality.recommended_framing` is one: *never "
+            "label SUM(value_myr) as total restaurant waste cost*. Left "
+            "unmapped, imported definitions carry no caveat."
+        ),
     )
 
     model_config = {"populate_by_name": True}
@@ -258,6 +289,14 @@ class UpdateDefinitionIn(BaseModel):
             "one place here where null and absent differ."
         ),
     )
+    caveat: str | None = Field(
+        default=None,
+        max_length=4000,
+        description=(
+            "Send null to clear it. Omitting the field keeps it — the same "
+            "null-versus-absent distinction `expression` makes."
+        ),
+    )
     synonyms: list[str] | None = Field(
         default=None, description="A list replaces what is there; omit to keep it."
     )
@@ -295,6 +334,7 @@ class VersionOut(BaseModel):
     name: str
     description: str
     expression: str | None = None
+    caveat: str | None = None
     required_filters: list[RequiredFilterModel] = Field(default_factory=list[RequiredFilterModel])
     synonyms: list[str] = Field(default_factory=list[str])
     status: str
@@ -309,6 +349,7 @@ class VersionOut(BaseModel):
             name=version.name,
             description=version.description,
             expression=version.expression,
+            caveat=version.caveat,
             required_filters=[
                 RequiredFilterModel(
                     table=item.table, column=item.column, op=item.op, values=list(item.values)
@@ -508,6 +549,7 @@ async def create_definition(
             name=body.name,
             description=body.description,
             expression=body.expression,
+            caveat=body.caveat,
             synonyms=body.synonyms,
             required_filters=_filters(body.required_filters),
             kind=body.kind,
@@ -554,6 +596,7 @@ async def import_definitions(
                 description=body.description_column,
                 expression=body.expression_column,
                 synonyms=body.synonyms_column,
+                caveat=body.caveat_column,
             ),
             actor_user_id=context.user_id,
         )
@@ -650,6 +693,7 @@ async def update_definition(
             # requests rather than one. Every other field reads absence off
             # `None` because none of them has a meaningful null.
             expression=body.expression if "expression" in sent else KEEP,
+            caveat=body.caveat if "caveat" in sent else KEEP,
             synonyms=body.synonyms,
             required_filters=(
                 None if body.required_filters is None else _filters(body.required_filters)

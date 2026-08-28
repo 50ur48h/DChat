@@ -136,6 +136,7 @@ const EMPTY_FILTER: RequiredFilter = { table: "", column: "", op: "in", values: 
 interface Draft {
   description: string;
   expression: string;
+  caveat: string;
   synonyms: string;
   filters: RequiredFilter[];
 }
@@ -144,6 +145,7 @@ function draftOf(definition: SemanticDefinition): Draft {
   return {
     description: definition.description,
     expression: definition.expression ?? "",
+    caveat: definition.caveat ?? "",
     synonyms: definition.synonyms.join(", "),
     filters: definition.required_filters,
   };
@@ -173,6 +175,7 @@ export function changesFrom(definition: SemanticDefinition, draft: Draft) {
   const changes: {
     description?: string;
     expression?: string | null;
+    caveat?: string | null;
     synonyms?: string[];
     required_filters?: RequiredFilter[];
   } = {};
@@ -182,6 +185,10 @@ export function changesFrom(definition: SemanticDefinition, draft: Draft) {
   const expression = draft.expression.trim();
   if (expression !== (definition.expression ?? "")) {
     changes.expression = expression === "" ? null : expression;
+  }
+  const caveat = draft.caveat.trim();
+  if (caveat !== (definition.caveat ?? "")) {
+    changes.caveat = caveat === "" ? null : caveat;
   }
   const synonyms = words(draft.synonyms);
   if (synonyms.join("\u0000") !== definition.synonyms.join("\u0000")) {
@@ -295,6 +302,9 @@ export function Definitions({
   //: a question by name and synonym, so an import that carries no synonyms
   //: produces metrics no question can reach (B-085, B-087).
   const [synonymsColumn, setSynonymsColumn] = useState("");
+  //: The column saying what an answer using each metric has to disclose. The
+  //: only imported field that reaches the reader rather than the prompt.
+  const [caveatColumn, setCaveatColumn] = useState("");
 
   const load = useCallback(async () => {
     const [active, waiting, outOfForce] = await Promise.all([
@@ -362,6 +372,7 @@ export function Definitions({
         description_column: descriptionColumn.trim(),
         ...(expressionColumn.trim() ? { expression_column: expressionColumn.trim() } : {}),
         ...(synonymsColumn.trim() ? { synonyms_column: synonymsColumn.trim() } : {}),
+        ...(caveatColumn.trim() ? { caveat_column: caveatColumn.trim() } : {}),
       });
       // An import that proposed nothing succeeded — every name was already
       // known. Saying so is the difference between "done" and "did my mapping
@@ -560,6 +571,15 @@ export function Definitions({
             placeholder="metric_name — what people call it"
             onChange={(event) => setSynonymsColumn(event.target.value)}
           />
+          {/* The customer's own limits on what each metric may be used to claim.
+              Where they exist they are usually the most carefully written column
+              in the table, and until now there was nowhere to put them. */}
+          <Input
+            label="Caveat column (optional)"
+            value={caveatColumn}
+            placeholder="what an answer must disclose"
+            onChange={(event) => setCaveatColumn(event.target.value)}
+          />
           <Button
             onClick={() => void importFromTable()}
             disabled={busy || !table.trim() || !nameColumn.trim() || !descriptionColumn.trim()}
@@ -597,6 +617,11 @@ export function Definitions({
                   {proposal.expression ? (
                     <p className={styles.expression}>
                       <code>{proposal.expression}</code>
+                    </p>
+                  ) : null}
+                  {proposal.caveat ? (
+                    <p className={styles.caveat}>
+                      <strong>Answers must say:</strong> {proposal.caveat}
                     </p>
                   ) : null}
                   {proposal.synonyms.length > 0 ? (
@@ -814,6 +839,14 @@ export function Definitions({
                           placeholder="sum(orders.total_amount)"
                           onChange={(event) => setEdit({ ...edit, expression: event.target.value })}
                         />
+                        {/* Not a formula and not a synonym: the sentence every
+                            answer using this metric carries. Empty clears it. */}
+                        <Input
+                          label="Answers must say (optional)"
+                          value={edit.caveat}
+                          placeholder="what an answer using this metric has to disclose"
+                          onChange={(event) => setEdit({ ...edit, caveat: event.target.value })}
+                        />
                         <Input
                           label="Also called"
                           value={edit.synonyms}
@@ -919,6 +952,14 @@ export function Definitions({
                       {definition.expression ? (
                         <p className={styles.expression}>
                           <code>{definition.expression}</code>
+                        </p>
+                      ) : null}
+                      {/* Above the filters on purpose. The filters say what the
+                          platform enforces; this says what the answer has to
+                          admit, and it is the half a reader of the answer sees. */}
+                      {definition.caveat ? (
+                        <p className={styles.caveat}>
+                          <strong>Answers must say:</strong> {definition.caveat}
                         </p>
                       ) : null}
                       {definition.required_filters.length > 0 ? (

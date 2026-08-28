@@ -67,7 +67,7 @@ test: test.api test.web                  ## Run all tests
 # ---------------------------------------------------------------------------
 # Local stack
 # ---------------------------------------------------------------------------
-.PHONY: up up.mssql down down.hard logs ps seed seed.mssql
+.PHONY: up up.mssql down down.hard logs ps seed seed.mssql seed.fnb seed.definitions
 up: .env ## Start the local stack (platform-pg, seed-pizza-pg, api, web)
 	$(COMPOSE) up -d --build
 	@printf '\n  web  http://localhost:3000\n  api  http://localhost:8000/healthz\n\n'
@@ -96,6 +96,9 @@ seed.mssql: .env ## (Re)build the pizza demo dataset in the mssql container
 
 seed.fnb: .env ## Load a customer SQLite file into seed-fnb-pg: make seed.fnb SQLITE=path
 	uv run ops/seed/load_sqlite.py --sqlite "$(SQLITE)"
+
+seed.definitions: .env ## Load metric definitions: make seed.definitions FILE=... SOURCE="..."
+	$(SHELL) ops/scripts/seed_definitions.sh
 
 .PHONY: db.setup migrate migrate.down migration
 db.setup: .env ## Migrate, then give dataagent_app its local login
