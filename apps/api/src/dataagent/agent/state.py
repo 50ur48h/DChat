@@ -229,6 +229,20 @@ class ResearchState(BaseModel):
 
     #: WP8.2's join-path verdicts and WP9.1's verdict — both written now.
     capability: dict[str, Any] = Field(default_factory=dict[str, Any])
+    #: What period the question asked for, against what the data holds (D-051).
+    #: On the state rather than recomputed, for the reason `capability` is: the
+    #: composer and the ending both read it, and a second resolution could
+    #: disagree with the one the planner was told about.
+    coverage: dict[str, Any] = Field(default_factory=dict[str, Any])
+    #: Whether the one permitted retry of a model-judgement refusal has been
+    #: spent (**D-055**). On the state rather than in a local, so an interrupted
+    #: run that comes back cannot quietly buy a second one.
+    retried_judgement: bool = False
+    #: What the planner said when it first judged the question unanswerable.
+    #: Kept because the retried answer must still name that gap, and a reader
+    #: comparing the two is checking exactly the thing the owner asked to be
+    #: guarded.
+    judgement_reason: str = ""
     critic: dict[str, Any] | None = None
 
     #: How many drafts the critic has judged. Bounded by `MAX_CRITIC_PASSES`, and

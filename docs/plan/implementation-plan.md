@@ -993,9 +993,13 @@ dev app (*"sales last month"* → July 2026, against data ending 2025-12-31).
   covering a month that does not exist.
 - `composer.limitations_for` gains the partial-coverage caveat, next to D-050's
   inferred-join one.
-- **`none` finishes the run as a refusal** with `outcome_state` set accordingly
-  (D-044), naming the period asked and the period held. A refusal is the correct
-  answer to a question this data cannot support; a confident zero is not.
+- ~~**`none` finishes the run as a refusal**~~ **Not built (D-064).** The
+  evidence has a known blind spot: a period column stored as text gets no
+  profiled range (B-051), so `fact_sale_monthly_history.year_month` is invisible
+  and a question about 2024 resolves to `none` against a database that answers
+  it. Building the block would refuse correct questions — B-157 inverted. `none`
+  drives the strongest wording in the note instead, and `state.coverage` carries
+  the verdict so the ending can use it the day the blind spot closes.
 - **Tests/Accept:** unit tests on the resolver for covered/partial/none and for
   a question naming no period (the common case — the check must not fire).
   **Plus proof it is reached on the live path** (CLAUDE.md): a run driven through

@@ -306,6 +306,39 @@ async def research(
             continue
 
         if not plan.answerable:
+            # **A model's judgement is not a platform fact, and the two had the
+            # same finality** (D-055). The join-graph verdict a dozen lines below
+            # is something the model cannot argue with; `plan.answerable` is an
+            # opinion about a question, and this ended the run on it with no
+            # query run and nothing to show. Asked *"can food waste be reduced to
+            # increase revenue?"*, the deployed app refused while `fact_waste`
+            # sat in its own bundle — and the refusal's first clause, *"the
+            # reference data contains no food-waste records"*, was false.
+            #
+            # So: **one retry, and only from a standing start.** Bounded by
+            # `state.executions` being empty, so it can never fire mid-
+            # investigation, and by `retried_judgement` so it cannot fire twice.
+            # A **capability** refusal stays terminal — the platform's own facts
+            # are not sent back for a second opinion.
+            #
+            # **The guard is the answer still naming the gap**, not the retry
+            # being rare: *an honest refusal that becomes a padded non-answer is
+            # worse than the refusal* (owner, 2026-08-27). A retry that produces
+            # no citations falls back to `refused` through D-044's existing
+            # derivation, with no special case written for it.
+            if not state.executions and not state.retried_judgement:
+                state.retried_judgement = True
+                state.judgement_reason = plan.reason
+                await events.emit(
+                    "plan_created",
+                    {
+                        "answerable": False,
+                        "reason": plan.reason,
+                        "retrying": True,
+                    },
+                )
+                await save()
+                continue
             state.phase = "finished"
             await save()
             return LoopOutcome(

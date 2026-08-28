@@ -56,11 +56,14 @@ from dataclasses import dataclass
 
 __all__ = [
     "TIME_TYPES",
+    "Asked",
     "Coverage",
     "Period",
+    "asked_for",
     "available_period",
     "coverage_note",
     "describe",
+    "held_days",
     "limitation",
     "period_of_values",
 ]
@@ -197,16 +200,40 @@ def describe(answered: Period | None, available: Period | None, *, reason: str =
     return Coverage(status="outside", answered=answered, available=available)
 
 
-def coverage_note(available: Period | None) -> str:
+def coverage_note(available: Period | None, asked: Asked | None = None) -> str:
     """What the planner is told as fact (architecture 4.3), or nothing.
 
-    **Not enforcement, and it is not pretending to be.** The limitation the
-    composer attaches is what holds; this is the cheap half of the pair, and it
-    is the half that stops the wrong sentence being written at all. B-157's
-    refusal — three months of 2025 declared missing while `dim_calendar` held
-    every one of them — is a sentence a planner shown this range would not have
-    written.
+    **One note, not two.** The general fact — *this database holds these
+    periods* — and the specific one — *the period you asked for is not among
+    them* — compete for the same L0 slot, and shipping both would be the padding
+    that teaches people to skip the layer. So the specific sentence is said when
+    there is one, and the general sentence otherwise.
+
+    **Not enforcement, and the module says so**: the composer's limitation and
+    the refusal are what hold. This is the half that stops the wrong sentence
+    being written at all — B-157's refusal, three months of 2025 declared missing
+    while `dim_calendar` held every one of them, is a sentence a planner shown
+    this range would not have written.
     """
+    if asked is not None and asked.held is not None and asked.asked is not None:
+        low, high = asked.held
+        first, last = asked.asked[0], _before(asked.asked[1])
+        if asked.verdict == "none":
+            return (
+                f"The question asks about {first} to {last}. This database holds "
+                f"{low} to {high}, so **none** of the period asked for exists here. Say that "
+                f"plainly and name both periods. Do not report a zero: no rows and no data are "
+                f"different answers, and only one of them is true."
+            )
+        if asked.verdict == "partial" and asked.overlap is not None:
+            begin, until = asked.overlap
+            return (
+                f"The question asks about {first} to {last}. This database holds {low} to "
+                f"{high}, so only {begin} to {until} of it exists. Answer for the part that "
+                f"exists and say which part does not — **narrowing to the data is correct here, "
+                f"not a compromise**, and an answer that queries past {high} is describing rows "
+                f"that are not there."
+            )
     if available is None:
         return ""
     return (
@@ -234,3 +261,91 @@ def limitation(coverage: Coverage) -> str:
         f"a table whose period column has no measured range, or it reaches beyond the data "
         f"that was profiled — both are worth checking before relying on the figures."
     )
+
+
+# ---------------------------------------------------------------------------
+# The period a question asked for, against the period the data holds (D-051)
+# ---------------------------------------------------------------------------
+
+#: A full ISO date, which is what a profiled `date` column stores and what
+#: `critic.stated_range` resolves a question to. Kept apart from `_MONTH`
+#: deliberately: **this comparison is done at day precision and the other one is
+#: not**, and the reason is which sides are being compared. An answer's own rows
+#: may hold a text period like `2023-01`, so months are the finest grain both
+#: sides can honestly express there. Here both sides are real dates, and rounding
+#: to months would call a question about December *covered* by data that stops on
+#: the 15th.
+_DAY = re.compile(r"^(\d{4}-\d{2}-\d{2})")
+
+
+@dataclass(frozen=True, slots=True)
+class Asked:
+    """What a question wanted, against what the catalog holds.
+
+    ``verdict`` is one of:
+
+    * ``"covered"`` — every day asked for is inside the data.
+    * ``"partial"`` — some of it is. ``overlap`` is the part that exists, and it
+      is what an honest answer narrows to.
+    * ``"none"`` — no day asked for exists. **The correct ending is a refusal**
+      naming both periods; a confident zero is not (D-051).
+    * ``"unknown"`` — the question named no period, or nothing is profiled. The
+      common case, and the check must not fire on it.
+    """
+
+    verdict: str
+    asked: tuple[str, str] | None = None
+    held: tuple[str, str] | None = None
+    overlap: tuple[str, str] | None = None
+
+
+def _day(value: object) -> str | None:
+    if value is None:
+        return None
+    match = _DAY.match(str(value).strip())
+    return match.group(1) if match else None
+
+
+def held_days(columns: Sequence[tuple[str, str | None, str | None]]) -> tuple[str, str] | None:
+    """The widest span of full dates the catalog records, at day precision."""
+    ends: list[str] = []
+    for data_type, minimum, maximum in columns:
+        if not any(kind in data_type.lower() for kind in TIME_TYPES):
+            continue
+        ends.extend(day for value in (minimum, maximum) if (day := _day(value)) is not None)
+    if not ends:
+        return None
+    ends.sort()
+    return ends[0], ends[-1]
+
+
+def asked_for(wanted: tuple[str, str] | None, held: tuple[str, str] | None) -> Asked:
+    """Compare the period a question named with the period the data holds.
+
+    ``wanted`` is half-open — ``critic.stated_range``'s own convention, kept
+    rather than converted, because the check and the critic have to resolve one
+    period or they will disagree and the critic will block the corrected answer.
+    ``held`` is inclusive, because that is what a profiled min and max are.
+    """
+    if wanted is None or held is None:
+        return Asked(verdict="unknown", asked=wanted, held=held)
+    start, end_exclusive = wanted
+    low, high = held
+    # `high` is the last day that exists; the asked range ends the day before
+    # `end_exclusive`.
+    last_asked = min(_before(end_exclusive), high)
+    first_asked = max(start, low)
+    if first_asked > last_asked:
+        return Asked(verdict="none", asked=wanted, held=held)
+    if start >= low and _before(end_exclusive) <= high:
+        return Asked(
+            verdict="covered", asked=wanted, held=held, overlap=(start, _before(end_exclusive))
+        )
+    return Asked(verdict="partial", asked=wanted, held=held, overlap=(first_asked, last_asked))
+
+
+def _before(day: str) -> str:
+    """The day before an exclusive end, as ISO text."""
+    from datetime import date as _date
+
+    return _date.fromordinal(_date.fromisoformat(day).toordinal() - 1).isoformat()

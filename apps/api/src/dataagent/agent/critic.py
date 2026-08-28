@@ -308,6 +308,12 @@ class Evidence:
     question: str
     as_of: date
     state: ResearchState
+    #: The window the data actually holds, inclusive, or None when nothing
+    #: dated has been profiled (**D-051**). Without it this critic blocked the
+    #: *honest* answer: a run that narrowed to where the data ends failed
+    #: `covered_by` while one that queried past the end passed, so the rule
+    #: rewarded overstating a range. Reproduced before it was fixed.
+    held: tuple[str, str] | None = None
     statements: dict[str, str] = field(default_factory=dict[str, str])
     previews: tuple[tuple[str, str], ...] = ()
     dialect: str = "postgres"
@@ -366,6 +372,19 @@ def _citations_resolve(draft: FinalizeIn, evidence: Evidence) -> list[CriticFind
     ]
 
 
+def _within(wanted: _Range, held: tuple[str, str] | None) -> _Range | None:
+    """`wanted`, clipped to the days that exist. None when none of them do."""
+    if held is None:
+        return wanted
+    low, high = date.fromisoformat(held[0]), date.fromisoformat(held[1])
+    start = max(wanted.start, low)
+    # `held` is inclusive and `_Range.end` is exclusive.
+    end = min(wanted.end, date.fromordinal(high.toordinal() + 1))
+    if start >= end:
+        return None
+    return _Range(start, end, wanted.phrase)
+
+
 def _range_matches(draft: FinalizeIn, evidence: Evidence) -> list[CriticFinding]:
     """The dates in the SQL cover the period the question asked for.
 
@@ -380,6 +399,19 @@ def _range_matches(draft: FinalizeIn, evidence: Evidence) -> list[CriticFinding]
         return []
     wanted = stated_range(evidence.question, evidence.as_of)
     if wanted is None:
+        return []
+
+    # **Judged against the period that exists, not the one that was asked for**
+    # (D-051). A question reaching past the end of the data has a correct answer
+    # that stops where the data does, and this rule used to block exactly that
+    # while passing a query that ran past the end — punishing the honest answer
+    # and rewarding the overstated one. Narrowing here is what makes the
+    # coverage note's instruction and this check agree; without it the platform
+    # would tell the model to narrow and then block it for narrowing.
+    wanted = _within(wanted, evidence.held)
+    if wanted is None:
+        # Nothing asked for exists. That is a refusal the runner owns, and
+        # blocking here as well would be the same fact twice in two voices.
         return []
 
     dated = {

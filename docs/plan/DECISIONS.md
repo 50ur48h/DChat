@@ -121,6 +121,48 @@ may be joined — and one more caveat the composer can attach: *the data diction
 says these join; we checked and found no unmatched values*, which is a different
 claim from either a foreign key or an inference.
 
+## D-064 — `none` does not end the run, because the evidence for it has a known blind spot
+Date: 2026-08-28 · Phase: 13 · PR: this one · **Amends D-051**
+D-051 specified that a period the data does not cover at all *"finishes the run as
+a refusal… naming the period asked and the period held"*. Built as written, that
+is a **platform-imposed block on a question the data may well answer**, and this
+dataset shows exactly how.
+
+`held_days` reads `CatalogColumn.min_val`/`.max_val`, and the profiler writes a
+range only for date, time and numeric columns — **free text gets none**, which is
+B-051's rule and is not being changed here. On MiseQ,
+`fact_sale_monthly_history.year_month` is `TEXT` holding `'2023-01'`, so the
+window the platform can see is 2025 only while that table holds two further
+years. A question about 2024 therefore resolves to `none` against a database that
+answers it.
+
+**That is B-157 inverted**: instead of answering from a modelled table without
+saying so, the product would refuse a question the real data covers — and a false
+block is this component's characteristic failure.
+Options: (a) build the refusal as specified; (b) refuse only when no offered
+table has a text column that looks like a period; (c) do not refuse, and spend
+the verdict on the note and the caveat instead.
+Decision: **(c)**. `none` produces the strongest sentence in the capability note
+— *"none of the period asked for exists here… do not report a zero: no rows and
+no data are different answers, and only one of them is true"* — and the honest
+refusal stays where it already was, with the planner better informed.
+
+(b) is defensible and is rejected as a rule that would be right for the wrong
+reason: it makes a refusal's correctness depend on a heuristic about column
+names, which is the move `inference.py` refuses by construction.
+
+**What this costs, plainly.** The product can still report a confident zero for a
+period it does not hold, because nothing now *stops* it — the note only
+discourages it. That is a weaker guarantee than D-051 wanted and a better one
+than a block that fires on correct questions. It becomes buildable the moment a
+period column's range is knowable regardless of its storage type, which is the
+gap **B-162** and **B-165** both touch from other directions.
+
+Consequences: the three verdicts are still resolved and still carried on
+`state.coverage`, so the ending can start using `none` the day the blind spot
+closes. `partial` drives a real caveat **and** a real change to the critic;
+`none` drives wording only.
+
 ## D-063 — correction: the asked-for period does exist, and D-060 said it did not
 Date: 2026-08-28 · Phase: 13 · PR: this one · **Corrects D-060**
 D-060 gave two reasons for not building D-058's substitution ban. **The first one
