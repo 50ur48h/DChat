@@ -87,6 +87,8 @@ PROBES: tuple[tuple[str, str, dict[str, Any] | None], ...] = (
     ),
     ("GET", "/v1/orgs/{org_id}/active-data-source", None),
     ("PUT", "/v1/orgs/{org_id}/active-data-source", {"data_source_id": None}),
+    ("GET", "/v1/orgs/{org_id}/show-run-cost", None),
+    ("PUT", "/v1/orgs/{org_id}/show-run-cost", {"visible": True}),
     ("GET", "/v1/orgs/{org_id}/data-sources", None),
     (
         "POST",
@@ -668,6 +670,11 @@ async def test_the_snapshot_says_what_the_architecture_says(matrix_app: Matrix) 
         # the screen cannot explain. It discloses the *name* of a database
         # every member already queries — no host, no account, no credential.
         "GET /v1/orgs/{org_id}/active-data-source",
+        # D-066, and readable for the same reason. Every member is subject to
+        # this switch, so the settings screen has to be able to show its state
+        # to whoever can open the screen. It discloses no spend — only whether
+        # spend is shown.
+        "GET /v1/orgs/{org_id}/show-run-cost",
         # "Ask questions / view own conversations & traces" is the one line of
         # 6.2's table that grants a Reader anything, so a Reader who cannot ask
         # is a broken product rather than a tightened one.
@@ -729,6 +736,11 @@ async def test_the_snapshot_says_what_the_architecture_says(matrix_app: Matrix) 
         # wrong data — so it sits with managing data sources, not with
         # asking questions.
         "PUT /v1/orgs/{org_id}/active-data-source",
+        # D-066. Not a permission — off hides spend from the whole
+        # organization, the Admin who set it included — but *changing* it is
+        # org-shaping and audited, so it sits with the other org-shaping
+        # writes rather than with asking questions.
+        "PUT /v1/orgs/{org_id}/show-run-cost",
     ):
         assert recorded[admin_only]["admin"] == "allow"
         assert recorded[admin_only]["contributor"].startswith("deny")

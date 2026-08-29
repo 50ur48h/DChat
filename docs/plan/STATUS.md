@@ -28,7 +28,28 @@ Current position: **Phase 13 — the chat product. WP13.1a (#121), WP13.1b
                   *"Dev is current"* below for why three revisions in one hop
                   were safe, and for the warning that section used to carry and
                   had wrong.
-Next step:        **WP13.23 — the MiseQ metric definitions, in review with the
+Next step:        **WP13.25 — what a run cost, told truthfully, and a switch to
+                  stop telling it.** Two things the owner asked for before
+                  deploying. **The cost figure overstates**, and by a knowable
+                  amount nobody could know: `estimate_cost` prices the whole
+                  input at the full rate while the provider discounts the part
+                  it served from its prompt cache, and `input_tokens` is
+                  inclusive of that part. Revision 0034 records
+                  `cached_input_tokens` and **deliberately changes no price**
+                  (D-067) — a test pins that two calls differing only in cached
+                  share still cost the same, so modelling the discount is a
+                  change somebody makes on purpose. `tokens_estimated` is
+                  surfaced in the same pass, recorded per row since revision
+                  0011 and never shown. **The comparison against the provider's
+                  own figures is the owner's to run** (B-170): this machine
+                  cannot reach `api.openai.com` — egress to it and to
+                  `github.com` is blocked while `example.com` resolves.
+                  **And spend can be switched off per organization** (D-066),
+                  enforced in the API rather than the browser: a screen that
+                  declines to draw `cost_estimate` has still sent it. Default
+                  visible, so turning it off is deliberate; off means off for
+                  Admins too, which makes it a switch and not a permission.
+                  Then **WP13.23 — the MiseQ metric definitions, in review with the
                   owner and approved with two corrections (2026-08-28).** Six,
                   every figure computed against `miseq_v64` before its sentence
                   was written, and two of them cross-checked against MiseQ's own

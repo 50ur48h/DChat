@@ -913,6 +913,46 @@ describe("what the run cost", () => {
     expect(cost.textContent).not.toContain("$0.0000");
   });
 
+  it("says how much of the input was cached, because the total does not discount it", async () => {
+    // **Revision 0034.** `cost_estimate` prices the whole input at the full
+    // rate while the provider bills the cached part at less, so a reader
+    // checking this against an invoice needs to see the cached share rather
+    // than having to guess why the two disagree.
+    routeFetch({
+      run: {
+        ...priced,
+        model_usage: { ...priced.model_usage, cached_input_tokens: 1200 },
+      },
+    });
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    expect(await screen.findByTestId("run-cost")).toHaveTextContent("1,200 cached");
+  });
+
+  it("says when the token counts are our arithmetic rather than the provider's", async () => {
+    // Estimated tokens are priced as if measured. A total that mixes the two
+    // and does not say which is the silent-mixing shape, so the line says it.
+    routeFetch({
+      run: { ...priced, model_usage: { ...priced.model_usage, estimated_calls: 2 } },
+    });
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    expect(await screen.findByTestId("run-cost")).toHaveTextContent("2 estimated");
+  });
+
+  it("renders nothing when the organization has spend switched off (D-066)", async () => {
+    // The API withholds `cost_estimate` and `model_usage` rather than the
+    // screen declining to draw them, so what arrives is indistinguishable from
+    // a run that recorded no usage — which this component already handled. That
+    // is the whole reason the switch needed no web change, and this is the
+    // assertion that keeps it true.
+    routeFetch({ run: { ...ANSWERED, cost_estimate: null, model_usage: {} } });
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    await screen.findByText(/6,214 orders/);
+    expect(screen.queryByTestId("run-cost")).toBeNull();
+  });
+
   it("shows nothing at all for a run that recorded no usage", async () => {
     // Older runs, and runs that ended before a model was called. An empty strip
     // is honest; "$0.00" would not be.

@@ -753,3 +753,107 @@ async def test_removing_the_chosen_source_leaves_the_organization_choosing_none(
     status, conversation = await api.call("POST", f"/v1/orgs/{org_id}/conversations", "alice", {})
     assert status == 201
     assert conversation["data_source_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# Whether an answer says what it cost (D-066)
+# ---------------------------------------------------------------------------
+
+
+async def _charged_run(api: Api, org_id: str) -> str:
+    """A run with one priced model call against it, through the real meter."""
+    from dataagent.llm.base import Usage
+    from dataagent.llm.meter import record
+
+    _, conversation = await api.call(
+        "POST", f"/v1/orgs/{org_id}/conversations", "alice", {"title": "Spend"}
+    )
+    _, accepted = await api.call(
+        "POST",
+        f"/v1/orgs/{org_id}/conversations/{conversation['id']}/messages",
+        "alice",
+        {"content": "What did we sell?", "idempotency_key": "spend-1"},
+    )
+    run_id = str(accepted["run_id"])
+    await record(
+        org_id=uuid.UUID(org_id),
+        run_id=uuid.UUID(run_id),
+        role="sql",
+        tier="strong",
+        provider="openai",
+        model="m-1",
+        usage=Usage(input_tokens=1000, output_tokens=100),
+        latency_ms=5,
+    )
+    await service.transition(org_id=uuid.UUID(org_id), run_id=uuid.UUID(run_id), status="running")
+    await service.transition(org_id=uuid.UUID(org_id), run_id=uuid.UUID(run_id), status="completed")
+    return run_id
+
+
+async def test_an_answer_says_what_it_cost_unless_the_organization_turned_it_off(
+    api: Api,
+) -> None:
+    """**Default visible, and turning it off is a deliberate act** (owner,
+    2026-08-29) — so a new organization inherits nothing it did not choose.
+
+    The switch is asserted on the **wire**, which is the whole of D-066. Hiding
+    the number in the browser leaves it in the response for anyone who opens the
+    network tab, and *"not everyone should see spend"* is not a claim a CSS rule
+    can make.
+    """
+    org_id = await _org(api)
+    run_id = await _charged_run(api, org_id)
+
+    status, before = await api.call("GET", f"/v1/orgs/{org_id}/runs/{run_id}", "alice")
+    assert status == 200
+    assert before["model_usage"]["calls"] == 1, "visible with nobody having chosen anything"
+
+    status, _ = await api.call(
+        "PUT", f"/v1/orgs/{org_id}/show-run-cost", "alice", {"visible": False}
+    )
+    assert status == 200
+
+    status, after = await api.call("GET", f"/v1/orgs/{org_id}/runs/{run_id}", "alice")
+    assert status == 200
+    assert after["cost_estimate"] is None
+    assert after["model_usage"] == {}
+    # The answer itself is untouched: this hides spend, not the work.
+    assert after["status"] == "completed"
+
+    # And back on, because the owner asked for a switch rather than a decision.
+    await api.call("PUT", f"/v1/orgs/{org_id}/show-run-cost", "alice", {"visible": True})
+    status, again = await api.call("GET", f"/v1/orgs/{org_id}/runs/{run_id}", "alice")
+    assert again["model_usage"]["calls"] == 1
+
+
+async def test_the_thread_listing_hides_spend_too(api: Api) -> None:
+    """The single-run route and the thread's list share `run_out` (B-106), and a
+    switch honoured by one of them is a switch that leaks from the other — which
+    is the more likely place to be read, since it is where a reader compares two
+    answers."""
+    org_id = await _org(api)
+    run_id = await _charged_run(api, org_id)
+    _, run = await api.call("GET", f"/v1/orgs/{org_id}/runs/{run_id}", "alice")
+    conversation_id = run["conversation_id"]
+
+    await api.call("PUT", f"/v1/orgs/{org_id}/show-run-cost", "alice", {"visible": False})
+
+    status, listed = await api.call(
+        "GET", f"/v1/orgs/{org_id}/conversations/{conversation_id}/runs", "alice"
+    )
+    assert status == 200
+    assert [row["model_usage"] for row in listed] == [{}]
+
+
+async def test_a_reader_cannot_turn_spend_back_on(api: Api) -> None:
+    """Changing it is an Admin act and audited. Reading it is not — every member
+    is subject to the switch and the settings screen has to show its state."""
+    org_id = await _org_with_a_reader(api)
+    await api.call("PUT", f"/v1/orgs/{org_id}/show-run-cost", "alice", {"visible": False})
+
+    status, _ = await api.call("PUT", f"/v1/orgs/{org_id}/show-run-cost", "bob", {"visible": True})
+    assert status == 403
+
+    status, seen = await api.call("GET", f"/v1/orgs/{org_id}/show-run-cost", "bob")
+    assert status == 200
+    assert seen["visible"] is False

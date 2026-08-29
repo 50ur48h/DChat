@@ -173,6 +173,12 @@ class Usage:
 
     input_tokens: int = 0
     output_tokens: int = 0
+    #: How many of ``input_tokens`` came from the provider's prompt cache, or
+    #: None where the provider does not say. **A subset of the input, not an
+    #: addition to it** — providers report it that way and bill it at a discount
+    #: we do not currently model (revision 0034). Recorded before it is priced,
+    #: deliberately: the size of the gap should be an observation.
+    cached_input_tokens: int | None = None
     estimated: bool = False
 
     @property

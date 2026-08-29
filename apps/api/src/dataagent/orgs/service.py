@@ -325,6 +325,74 @@ async def active_data_source(org_id: uuid.UUID) -> ActiveDataSource:
         return await _active_data_source(session, org)
 
 
+#: The key in ``organizations.settings`` holding whether an answer shows what it
+#: cost. **Absent means visible**, which is the owner's rule (2026-08-29):
+#: turning spend off is a deliberate act, not something a new organization
+#: inherits from a default nobody chose.
+SHOW_RUN_COST = "show_run_cost"
+
+
+def show_run_cost_of(org: Organization) -> bool:
+    """Whether this organization's answers carry cost and token counts.
+
+    **A key in ``settings``, not a column**, and revision 0031's reasoning is
+    what decides it rather than contradicting it: that migration rejected the
+    JSONB column for `active_data_source_id` because an id needs referential
+    integrity and JSONB has none. A boolean references nothing, so the objection
+    does not apply and the column that has been sitting empty since revision
+    0001 is the right home.
+
+    Anything other than an explicit ``false`` reads as visible. A malformed
+    value must not hide spend by accident — the failure that matters here is a
+    number vanishing with nobody able to say why, not one showing when it could
+    have been hidden.
+    """
+    return (org.settings or {}).get(SHOW_RUN_COST) is not False
+
+
+async def show_run_cost(org_id: uuid.UUID) -> bool:
+    """The switch, readable by any member — every member is subject to it."""
+    async with org_session(org_id) as session:
+        org = (
+            (await session.execute(select(Organization).where(Organization.id == org_id)))
+            .scalars()
+            .one()
+        )
+        return show_run_cost_of(org)
+
+
+async def set_show_run_cost(*, org_id: uuid.UUID, actor_user_id: uuid.UUID, visible: bool) -> bool:
+    """Turn spend on or off for the whole organization. Admin only.
+
+    **Not a permission.** It hides cost from everybody, the Admin who set it
+    included — which is the owner's intent (2026-08-29: *"Hide it from everyone
+    including me when it's off"*) and worth stating because a per-role rule is
+    the thing this most resembles and is not.
+    """
+    async with org_session(org_id) as session:
+        org = (
+            (await session.execute(select(Organization).where(Organization.id == org_id)))
+            .scalars()
+            .one()
+        )
+        previous = show_run_cost_of(org)
+        # Reassigned rather than mutated: SQLAlchemy does not track a mutation
+        # inside a JSONB dict, so `settings[key] = x` would flush nothing and the
+        # switch would appear to work until the next request read it back.
+        org.settings = {**(org.settings or {}), SHOW_RUN_COST: visible}
+        audit(
+            session,
+            org_id=org_id,
+            actor_user_id=actor_user_id,
+            action="org.show_run_cost_changed",
+            object_type="organization",
+            object_id=str(org_id),
+            details={"from": previous, "to": visible},
+        )
+        await session.flush()
+        return visible
+
+
 async def set_active_data_source(
     *, org_id: uuid.UUID, actor_user_id: uuid.UUID, data_source_id: uuid.UUID | None
 ) -> ActiveDataSource:

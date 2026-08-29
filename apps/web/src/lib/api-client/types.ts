@@ -413,13 +413,27 @@ export interface RunUsage {
   calls?: number;
   input_tokens?: number;
   output_tokens?: number;
+  /**
+   * How many of `input_tokens` the provider served from its own prompt cache.
+   *
+   * **A subset of the input, and not discounted in `cost_estimate`** (revision
+   * 0034). The provider bills cached input at less than full rate and we price
+   * the whole input at full rate, so this measures how far the total overstates.
+   * `null` means no call reported a cached share — which is not a claim that
+   * none was cached.
+   */
+  cached_input_tokens?: number | null;
   unpriced_calls?: number;
+  /** Calls whose token counts are our arithmetic rather than the provider's. */
+  estimated_calls?: number;
   by_model?: {
     model?: string;
     role?: string;
     calls?: number;
     input_tokens?: number;
     output_tokens?: number;
+    cached_input_tokens?: number | null;
+    estimated_calls?: number;
     /** Null for a model the price table does not cover. */
     cost_usd?: string | null;
   }[];

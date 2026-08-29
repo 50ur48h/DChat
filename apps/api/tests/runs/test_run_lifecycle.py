@@ -479,6 +479,8 @@ async def _charge(
     input_tokens: int,
     output_tokens: int,
     priced: bool = False,
+    cached: int | None = None,
+    estimated: bool = False,
 ) -> None:
     """One provider call, through the meter the product uses.
 
@@ -497,7 +499,12 @@ async def _charge(
         tier="strong",
         provider="openai",
         model=model,
-        usage=Usage(input_tokens=input_tokens, output_tokens=output_tokens),
+        usage=Usage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_input_tokens=cached,
+            estimated=estimated,
+        ),
         latency_ms=12,
         settings=build_settings(llm_prices=PRICES) if priced else None,
     )
@@ -557,6 +564,68 @@ async def test_a_finished_run_says_what_it_cost(tenant: Tenant) -> None:
     ]
 
 
+async def test_the_rollup_carries_the_cached_share_and_the_estimated_count(
+    tenant: Tenant,
+) -> None:
+    """**Revision 0034, and the reason it exists.**
+
+    `cost_estimate` prices the whole input at the full rate while the provider
+    bills the cached part at less, so the total overstates every cache hit. The
+    size of that was unmeasurable because the number was never stored. Both this
+    and `estimated_calls` sit *beside* the total rather than inside it — nothing
+    here changes a price.
+
+    Asserted on the run the route returns, not on the ledger query: a value
+    that is right in flight and absent from the response is the defect this
+    repository keeps filing.
+    """
+    asked = await _ask(tenant)
+    await service.transition(org_id=tenant.org_id, run_id=asked.run_id, status="running")
+    await _charge(
+        tenant,
+        asked.run_id,
+        model="m-1",
+        role="sql",
+        input_tokens=1000,
+        output_tokens=100,
+        cached=900,
+    )
+    await _charge(
+        tenant,
+        asked.run_id,
+        model="m-1",
+        role="sql",
+        input_tokens=500,
+        output_tokens=50,
+        cached=100,
+    )
+    # A provider that reports no usage: we counted these, and a total that mixes
+    # measured with guessed and does not say so is the silent-mixing shape.
+    await _charge(
+        tenant,
+        asked.run_id,
+        model="m-2",
+        role="compose",
+        input_tokens=200,
+        output_tokens=20,
+        estimated=True,
+    )
+
+    run = await service.transition(org_id=tenant.org_id, run_id=asked.run_id, status="completed")
+
+    usage = run.model_usage
+    assert usage["cached_input_tokens"] == 1000
+    assert usage["input_tokens"] == 1700, "cached is a subset of input, never an addition"
+    assert usage["estimated_calls"] == 1
+
+    by_model = cast(list[dict[str, object]], usage["by_model"])
+    rows = {(row["model"], row["role"]): row for row in by_model}
+    assert rows[("m-1", "sql")]["cached_input_tokens"] == 1000
+    # None rather than 0 on the model whose calls said nothing about caching.
+    assert rows[("m-2", "compose")]["cached_input_tokens"] is None
+    assert rows[("m-2", "compose")]["estimated_calls"] == 1
+
+
 async def test_an_unpriced_call_leaves_the_total_null_rather_than_understating_it(
     tenant: Tenant,
 ) -> None:
@@ -597,7 +666,11 @@ async def test_a_run_that_called_no_model_claims_no_price(tenant: Tenant) -> Non
         "calls": 0,
         "input_tokens": 0,
         "output_tokens": 0,
+        # None, not 0: no call reported a cached share, which is not a claim
+        # that none of the input was cached (revision 0034).
+        "cached_input_tokens": None,
         "unpriced_calls": 0,
+        "estimated_calls": 0,
         "by_model": [],
     }
 

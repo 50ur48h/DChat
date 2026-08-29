@@ -977,6 +977,14 @@ async def _roll_up_usage(session: AsyncSession, run: AgentRun) -> None:
                 func.coalesce(func.sum(UsageLedger.output_tokens), 0).label("output_tokens"),
                 func.sum(UsageLedger.cost_usd).label("cost_usd"),
                 func.count().filter(UsageLedger.cost_usd.is_(None)).label("unpriced"),
+                # Cached input is summed over the rows that reported one, and
+                # the count of those rows travels beside it — `0` and "nobody
+                # said" are different claims and a bare sum conflates them.
+                func.sum(UsageLedger.cached_input_tokens).label("cached_input_tokens"),
+                func.count()
+                .filter(UsageLedger.cached_input_tokens.isnot(None))
+                .label("cached_reported"),
+                func.count().filter(UsageLedger.tokens_estimated.is_(True)).label("estimated"),
             )
             .where(UsageLedger.run_id == run.id)
             .group_by(UsageLedger.model, UsageLedger.role)
@@ -986,12 +994,16 @@ async def _roll_up_usage(session: AsyncSession, run: AgentRun) -> None:
 
     by_model: list[dict[str, object]] = []
     calls = inputs = outputs = unpriced = 0
+    cached = cached_reported = estimated = 0
     total = Decimal("0")
     for row in rows:
         calls += row.calls
         inputs += int(row.input_tokens)
         outputs += int(row.output_tokens)
         unpriced += row.unpriced
+        cached += int(row.cached_input_tokens or 0)
+        cached_reported += row.cached_reported
+        estimated += row.estimated
         if row.cost_usd is not None:
             total += row.cost_usd
         by_model.append(
@@ -1001,6 +1013,10 @@ async def _roll_up_usage(session: AsyncSession, run: AgentRun) -> None:
                 "calls": row.calls,
                 "input_tokens": int(row.input_tokens),
                 "output_tokens": int(row.output_tokens),
+                "cached_input_tokens": (
+                    None if row.cached_reported == 0 else int(row.cached_input_tokens or 0)
+                ),
+                "estimated_calls": row.estimated,
                 # A string, because JSONB has no decimal and a float would round
                 # a price. The reader formats it; nothing here does arithmetic on
                 # it again.
@@ -1012,7 +1028,17 @@ async def _roll_up_usage(session: AsyncSession, run: AgentRun) -> None:
         "calls": calls,
         "input_tokens": inputs,
         "output_tokens": outputs,
+        # **Recorded, not discounted** (revision 0034). `cost_estimate` prices
+        # the whole input at the full rate, and the provider bills the cached
+        # part at less — so this is the measurement of how far that overstates,
+        # kept beside the total rather than folded into it. None means no call
+        # reported a cached share, which is not the same as none being cached.
+        "cached_input_tokens": None if cached_reported == 0 else cached,
         "unpriced_calls": unpriced,
+        # How many of these calls were counted by us rather than by the
+        # provider. A total that mixes measured and estimated tokens and does
+        # not say so is the shape this project keeps filing.
+        "estimated_calls": estimated,
         "by_model": by_model,
     }
     run.cost_estimate = None if (unpriced or not rows) else total

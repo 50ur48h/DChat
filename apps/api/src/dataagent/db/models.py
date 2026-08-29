@@ -844,6 +844,15 @@ class UsageLedger(Base):
         CheckConstraint(
             "input_tokens >= 0 AND output_tokens >= 0", name="token_counts_non_negative"
         ),
+        # Cached input is a *subset* of the input, never an addition (revision
+        # 0034). Declared here as well as in the migration because the drift
+        # check compares the two, and a constraint the database has and the
+        # model does not is one nobody reading the model would know about.
+        CheckConstraint(
+            "cached_input_tokens IS NULL OR "
+            "(cached_input_tokens >= 0 AND cached_input_tokens <= input_tokens)",
+            name="cached_within_input",
+        ),
         Index("ix_usage_ledger_org_id_created_at", "org_id", text("created_at DESC")),
         Index("ix_usage_ledger_org_id_run_id", "org_id", "run_id"),
     )
@@ -865,6 +874,13 @@ class UsageLedger(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     input_tokens: Mapped[int] = mapped_column(nullable=False, server_default=text("0"))
     output_tokens: Mapped[int] = mapped_column(nullable=False, server_default=text("0"))
+    #: How many of ``input_tokens`` the provider served from its prompt cache.
+    #: A *subset* of the input, never an addition, and priced at a discount by
+    #: the provider while we price the whole input at the full rate — so this is
+    #: the measurement of a known overstatement (revision 0034). Null is
+    #: "unknown", which is what every row before that revision is and what a
+    #: provider that does not report a cached share stays.
+    cached_input_tokens: Mapped[int | None] = mapped_column()
     #: True when the counts are our own arithmetic rather than the provider's, so
     #: a total can say how much of itself is measured.
     tokens_estimated: Mapped[bool] = mapped_column(nullable=False, server_default=text("false"))
