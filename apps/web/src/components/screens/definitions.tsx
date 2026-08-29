@@ -141,6 +141,51 @@ interface Draft {
   filters: RequiredFilter[];
 }
 
+/** What an Admin has typed into the *new* definition form (**B-169**). */
+export interface Written {
+  name: string;
+  description: string;
+  expression: string;
+  caveat: string;
+  synonyms: string;
+  filters: RequiredFilter[];
+}
+
+export const EMPTY_WRITTEN: Written = {
+  name: "",
+  description: "",
+  expression: "",
+  caveat: "",
+  synonyms: "",
+  filters: [],
+};
+
+/**
+ * The body a written definition sends, with empty optional fields omitted.
+ *
+ * **Omission rather than empty string**, for `create`'s own reason: the API
+ * treats `expression: ""` as a formula that is the empty string, and `caveat:
+ * ""` as a caveat nobody can read. Neither is what an untouched field means.
+ */
+export function bodyFrom(written: Written) {
+  const expression = written.expression.trim();
+  const caveat = written.caveat.trim();
+  const synonyms = words(written.synonyms);
+  return {
+    name: written.name.trim(),
+    description: written.description.trim(),
+    ...(expression ? { expression } : {}),
+    ...(caveat ? { caveat } : {}),
+    ...(synonyms.length > 0 ? { synonyms } : {}),
+    ...(written.filters.length > 0 ? { required_filters: written.filters } : {}),
+  };
+}
+
+/** Whether the form has enough to send. Name and description are required. */
+export function canWrite(written: Written): boolean {
+  return written.name.trim().length > 0 && written.description.trim().length > 0;
+}
+
 function draftOf(definition: SemanticDefinition): Draft {
   return {
     description: definition.description,
@@ -270,6 +315,12 @@ export function Definitions({
   //: editor at the bottom of a long page is where the person is looking.
   const [errorAt, setErrorAt] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  //: Where the notice belongs, for the reason `errorAt` exists: the screen had
+  //: one render site for every success message, so accepting a proposal at the
+  //: bottom of the page reported it under the import form at the top. Taken
+  //: from whatever anchor `run` was given, so the existing callers — which
+  //: pass none — keep landing exactly where they did.
+  const [noticeAt, setNoticeAt] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   //: Filters staged against one proposal, by proposal id. Kept here rather than
@@ -305,6 +356,14 @@ export function Definitions({
   //: The column saying what an answer using each metric has to disclose. The
   //: only imported field that reaches the reader rather than the prompt.
   const [caveatColumn, setCaveatColumn] = useState("");
+
+  //: Writing one by hand (**B-169**). `createDefinition` existed on the client
+  //: from the beginning and no screen ever called it, so the only ways to get a
+  //: definition into a source were to import a table that already held one or
+  //: to spend a bearer token from a script. Somebody trying the product on
+  //: their own data has neither.
+  const [written, setWritten] = useState<Written>(EMPTY_WRITTEN);
+  const [writtenFilter, setWrittenFilter] = useState<RequiredFilter>(EMPTY_FILTER);
 
   const load = useCallback(async () => {
     const [active, waiting, outOfForce] = await Promise.all([
@@ -351,6 +410,7 @@ export function Definitions({
     setError(null);
     setErrorAt(null);
     setNotice(null);
+    setNoticeAt(anchor);
     try {
       await action();
       await load();
@@ -362,6 +422,22 @@ export function Definitions({
     } finally {
       setBusy(false);
     }
+  };
+
+  const writeOne = async () => {
+    await run(async () => {
+      const created = await api.createDefinition(orgId, dataSourceId, bodyFrom(written));
+      setWritten(EMPTY_WRITTEN);
+      setWrittenFilter(EMPTY_FILTER);
+      // Says which of the two it is, because they are different objects: one
+      // constrains generated SQL and the other is guidance the critic ignores
+      // (D-033). An Admin who meant to write a rule should find out now.
+      setNotice(
+        created.binds
+          ? `${created.name} is in force: a query that ignores its filters is blocked.`
+          : `${created.name} is in force as prose. Nothing checks it — add a filter to make it bind.`,
+      );
+    }, "written");
   };
 
   const importFromTable = async () => {
@@ -587,7 +663,137 @@ export function Definitions({
             {busy ? "Working…" : "Import"}
           </Button>
         </div>
-        {notice ? <p className={styles.notice}>{notice}</p> : null}
+        {notice && noticeAt === null ? <p className={styles.notice}>{notice}</p> : null}
+      </Card>
+
+      {/* **B-169.** `createDefinition` was on the API client from the start and
+          no screen called it, so a source whose warehouse has no metric table —
+          which is most of them, and every one somebody is trying the product on
+          for the first time — could not be given a definition at all without a
+          bearer token and a script. */}
+      <Card
+        title="Write one by hand"
+        subtitle="For a database that does not already carry its definitions. Unlike an import, this takes effect as soon as you save it."
+      >
+        <div className={styles.importForm}>
+          <Input
+            label="Name"
+            value={written.name}
+            placeholder="net_revenue"
+            onChange={(event) => setWritten({ ...written, name: event.target.value })}
+          />
+          <Input
+            label="What it means"
+            value={written.description}
+            placeholder="Sales after discounts, excluding cancelled orders."
+            onChange={(event) => setWritten({ ...written, description: event.target.value })}
+          />
+          <Input
+            label="Formula (optional)"
+            value={written.expression}
+            placeholder="sum(orders.total_amount)"
+            onChange={(event) => setWritten({ ...written, expression: event.target.value })}
+          />
+          <Input
+            label="Answers must say (optional)"
+            value={written.caveat}
+            placeholder="what an answer using this metric has to disclose"
+            onChange={(event) => setWritten({ ...written, caveat: event.target.value })}
+          />
+          {/* The same warning the import form carries, and it matters more here:
+              an imported definition at least answers to the label its own table
+              gave it, while a hand-written one answers to nothing but what is
+              typed in this box (B-085). */}
+          <Input
+            label="Also called"
+            value={written.synonyms}
+            placeholder="the words people use when they ask"
+            onChange={(event) => setWritten({ ...written, synonyms: event.target.value })}
+          />
+        </div>
+
+        {written.filters.length > 0 ? (
+          <ul className={styles.filters}>
+            {written.filters.map((filter, index) => (
+              <li key={`${filter.table}.${filter.column}.${index}`}>
+                {describeFilter(filter)}{" "}
+                <Button
+                  variant="ghost"
+                  onClick={() =>
+                    setWritten({
+                      ...written,
+                      filters: written.filters.filter((_, at) => at !== index),
+                    })
+                  }
+                  disabled={busy}
+                >
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className={styles.prose}>
+            With no filter this is prose: it reaches the model as guidance and the critic checks
+            nothing. Add one to make it bind.
+          </p>
+        )}
+
+        <div className={styles.filterForm}>
+          {/* Prefixed, for the reason the import form gives above: this card
+              puts a second filter editor on a screen that already has one, and
+              two controls with one name is how a column ends up in the wrong
+              box. */}
+          <Input
+            label="Filter table"
+            value={writtenFilter.table}
+            onChange={(event) => setWrittenFilter({ ...writtenFilter, table: event.target.value })}
+          />
+          <Input
+            label="Filter column"
+            value={writtenFilter.column}
+            onChange={(event) => setWrittenFilter({ ...writtenFilter, column: event.target.value })}
+          />
+          <Select
+            label="Filter must be"
+            options={OPERATORS}
+            value={writtenFilter.op}
+            onChange={(event) => setWrittenFilter({ ...writtenFilter, op: event.target.value })}
+          />
+          <Input
+            label="Filter values"
+            value={writtenFilter.values.join(", ")}
+            placeholder="completed"
+            onChange={(event) =>
+              setWrittenFilter({ ...writtenFilter, values: words(event.target.value) })
+            }
+          />
+          <Button
+            onClick={() => {
+              if (
+                !writtenFilter.table.trim() ||
+                !writtenFilter.column.trim() ||
+                writtenFilter.values.length === 0
+              ) {
+                return;
+              }
+              setWritten({ ...written, filters: [...written.filters, writtenFilter] });
+              setWrittenFilter(EMPTY_FILTER);
+            }}
+            disabled={busy}
+          >
+            Add this filter
+          </Button>
+        </div>
+
+        <Row>
+          <Button onClick={() => void writeOne()} disabled={busy || !canWrite(written)}>
+            {busy ? "Working…" : "Create definition"}
+          </Button>
+        </Row>
+        {/* Beside the action that earned it, like every other message here. */}
+        {notice && noticeAt === "written" ? <p className={styles.notice}>{notice}</p> : null}
+        {error && errorAt === "written" ? <p className={styles.error}>{error}</p> : null}
       </Card>
 
       <Card

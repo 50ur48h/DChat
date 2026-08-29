@@ -82,6 +82,7 @@ function stubFetch(
     retired?: Response;
     versions?: Response;
     patch?: Response;
+    post?: Response;
   } = {},
 ) {
   const calls: { url: string; init: RequestInit }[] = [];
@@ -100,6 +101,14 @@ function stubFetch(
       if (url.endsWith("/versions")) {
         return Promise.resolve((routes.versions ?? json([])).clone());
       }
+      // Method before URL: writing one by hand (B-169) POSTs to the same path
+      // the list is read from, and matching on the path alone answers a create
+      // with an array.
+      if (init.method === "POST" && url.endsWith("/definitions")) {
+        return Promise.resolve(
+          (routes.post ?? json({ ...BINDING, id: "new", name: "net_revenue" })).clone(),
+        );
+      }
       if (url.endsWith("/definitions")) {
         return Promise.resolve((routes.definitions ?? json([])).clone());
       }
@@ -113,6 +122,21 @@ function stubFetch(
     }),
   );
   return calls;
+}
+
+/**
+ * The open editor, scoped.
+ *
+ * "Write one by hand" (**B-169**) is always on the page and uses the same field
+ * labels as the editor, because they are the same fields. A reader tells them
+ * apart by which card they are in, so a test has to do the same rather than
+ * asking the whole document for a label that legitimately appears twice.
+ */
+function inEditor() {
+  const save = screen.getByRole("button", { name: "Save changes" });
+  const item = save.closest("li");
+  if (!item) throw new Error("The editor is not open.");
+  return within(item);
 }
 
 /** The body of the last request made with this method. */
@@ -368,6 +392,93 @@ describe("<Definitions />", () => {
     expect(await screen.findByText(/Excludes samples/)).toBeInTheDocument();
   });
 
+  it("writes a definition by hand, through the form, with its filter", async () => {
+    // **B-169, and the point is the route.** `createDefinition` was on the API
+    // client from the start and no screen called it, so the POST was reachable
+    // only from a script holding a bearer token. This drives the card the way a
+    // person does — typing, adding a filter, clicking — and asserts the body
+    // that leaves the browser. A test calling `bodyFrom` would pass over a card
+    // that renders no button at all.
+    const calls = stubFetch({});
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
+    await screen.findByText("Write one by hand");
+
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "net_revenue" } });
+    fireEvent.change(screen.getByLabelText("Answers must say (optional)"), {
+      target: { value: "Excludes refunds." },
+    });
+    fireEvent.change(screen.getByLabelText("Also called"), {
+      target: { value: "net sales, takings" },
+    });
+    fireEvent.change(screen.getByLabelText("Filter table"), { target: { value: "orders" } });
+    fireEvent.change(screen.getByLabelText("Filter column"), { target: { value: "status" } });
+    fireEvent.change(screen.getByLabelText("Filter values"), { target: { value: "completed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add this filter" }));
+
+    // Description last, so the button's enabling is observed rather than assumed.
+    const create = screen.getByRole("button", { name: "Create definition" });
+    expect(create).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("What it means"), {
+      target: { value: "Sales after discounts." },
+    });
+    fireEvent.click(create);
+
+    await waitFor(() => expect(bodyOf(calls, "POST")).toBeDefined());
+    expect(bodyOf(calls, "POST")).toEqual({
+      name: "net_revenue",
+      description: "Sales after discounts.",
+      caveat: "Excludes refunds.",
+      synonyms: ["net sales", "takings"],
+      required_filters: [{ table: "orders", column: "status", op: "in", values: ["completed"] }],
+    });
+  });
+
+  it("omits the fields nobody filled in rather than sending them empty", async () => {
+    // `expression: ""` is a formula that is the empty string, and the API would
+    // store it as one. An untouched field is absent, not empty.
+    const calls = stubFetch({});
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
+    await screen.findByText("Write one by hand");
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "basket_size" } });
+    fireEvent.change(screen.getByLabelText("What it means"), {
+      target: { value: "What an average order is worth." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create definition" }));
+
+    await waitFor(() => expect(bodyOf(calls, "POST")).toBeDefined());
+    expect(bodyOf(calls, "POST")).toEqual({
+      name: "basket_size",
+      description: "What an average order is worth.",
+    });
+  });
+
+  it("says whether what was just written binds anything", async () => {
+    // D-033 at the moment it happens. A definition with no filter is guidance
+    // the critic ignores, and an Admin who meant to write a rule has to find
+    // that out now rather than from an answer that quietly ignored it.
+    stubFetch({ post: json({ ...PROSE, name: "basket_size", binds: false }) });
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
+    await screen.findByText("Write one by hand");
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "basket_size" } });
+    fireEvent.change(screen.getByLabelText("What it means"), { target: { value: "Worth." } });
+    fireEvent.click(screen.getByRole("button", { name: "Create definition" }));
+
+    expect(await screen.findByText(/in force as prose/)).toBeInTheDocument();
+  });
+
+  it("offers no way to write one to a Reader (B-008)", async () => {
+    stubFetch({});
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="reader" />);
+    await screen.findByText(/Definitions/);
+
+    expect(screen.queryByText("Write one by hand")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create definition" })).not.toBeInTheDocument();
+  });
+
   it("separates what is enforced from what is only prose", async () => {
     // The whole of D-033 on one screen. A definition with filters is a
     // constraint; one without is guidance, and reading them as the same thing
@@ -584,7 +695,7 @@ describe("<Definitions />", () => {
 
     render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByLabelText("What it means"), {
+    fireEvent.change(inEditor().getByLabelText("What it means"), {
       target: { value: "Revenue, excluding anything cancelled." },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
@@ -638,14 +749,14 @@ describe("<Definitions />", () => {
 
     render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByLabelText("What it means"), {
+    fireEvent.change(inEditor().getByLabelText("What it means"), {
       target: { value: "Something else." },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => expect(bodyOf(calls, "PATCH")).toBeDefined());
     expect(await screen.findByText(/orders.nope/)).toBeInTheDocument();
-    expect(screen.getByLabelText("What it means")).toHaveValue("Something else.");
+    expect(inEditor().getByLabelText("What it means")).toHaveValue("Something else.");
   });
 
   it("shows a refused save inside the editor, not at the top of the page", async () => {
@@ -661,7 +772,7 @@ describe("<Definitions />", () => {
 
     render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByLabelText("What it means"), {
+    fireEvent.change(inEditor().getByLabelText("What it means"), {
       target: { value: "Something else." },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }));

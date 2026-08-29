@@ -37,7 +37,21 @@ Next step:        **WP13.23 — the MiseQ metric definitions, in review with the
                   *"2,634 vs 2,360"* their `meta_data_quality` row cites.
                   Definitions carry a `caveat` that reaches the reader (D-065,
                   revision 0033) rather than only the prompt.
-                  **Seven now, not six: `waste_value_rm` was added on
+                  **Six, not seven. `waste_value_rm` was built and withdrawn**
+                  (owner, 2026-08-29) — it prices 9.2% of the waste by weight
+                  and `ayam`, ~70% of all waste, is unpriced, so the largest
+                  part of any waste-cost question is what the number omits. The
+                  chain itself is sound; the coverage is not. B-168 carries the
+                  measurement and one correction to the stated reason.
+                  **WP13.24 closes B-169**: the definitions screen can write one
+                  by hand. `createDefinition` had been on the API client since
+                  the beginning with no screen calling it, so a source whose
+                  warehouse holds no metric table — every source somebody tries
+                  the product on for the first time — could not be given a
+                  definition without a bearer token and a script. The card takes
+                  filters too, so a hand-written definition can *bind* rather
+                  than only advise.
+                  **Previously: `waste_value_rm` was added on
                   2026-08-28** when the owner registered a Neon database
                   carrying the same v6.4 data plus the 15 views — 56 tables
                   against 41, every base figure re-verified and identical.
