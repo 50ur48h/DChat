@@ -252,6 +252,77 @@ def validate(definition: Definition, policy: SourcePolicy) -> None:
             )
 
 
+def _satisfies(value: str, item: RequiredFilter) -> bool | None:
+    """Whether a single known value passes this filter. None when undecidable.
+
+    Values are compared as text, exactly as ``RequiredFilter`` documents, with a
+    numeric comparison attempted for the ordering operators because `40` and
+    `'40'` are the same thing to a reader of SQL and `9` sorts before `10` only
+    if you know they are numbers.
+    """
+    if item.op in ("in", "eq"):
+        return value in item.values
+    if item.op in ("not_in", "ne"):
+        return value not in item.values
+    if not item.values:
+        return None
+    try:
+        left = float(value)
+        right = float(item.values[0])
+    except (TypeError, ValueError):
+        return None
+    return {
+        "gt": left > right,
+        "gte": left >= right,
+        "lt": left < right,
+        "lte": left <= right,
+    }.get(item.op)
+
+
+def non_constraining(definition: Definition, policy: SourcePolicy) -> tuple[RequiredFilter, ...]:
+    """The required filters that currently exclude no row at all (**B-171**).
+
+    **A definition whose filters cannot partition anything still badges
+    `enforced`**, and that badge is a claim: prose says plainly that the critic
+    checks nothing, while `enforced` says it checks something. `edible_waste`
+    made exactly that claim through a MiseQ version change — `edible_flag`
+    split 3,005.75 kg from 2,522.76 in v6.4 and is `1` on all 35,398 rows in
+    v6.7, so the same definition went from constraining to decorative with no
+    edit and no signal.
+
+    **Derived, never stored.** A stored flag is the failure being described: it
+    would be written when the definition was created and go quietly wrong the
+    next time the data moved. Computed from the active catalog, it is right
+    whenever it is read and needs no re-check on discovery.
+
+    **Profiling already knows.** `distinct_est == 1` says the column holds one
+    value, so no predicate over it can separate one row from another. What
+    `top_values` adds is *which* way: a filter the single value satisfies
+    excludes nothing, and one it fails excludes everything — a louder bug that
+    shows up as an empty answer, and not the one this reports.
+
+    Silent where the profiler has not run, or where the operator cannot be
+    decided against a single value. An unprofiled column is unknown, and
+    reporting unknown as *excludes nothing* would be the same overstatement in
+    the other direction.
+    """
+    columns = {
+        (table.table_name.lower(), column.name.lower()): column
+        for table in policy.catalog.tables
+        for column in table.columns
+    }
+    found: list[RequiredFilter] = []
+    for item in definition.required_filters:
+        column = columns.get((item.table.lower(), item.column.lower()))
+        if column is None or column.distinct_est != 1 or not column.top_values:
+            continue
+        only = column.top_values[0].get("value")
+        if only is None or _satisfies(str(only), item) is not True:
+            continue
+        found.append(item)
+    return tuple(found)
+
+
 async def create(
     *,
     org_id: uuid.UUID,

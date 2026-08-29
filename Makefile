@@ -68,6 +68,7 @@ test: test.api test.web                  ## Run all tests
 # Local stack
 # ---------------------------------------------------------------------------
 .PHONY: up up.mssql down down.hard logs ps seed seed.mssql seed.fnb seed.definitions
+.PHONY: db.firewall.plan db.firewall.narrow
 up: .env ## Start the local stack (platform-pg, seed-pizza-pg, api, web)
 	$(COMPOSE) up -d --build
 	@printf '\n  web  http://localhost:3000\n  api  http://localhost:8000/healthz\n\n'
@@ -99,6 +100,12 @@ seed.fnb: .env ## Load a customer SQLite file into seed-fnb-pg: make seed.fnb SQ
 
 seed.definitions: .env ## Load metric definitions: make seed.definitions FILE=... SOURCE="..."
 	$(SHELL) ops/scripts/seed_definitions.sh
+
+db.firewall.plan: ## Show what narrowing the demo DB firewall would change (touches nothing)
+	$(SHELL) ops/scripts/narrow_db_firewall.sh --dry-run
+
+db.firewall.narrow: ## Replace the demo DB allow-all rule with this machine's IP
+	$(SHELL) ops/scripts/narrow_db_firewall.sh
 
 .PHONY: db.setup migrate migrate.down migration
 db.setup: .env ## Migrate, then give dataagent_app its local login

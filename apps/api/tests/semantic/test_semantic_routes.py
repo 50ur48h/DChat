@@ -1247,3 +1247,128 @@ async def test_accepting_without_saying_keeps_the_words_the_import_found(
     )
 
     assert accepted["synonyms"] == imported
+
+
+# ---------------------------------------------------------------------------
+# A filter that is checked and cannot exclude anything (B-171)
+# ---------------------------------------------------------------------------
+
+
+async def _constant_column_table(customer: CustomerDatabase) -> None:
+    """A table with one column that never varies, and one that does.
+
+    `edible_flag` in MiseQ v6.7, in miniature: profiling records
+    `distinct_est = 1`, and a filter over such a column is checked by the critic
+    and cannot separate one row from another.
+    """
+    engine = create_async_engine(customer.url)
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS shipments ("
+                    "  id integer PRIMARY KEY, active integer, status text)"
+                )
+            )
+            await connection.execute(text("DELETE FROM shipments"))
+            await connection.execute(
+                text(
+                    "INSERT INTO shipments (id, active, status) VALUES "
+                    "(1, 1, 'sent'), (2, 1, 'held'), (3, 1, 'sent'), (4, 1, 'held')"
+                )
+            )
+            await connection.execute(
+                text(f"GRANT SELECT ON shipments TO {customer.reader_username}")
+            )
+    finally:
+        await engine.dispose()
+
+
+async def test_a_filter_that_excludes_nothing_is_reported_as_such(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """**B-171, on the route the screen calls.**
+
+    A definition whose filters cannot separate rows still badges `enforced`, and
+    that badge is a claim: prose says the critic checks nothing, `enforced` says
+    it checks something. `edible_waste` made exactly that claim through a MiseQ
+    version change — `edible_flag` split 3,005.75 kg from 2,522.76 in v6.4 and
+    is `1` on every row in v6.7 — with no edit and no signal.
+
+    Driven end to end rather than against the helper: the answer comes from
+    profiling data, through the live catalog, into the response the screen
+    reads. A test on `non_constraining` alone would pass over a route that never
+    loads a policy.
+    """
+    await _constant_column_table(isolated_customer_database)
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    # Discovery alone leaves `distinct_est` null; the profiler is what knows.
+    await api.call("POST", f"/v1/orgs/{org_id}/data-sources/{source_id}/profile", "alice")
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+
+    status, hollow = await api.call(
+        "POST",
+        base,
+        "alice",
+        {
+            "name": "active_shipments",
+            "description": "Shipments still in play.",
+            "required_filters": [
+                {"table": "shipments", "column": "active", "op": "eq", "values": ["1"]}
+            ],
+        },
+    )
+    assert status == 201, hollow
+    # Still enforced — the critic really does check it. That is the distinction.
+    assert hollow["binds"] is True
+
+    status, real = await api.call(
+        "POST",
+        base,
+        "alice",
+        {
+            "name": "sent_shipments",
+            "description": "Shipments that went out.",
+            "required_filters": [
+                {"table": "shipments", "column": "status", "op": "eq", "values": ["sent"]}
+            ],
+        },
+    )
+    assert status == 201, real
+
+    status, listed = await api.call("GET", base, "alice")
+    assert status == 200
+    by_name = {row["name"]: row for row in listed}
+    assert by_name["active_shipments"]["excluding_nothing"] == ["shipments.active"]
+    # `status` holds two values, so its filter does separate rows.
+    assert by_name["sent_shipments"]["excluding_nothing"] == []
+
+
+async def test_a_filter_on_an_unprofiled_column_is_not_called_hollow(
+    api: Api, isolated_customer_database: CustomerDatabase
+) -> None:
+    """Silence where the profiler has not run.
+
+    An unprofiled column is unknown, and reporting unknown as *excludes nothing*
+    would be the same overstatement pointing the other way — a definition
+    labelled hollow on the strength of a measurement nobody took.
+    """
+    await _constant_column_table(isolated_customer_database)
+    org_id, source_id = await _org_with_catalog(api, isolated_customer_database)
+    base = f"/v1/orgs/{org_id}/data-sources/{source_id}/definitions"
+
+    await api.call(
+        "POST",
+        base,
+        "alice",
+        {
+            "name": "active_shipments",
+            "description": "Shipments still in play.",
+            "required_filters": [
+                {"table": "shipments", "column": "active", "op": "eq", "values": ["1"]}
+            ],
+        },
+    )
+
+    _, listed = await api.call("GET", base, "alice")
+    assert [row["excluding_nothing"] for row in listed] == [[]]
