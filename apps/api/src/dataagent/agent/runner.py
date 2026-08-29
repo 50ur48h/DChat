@@ -871,7 +871,9 @@ async def _compose(
         "Write about the data and never about the chart. Whether a picture can "
         "be drawn is decided after you answer and shown in its own place, so a "
         "sentence about what a chart can or cannot do belongs nowhere in this "
-        "answer — to the reader it reads as the product being broken." + PARTIAL_RESULT_RULE
+        "answer — to the reader it reads as the product being broken."
+        + READABLE_ANSWER_RULE
+        + PARTIAL_RESULT_RULE
     )
     completion = await llm.complete(
         role="compose",
@@ -955,6 +957,45 @@ async def _finalize_refusal(
 #: as though nothing was there (**B-111** — *"the evidence does not include the
 #: actual monthly revenue values"* over twenty rows of them), and declining
 #: outright a question the data answers in full (**B-113**).
+#: **The model could always write structure; nothing could show it** (B-172).
+#:
+#: The answer rendered into a bare `<p>` with `white-space: pre-wrap`, so a
+#: heading arrived as a literal `##` and a list as a column of asterisks. The
+#: only sane instruction against that renderer was *plain words*, which the
+#: model read — correctly — as plain prose. What came back for a nine-product
+#: ranking with seven waste figures was one paragraph the reader had to count
+#: commas through.
+#:
+#: So this ships in the same change as the renderer, and neither half is worth
+#: anything alone: this rule against the old `<p>` would put `##` on the screen,
+#: and the renderer without this rule would keep formatting prose that has no
+#: structure to format.
+#:
+#: **Simple is not vague.** The vocabulary half is here because the answers read
+#: like a data-warehouse release note — *"avoidable-waste exposure"*,
+#: *"prompt/tool display limits"*, *"deduplicated"* — to a restaurant owner who
+#: wants to know which dish to make less of. Every number, name and limit stays
+#: exactly as the evidence gives it; what changes is the words around them.
+READABLE_ANSWER_RULE = (
+    "\n\nWrite the answer as Markdown, for a busy person who is not a data "
+    "analyst.\n"
+    "- Use short `##` headings when the answer has more than one part.\n"
+    "- Put every list of things on its own bullet or numbered line. Never run a "
+    "ranked list through a sentence with commas.\n"
+    "- Use a table when each item carries two or more numbers.\n"
+    "- **Bold** the names and the money. Bold sparingly; if half the answer is "
+    "bold, none of it is.\n"
+    "- Lead with the answer. Put what is missing or uncertain at the end, under "
+    "its own heading.\n\n"
+    "Use everyday words and short sentences. Prefer 'waste' to 'avoidable-waste "
+    "exposure', 'we could not see all the rows' to 'prompt/tool display limits', "
+    "'left over' to 'deduplicated'. If a plain word will do, use it. A reader "
+    "should not need a second reading to learn what to do next.\n"
+    "Being simple is not being vague: keep every number, every name and every "
+    "limit exactly as the evidence gives them."
+)
+
+
 PARTIAL_RESULT_RULE = (
     "\n\nA result marked `truncated` reached you in part: `row_count` is how many "
     "rows the query returned, and the rows you were given are the ones that fit "

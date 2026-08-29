@@ -185,6 +185,44 @@ async def test_a_question_becomes_sql_rows_and_a_cited_answer(
     assert view.state == "answered"
 
 
+async def test_the_composer_is_told_to_write_something_a_person_can_read(
+    context: ToolContext, fake_llm: FakeLLM
+) -> None:
+    """**B-172, and the half that is easy to get wrong.**
+
+    The instruction is prompt text, not enforcement — a model can ignore it and
+    nothing here will stop it. What this asserts is the one thing that *is*
+    ours: that the rule reaches the model at all. A constant nothing sends is
+    the defect this repository files most, and `READABLE_ANSWER_RULE` has
+    exactly the shape it comes in — a module-level string, referenced once.
+
+    It also has to reach the **composer** and no one else. The planner choosing
+    SQL has no business being told to use bullet points, and a rule that leaked
+    into every role would be spending tokens on all of them.
+    """
+    fake_llm.script(_plan("SELECT count(*) AS n FROM shops"), role="sql")
+    fake_llm.script(_reflect(), role="plan")
+    fake_llm.script(_cites_the_execution, role="compose")
+    fake_llm.script(_passes(), role="critic")
+    run_id = await _run_for(context, "How many shops are there?")
+
+    await _execute(context, run_id)
+
+    composing = " ".join(fake_llm.prompts(role="compose"))
+    assert composing, "no composing call was made, so this proves nothing"
+    assert "Write the answer as Markdown" in composing
+    assert "Never run a ranked list through a sentence with commas" in composing
+    assert "Use everyday words and short sentences" in composing
+    # Simple is not vague: the rule must not read as licence to drop numbers.
+    assert "keep every number, every name and every limit" in composing
+
+    planning = " ".join(fake_llm.prompts(role="sql")) + " ".join(fake_llm.prompts(role="plan"))
+    assert "Write the answer as Markdown" not in planning, (
+        "the formatting rule belongs to the composer; a planner told to use "
+        "bullet points is paying for advice about a job it does not do"
+    )
+
+
 async def test_a_rephrased_answer_is_not_a_second_finding(
     context: ToolContext, fake_llm: FakeLLM
 ) -> None:

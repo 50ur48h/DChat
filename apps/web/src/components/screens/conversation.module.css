@@ -168,7 +168,87 @@
   line-height: 32px;
   letter-spacing: -0.003em;
   color: var(--ink);
-  white-space: pre-wrap;
+  /* `pre-wrap` is gone on purpose: markdown decides the breaks now, and keeping
+     it would double every blank line between blocks. */
+}
+
+/* The answer is markdown now, so its blocks need spacing of their own. Sized
+   down from the body text rather than up: a heading inside a chat reply is a
+   signpost, and one that competes with the answer has taken over. */
+.answerText > :first-child {
+  margin-top: 0;
+}
+.answerText > :last-child {
+  margin-bottom: 0;
+}
+.answerText p {
+  margin: 0 0 0.85em;
+}
+.answerText h1,
+.answerText h2,
+.answerText h3,
+.answerText h4 {
+  font-family: var(--font-sans, inherit);
+  font-weight: 600;
+  line-height: 1.35;
+  margin: 1.4em 0 0.5em;
+  color: var(--ink);
+}
+.answerText h1 { font-size: 21px; }
+.answerText h2 { font-size: 19px; }
+.answerText h3,
+.answerText h4 { font-size: 17px; }
+.answerText ul,
+.answerText ol {
+  margin: 0 0 0.85em;
+  padding-left: 1.5em;
+}
+.answerText li {
+  margin: 0.25em 0;
+  line-height: 1.6;
+}
+.answerText strong {
+  font-weight: 650;
+}
+.answerText code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.85em;
+  background: var(--surface-muted, rgba(0, 0, 0, 0.05));
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+/* Wide tables scroll inside the answer rather than stretching the thread. */
+.answerText table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-family: var(--font-sans, inherit);
+  font-size: 15px;
+  margin: 0 0 1em;
+}
+.answerText th,
+.answerText td {
+  border: 1px solid var(--rule, rgba(0, 0, 0, 0.12));
+  padding: 0.4em 0.7em;
+  text-align: left;
+  white-space: nowrap;
+}
+.answerText th {
+  font-weight: 600;
+  background: var(--surface-muted, rgba(0, 0, 0, 0.04));
+}
+/* Numbers read better right-aligned, and every number here is money or a count. */
+.answerText td:not(:first-child) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.answerText blockquote {
+  margin: 0 0 0.85em;
+  padding-left: 0.9em;
+  border-left: 3px solid var(--rule, rgba(0, 0, 0, 0.15));
+  color: var(--ink-muted, inherit);
 }
 
 .messageText {

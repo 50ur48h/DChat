@@ -50,6 +50,9 @@ import {
   type Run,
   type RunChart,
 } from "@/lib/api-client";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
 import { useSession } from "@/lib/auth/session";
 
 import styles from "./conversation.module.css";
@@ -599,11 +602,7 @@ function AnswerCard({
               gate caught from the other direction when the card rendered a
               citation and no words at all. The card is the assistant turn now, so
               there is one rendering of an answer and nothing to keep in step. */}
-          {words && (
-            <p className={styles.answerText} data-testid="answer-text">
-              {words}
-            </p>
-          )}
+          {words && <AnswerText words={words} />}
           <AnswerChart chart={run.chart} />
           {/* **A caveat is never folded away.** It changes what the answer
               means, so a reader who opens nothing must still see it; hiding the
@@ -666,6 +665,33 @@ function AnswerCard({
  * it, and the breakdown says how many calls that was — so the absence is
  * informative instead of merely blank.
  */
+/**
+ * The answer, with its structure shown rather than flattened.
+ *
+ * **The model could always write structure and nothing could display it.** This
+ * rendered into a bare `<p>` with `white-space: pre-wrap`, so a heading arrived
+ * as a literal `##` and a list as a column of asterisks — which is why the
+ * prompt asked for "plain words" and got a wall of prose. A reader facing nine
+ * ranked products and seven waste figures needs headings, lists and a table;
+ * one paragraph makes them count commas.
+ *
+ * **HTML is escaped, deliberately.** `rehype-raw` is not installed and must not
+ * be: this text is written by a model that has just read customer rows, so a
+ * `<script>` or an `<img onerror>` reaching the DOM would make the answer a
+ * delivery mechanism. Markdown only — react-markdown escapes raw HTML by
+ * default and strips dangerous URL schemes from links.
+ *
+ * `remark-gfm` is here for tables, which is the one shape a ranked list of
+ * products with two numbers each genuinely wants.
+ */
+function AnswerText({ words }: { words: string }) {
+  return (
+    <div className={styles.answerText} data-testid="answer-text">
+      <Markdown remarkPlugins={[remarkGfm]}>{words}</Markdown>
+    </div>
+  );
+}
+
 function Cost({ run }: { run: Run }) {
   const usage = run.model_usage ?? {};
   const calls = usage.calls ?? 0;
