@@ -216,6 +216,31 @@ function sameFilters(left: RequiredFilter[], right: RequiredFilter[]): boolean {
  * and `expression` is the one place where `null` and absent differ, since a
  * metric with no formula is a real thing to say.
  */
+/**
+ * What the badge should say about what this definition actually guarantees.
+ *
+ * **Three states, because there are three** (**B-171**). `prose only` means the
+ * critic checks nothing. `enforced` means it checks something that separates
+ * rows. In between sits a definition whose filters are checked and cannot
+ * exclude anything — `edible_waste` was exactly that when MiseQ v6.7 made
+ * `edible_flag` constant — and calling it `enforced` states a guarantee it is
+ * not delivering.
+ *
+ * The absent field reads as "not currently excluding nothing", which is the
+ * safe direction: an older API that does not send it leaves the badge exactly
+ * as it was rather than labelling every definition as hollow.
+ */
+export function badgeLabel(definition: SemanticDefinition): string {
+  if (!definition.binds) return "prose only";
+  const hollow = definition.excluding_nothing ?? [];
+  return hollow.length > 0 ? "enforced, but currently excluding nothing" : "enforced";
+}
+
+export function badgeTone(definition: SemanticDefinition): "mint" | "peach" | "neutral" {
+  if (!definition.binds) return "neutral";
+  return (definition.excluding_nothing ?? []).length > 0 ? "peach" : "mint";
+}
+
 export function changesFrom(definition: SemanticDefinition, draft: Draft) {
   const changes: {
     description?: string;
@@ -1023,9 +1048,13 @@ export function Definitions({
                           one question together: what is in force, and which
                           version of it. */}
                       <Badge tone="neutral">v{definition.version}</Badge>
-                      <Badge tone={definition.binds ? "mint" : "neutral"}>
-                        {definition.binds ? "enforced" : "prose only"}
-                      </Badge>
+                      {/* **B-171.** Three states, not two. A definition whose
+                          filters cannot separate one row from another is still
+                          checked by the critic — so it is not prose — but
+                          saying only "enforced" claims a guarantee it is not
+                          currently delivering, and an overstated badge is the
+                          thing this screen exists to avoid. */}
+                      <Badge tone={badgeTone(definition)}>{badgeLabel(definition)}</Badge>
                     </Row>
                   </div>
 
@@ -1169,13 +1198,28 @@ export function Definitions({
                         </p>
                       ) : null}
                       {definition.required_filters.length > 0 ? (
-                        <ul className={styles.filters}>
-                          {definition.required_filters.map((filter, index) => (
-                            <li key={`${filter.table}.${filter.column}.${index}`}>
-                              {describeFilter(filter)}
-                            </li>
-                          ))}
-                        </ul>
+                        <>
+                          <ul className={styles.filters}>
+                            {definition.required_filters.map((filter, index) => (
+                              <li key={`${filter.table}.${filter.column}.${index}`}>
+                                {describeFilter(filter)}
+                              </li>
+                            ))}
+                          </ul>
+                          {/* Names the column, because "excluding nothing" on
+                              its own leaves an Admin to guess which of several
+                              filters is hollow — and the answer is a property
+                              of the data today, not of the definition. */}
+                          {(definition.excluding_nothing ?? []).length > 0 ? (
+                            <p className={styles.caveat}>
+                              <strong>Currently excluding nothing:</strong>{" "}
+                              {definition.excluding_nothing?.join(", ")} holds a single value that
+                              this filter accepts, so it is checked and cannot exclude a row. That
+                              may be deliberate — a guard for data that later has gaps — or a
+                              filter that has quietly stopped doing anything.
+                            </p>
+                          ) : null}
+                        </>
                       ) : (
                         <p className={styles.prose}>
                           Nothing checks this one. It reaches the model as guidance, and an answer

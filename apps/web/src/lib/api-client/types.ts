@@ -199,6 +199,17 @@ export interface SemanticDefinition {
   required_filters: RequiredFilter[];
   synonyms: string[];
   binds: boolean;
+  /**
+   * Required filters that currently exclude no row at all (**B-171**).
+   *
+   * `binds` stays true — the critic really does check these — but a badge
+   * reading only *enforced* would overstate the guarantee, which is the kind of
+   * claim this project keeps removing. Derived from the live catalog on every
+   * read, never stored: a stored answer is what went quietly wrong when MiseQ
+   * v6.7 made `edible_flag` constant and a filter that had split 3,005.75 kg
+   * from 2,522.76 started excluding nothing, with no edit and no signal.
+   */
+  excluding_nothing?: string[];
   /** Which state of this definition is in force. Every edit bumps it (B-088). */
   version: number;
 }

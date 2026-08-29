@@ -28,7 +28,30 @@ Current position: **Phase 13 — the chat product. WP13.1a (#121), WP13.1b
                   *"Dev is current"* below for why three revisions in one hop
                   were safe, and for the warning that section used to carry and
                   had wrong.
-Next step:        **WP13.25 — what a run cost, told truthfully, and a switch to
+Next step:        **WP13.27 — a badge that does not overstate itself
+                  (B-171 done), and v6.7 on Azure.** A definition whose
+                  required filters cannot separate one row from another still
+                  badged `enforced`, and that badge is a claim: prose says the
+                  critic checks nothing, `enforced` says it checks something.
+                  `edible_waste` made exactly that claim through a MiseQ version
+                  change with no edit and no signal. Now three states, the
+                  middle one reading **enforced, but currently excluding
+                  nothing**, with the card naming the column. **Derived on every
+                  read, never stored** — a stored flag is the failure being
+                  described. Silent on an unprofiled column, because unknown
+                  reported as *excludes nothing* is the same overstatement
+                  pointing the other way.
+                  **v6.7 is on Azure** as `miseq_v67` beside `miseq_v64`: 60
+                  tables, 1,092,775 rows, counts verified table by table against
+                  the SQLite with zero mismatches, read-only proven by attempt,
+                  PUBLIC closed. All 60 cards embedded.
+                  **The demo server's firewall is still open to the internet**
+                  (`AllowAll`, 0.0.0.0–255.255.255.255). `make db.firewall.plan`
+                  says what narrowing it would change and touches nothing;
+                  `make db.firewall.narrow` does it, taking the machine's
+                  measured egress IP rather than a hard-coded one. **Deliberately
+                  not run before the demo** (owner, 2026-08-29).
+                  Then **WP13.25 — what a run cost, told truthfully, and a switch to
                   stop telling it.** Two things the owner asked for before
                   deploying. **The cost figure overstates**, and by a knowable
                   amount nobody could know: `estimate_cost` prices the whole

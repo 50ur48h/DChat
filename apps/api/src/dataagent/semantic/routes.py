@@ -60,6 +60,8 @@ is the whole reason `validate` runs at the door.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
+from contextlib import suppress
 from datetime import datetime
 from typing import Annotated, Literal
 
@@ -71,6 +73,7 @@ from dataagent.auth.guards import require_admin
 from dataagent.catalog.browse import NoCatalogError
 from dataagent.connectors.base import ConnectorError
 from dataagent.dal.errors import PolicyViolation
+from dataagent.dal.policy import source_policy
 from dataagent.datasources.service import NotFoundError
 from dataagent.semantic import definitions as definitions_service
 from dataagent.semantic import proposals as proposals_service
@@ -133,6 +136,17 @@ class DefinitionOut(BaseModel):
             "and an answer resting on it says so."
         )
     )
+    excluding_nothing: list[str] = Field(
+        default_factory=list[str],
+        description=(
+            "Qualified names of required filters that currently exclude no row "
+            "at all, because the column holds a single value the filter accepts "
+            "(B-171). `binds` stays true — the critic really does check these — "
+            "but a badge reading only *enforced* would overstate the guarantee. "
+            "Derived from the live catalog on every read rather than stored, "
+            "because a stored answer is what went quietly wrong last time."
+        ),
+    )
     version: int = Field(
         default=1,
         description=(
@@ -142,7 +156,7 @@ class DefinitionOut(BaseModel):
     )
 
     @classmethod
-    def of(cls, definition: Definition) -> DefinitionOut:
+    def of(cls, definition: Definition, *, excluding_nothing: Sequence[str] = ()) -> DefinitionOut:
         return cls(
             id=definition.id,
             name=definition.name,
@@ -158,6 +172,7 @@ class DefinitionOut(BaseModel):
             ],
             synonyms=list(definition.synonyms),
             binds=bool(definition.required_filters),
+            excluding_nothing=list(excluding_nothing),
             version=definition.version,
         )
 
@@ -508,7 +523,27 @@ async def list_definitions(
     definition still binds nothing and still reaches no prompt.
     """
     found = await definitions_service.definitions_for(context.org_id, data_source_id, status=status)
-    return [DefinitionOut.of(definition) for definition in found]
+    # One catalog load for the whole list (**B-171**). Computed here rather than
+    # stored, so the badge is right whenever it is read; a retired definition
+    # binds nothing anyway, so it is not worth the load.
+    policy = None
+    if status == "active" and any(d.required_filters for d in found):
+        with suppress(NotFoundError, NoCatalogError):
+            policy = await source_policy(context.org_id, data_source_id)
+    return [
+        DefinitionOut.of(
+            definition,
+            excluding_nothing=(
+                []
+                if policy is None
+                else [
+                    item.qualified
+                    for item in definitions_service.non_constraining(definition, policy)
+                ]
+            ),
+        )
+        for definition in found
+    ]
 
 
 @router.get(

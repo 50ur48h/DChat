@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   acceptanceSummary,
+  badgeLabel,
+  badgeTone,
   changesFrom,
   describeFilter,
   describeProvenance,
@@ -178,6 +180,36 @@ describe("acceptanceSummary", () => {
 
   it("says a query ignoring the filters will be blocked", () => {
     expect(acceptanceSummary(BINDING.required_filters)).toContain("blocked");
+  });
+});
+
+describe("badgeLabel", () => {
+  it("says enforced when the filters actually separate rows", () => {
+    expect(badgeLabel(BINDING)).toBe("enforced");
+    expect(badgeTone(BINDING)).toBe("mint");
+  });
+
+  it("says prose only when nothing is checked", () => {
+    expect(badgeLabel(PROSE)).toBe("prose only");
+    expect(badgeTone(PROSE)).toBe("neutral");
+  });
+
+  it("does not claim enforcement a hollow filter is not delivering (B-171)", () => {
+    // `edible_waste` badged `enforced` over `edible_flag = 1` after MiseQ v6.7
+    // made that column constant: still checked by the critic, and unable to
+    // exclude a single row. "Enforced" alone overstates it.
+    const hollow = { ...BINDING, excluding_nothing: ["orders.status"] };
+
+    expect(badgeLabel(hollow)).toBe("enforced, but currently excluding nothing");
+    expect(badgeTone(hollow)).toBe("peach");
+  });
+
+  it("reads an absent field as fine rather than as hollow", () => {
+    // An older API does not send it. Defaulting the other way would label every
+    // definition in the product as hollow on the strength of a missing key.
+    const { excluding_nothing: _omitted, ...older } = { ...BINDING, excluding_nothing: [] };
+
+    expect(badgeLabel(older as typeof BINDING)).toBe("enforced");
   });
 });
 
@@ -477,6 +509,23 @@ describe("<Definitions />", () => {
 
     expect(screen.queryByText("Write one by hand")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create definition" })).not.toBeInTheDocument();
+  });
+
+  it("shows on the card which filter is excluding nothing (B-171)", async () => {
+    // The badge says that something is hollow; this says which, because the
+    // answer is a property of today's data rather than of the definition.
+    stubFetch({
+      definitions: json([{ ...BINDING, excluding_nothing: ["orders.status"] }]),
+    });
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
+
+    expect(
+      await screen.findByText("enforced, but currently excluding nothing"),
+    ).toBeInTheDocument();
+    // The explanation, not the filter list — both name the column, and only
+    // one of them says why it currently guarantees nothing.
+    expect(screen.getByText(/holds a single value that this filter accepts/)).toBeInTheDocument();
   });
 
   it("separates what is enforced from what is only prose", async () => {
