@@ -1,0 +1,210 @@
+{
+  "_note": [
+    "Seven definitions for MiseQ v6.7, every figure computed against miseq_v67",
+    "before its sentence was written. These are NOT the v6.4 six with new numbers:",
+    "v6.7 changed what several of them can honestly say.",
+    "",
+    "edible_waste was rebuilt rather than re-derived. In v6.4 it was",
+    "sum(waste_kg) WHERE edible_flag = 1, and in v6.7 edible_flag is 1 on all",
+    "35,398 rows -- so that filter would have badged the definition 'enforced'",
+    "while excluding nothing, which is worse than prose because the badge is a",
+    "claim. The split moved to the edible_waste_kg / normal_inedible_kg columns.",
+    "See B-171 for the general guard this argues for.",
+    "",
+    "waste_by_cause keeps its 'cause is authoritative' rule and loses its reason:",
+    "in v6.4 stage and waste_cause disagreed by up to 30% and the caveat was about",
+    "that. In v6.7 they agree exactly and no meta_data_quality topic mentions",
+    "stage at all. The rule now rests on waste_mechanism_generation instead.",
+    "",
+    "Also gone: the 883.74 kg (16%) of waste behind unusable portion-to-kilogram",
+    "factors. All nine dim_uom_factor categories are is_usable = 1 in v6.7."
+  ],
+  "definitions": [
+    {
+      "name": "waste_kg",
+      "kind": "metric",
+      "description": "Food thrown away, by weight in kilograms -- gross disposal, before any edible/inedible split. fact_waste.waste_kg is the portion-to-kilogram conversion already applied: it reconciles exactly with sum(qty * dim_uom_factor.kg_per_portion) at 5,449.39 kg across all 35,398 rows. Never re-apply the factor, and never sum qty across ingredient categories -- qty is portion-equivalents and the units are not comparable.",
+      "expression": "sum(fact_waste.waste_kg)",
+      "caveat": "The waste scenario is calibrated to a single measured-day anchor of 3.398 kg, then constrained by real 2025 POS demand -- so it is a modelled twin of the restaurant rather than a meter reading. Composition is what it is for: which cause dominates, and which outlet. Comparing outlets needs one more step, because they are not observed for equal periods (365 days at three of them, 329 and 160 at the others), so divide by observed days or the least-recorded outlet looks like the thriftiest. This is gross disposal and includes bone and shell: 2,801.50 kg of the 5,449.39 is normal inedible material that was never sellable, so do not read the total as avoidable loss.",
+      "synonyms": [
+        "waste",
+        "wastage",
+        "wastes",
+        "food waste",
+        "total waste",
+        "waste kg",
+        "waste weight",
+        "thrown away",
+        "throwing away",
+        "gross waste",
+        "disposal"
+      ],
+      "required_filters": []
+    },
+    {
+      "name": "waste_by_cause",
+      "kind": "metric",
+      "description": "Food thrown away, in kilograms, split by the reason. Group by fact_waste.waste_cause. Verified v6.7: overproduction 2,530.11, prep_trim 1,973.49, plate_return 647.63, storage_spoilage 298.17. Four causes, not the eight v6.4 carried.",
+      "expression": "sum(fact_waste.waste_kg) grouped by fact_waste.waste_cause",
+      "caveat": "Group by waste_cause, never by stage. The causes are regenerated from deterministic operating mechanisms -- throughput drives prep trim, replenishment age drives storage spoilage, rolling demand gap drives overproduction, sold throughput drives plate return -- which is what makes waste_cause authoritative and what a recommendation should be tied back to, through inventory_age_days and forecast_gap_kg. Unlike v6.4, stage and waste_cause now agree, so a wrong grouping no longer shows up as a different number; it shows up as a claim the mechanism columns cannot support.",
+      "synonyms": [
+        "waste cause",
+        "waste causes",
+        "cause of waste",
+        "causes of waste",
+        "causing waste",
+        "causing our waste",
+        "causing our wastage",
+        "waste reason",
+        "waste reasons",
+        "reason for waste",
+        "reasons for waste",
+        "waste by cause",
+        "waste by reason",
+        "wastage by reason",
+        "waste breakdown",
+        "biggest source of waste",
+        "where waste comes from"
+      ],
+      "required_filters": []
+    },
+    {
+      "name": "edible_waste",
+      "kind": "metric",
+      "description": "The part of the thrown-away food that was edible material, by weight: 2,647.89 kg of the 5,449.39 kg gross. The remainder, 2,801.50 kg, is normal inedible -- bone and shell that was never sellable. The two sum exactly to gross disposal. Read from fact_waste.edible_waste_kg; do NOT filter on edible_flag, which is 1 on every row in v6.7 and partitions nothing.",
+      "expression": "sum(fact_waste.edible_waste_kg)",
+      "caveat": "Edible means the material was food rather than bone or shell -- not that it could realistically have been sold. Of this 2,647.89 kg, 2,215.88 kg is classed avoidable; the rest is inherent trim. Bone and shell percentages are per-category and explicit in dim_waste_economics, so never subtract one bone percentage across every waste stream. This is a modelled split on a modelled waste scenario: use it as a share of gross disposal rather than as an absolute.",
+      "synonyms": [
+        "edible waste",
+        "edible food waste",
+        "edible",
+        "inedible",
+        "bone",
+        "shell",
+        "fit to serve",
+        "still good",
+        "avoidable waste",
+        "preventable waste",
+        "edible kg"
+      ],
+      "required_filters": []
+    },
+    {
+      "name": "waste_intensity",
+      "kind": "metric",
+      "description": "Waste weight per RM1,000 of net sales. Verified v6.7: 1.5032 kg per RM1,000, from 5,449.39 kg against RM3,625,180.34. Both tables span 2025-01-01 to 2025-12-31 across the same 5 outlets.",
+      "expression": "sum(fact_waste.waste_kg) / (sum(fact_sale.net_amt) / 1000)",
+      "caveat": "The two halves are not equally sound: sales are real POS data at outlet-item-day grain, waste is a modelled scenario calibrated to one measured day. So this is a comparison instrument, not an efficiency measurement -- rank outlets against each other rather than quoting it as the waste rate of the business. Per outlet it must be read per observed day, since coverage runs from 365 days at three outlets to 160 at another. The numerator is gross disposal including bone and shell.",
+      "synonyms": [
+        "waste rate",
+        "waste intensity",
+        "waste per sales",
+        "waste against sales",
+        "waste vs sales",
+        "waste relative to sales",
+        "waste per revenue",
+        "waste as a share of sales",
+        "waste ratio"
+      ],
+      "required_filters": []
+    },
+    {
+      "name": "net_revenue",
+      "kind": "metric",
+      "description": "Sales after discounts, in ringgit. Verified v6.7: RM3,625,180.34 from fact_sale.net_amt -- real POS data at outlet x item x day grain.",
+      "expression": "sum(fact_sale.net_amt)",
+      "caveat": "Revenue comes from fact_sale only. fact_sale_line is a synthetic receipt-level reconstruction of those same sales and carries gross_amt, discount_amt and net_amt under identical column names; it reconciles to exactly the same RM3,625,180.34, which is what makes the mistake easy. Summing both overstates revenue by 2.01x -- RM7,291,342. fact_sale has no receipt id and no covers count, so any per-receipt or per-cover figure comes from the synthetic reconstruction and must be labelled modelled.",
+      "synonyms": [
+        "revenue",
+        "sales",
+        "net sales",
+        "net revenue",
+        "turnover",
+        "total sales",
+        "sales value",
+        "how much did we sell",
+        "takings"
+      ],
+      "required_filters": []
+    },
+    {
+      "name": "observed_waste_days",
+      "kind": "metric",
+      "description": "How many distinct days each outlet actually recorded waste. Verified v6.7: 365, 365, 365, 329 and 160 days for outlets 1 to 5.",
+      "expression": "count(distinct fact_waste.waste_date) grouped by fact_waste.outlet_key",
+      "caveat": "Outlets are not observed for equal periods and nothing else in the waste data says so. Any per-outlet total or ranking has to be divided by this or read alongside it -- outlet 5 has 160 observed days against 365 at three others, so on raw totals it looks like the best performer when it is mostly the least recorded.",
+      "synonyms": [
+        "observed days",
+        "waste days",
+        "days of waste data",
+        "days recorded",
+        "recording coverage",
+        "waste coverage",
+        "coverage days",
+        "how complete is the waste data"
+      ],
+      "required_filters": []
+    },
+    {
+      "name": "waste_value_rm",
+      "kind": "metric",
+      "description": "What the food thrown away cost to buy -- material value, from v_waste_valued.value_myr. Verified against v6.7: RM72,219.06 across all 35,398 waste rows and 5,449.39 kg, with every one of the nine tracked categories priced. Cost per kilogram comes from dim_waste_economics, which carries its own source_mode, valuation_method and assumption_basis. This is NOT the avoidable figure: avoidable_value_myr is RM41,060.15 and answers a different question.",
+      "expression": "sum(v_waste_valued.value_myr) where v_waste_valued.value_is_available = 1",
+      "caveat": "This valuation is synthetic -- source_mode is 'synthetic' on all 35,398 rows and every ringgit of it -- so it is a modelled figure, not an invoice. Within that, the price and the weight are not equally sound. Cost per kilogram comes from real weighted purchase costs. What is assumed is the mass a discarded piece represents, and that carries RM65,603.79 of the RM72,219.06 -- 90.8%: ayam at a 0.25 kg gross-piece assumption, tilapia 0.35 kg, lele 0.30 kg, udang a 0.50 kg scenario pack, and soup a BOM/yield scenario rather than concentrate treated as finished soup 1:1. Only the four categories bought by weight -- RM6,615.27, 9.2% -- rest on no mass assumption. Quote it as a modelled material value with that basis stated, never as what waste cost the business.",
+      "synonyms": [
+        "waste cost",
+        "cost of waste",
+        "waste value",
+        "value of waste",
+        "waste in rm",
+        "waste in ringgit",
+        "waste worth",
+        "waste money",
+        "wastage cost",
+        "cost of wastage",
+        "waste costing",
+        "money lost to waste",
+        "waste spend",
+        "waste in myr"
+      ],
+      "required_filters": [
+        {
+          "table": "v_waste_valued",
+          "column": "value_is_available",
+          "op": "eq",
+          "values": [
+            "1"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "waste_avoidable_value_rm",
+      "kind": "metric",
+      "description": "The economic opportunity in the waste -- what could have been saved, as opposed to what the discarded food cost to buy. Verified v6.7: RM41,060.15 over 2,215.88 avoidable kg. Its sibling waste_value_rm is the material value at RM72,219.06; these answer different questions and are not interchangeable.",
+      "expression": "sum(v_waste_valued.avoidable_value_myr) where v_waste_valued.value_is_available = 1",
+      "caveat": "This is the smaller and more defensible of the two waste-money figures. It excludes bone and normal inedible material -- 2,801.50 kg, 51.4% of gross weight -- because that mass was never sellable and counting it as opportunity would invent savings nobody could make. Material value is RM72,219.06; this is RM41,060.15, and the RM31,145.41 difference is unavoidable rather than overlooked. It inherits the same synthetic basis as its sibling: source_mode is 'synthetic' throughout, prices are real weighted purchase costs, and 90.8% of the value rests on an assumed piece mass. Use this for what could we have saved, and waste_value_rm for what did the waste cost. Avoidable and unavoidable sum to RM72,205.56 against a material total of RM72,219.06 -- a RM13.50 rounding gap.",
+      "synonyms": [
+        "avoidable waste value",
+        "avoidable waste cost",
+        "preventable waste value",
+        "recoverable waste",
+        "waste opportunity",
+        "what could we have saved",
+        "savings opportunity",
+        "avoidable in rm",
+        "avoidable value"
+      ],
+      "required_filters": [
+        {
+          "table": "v_waste_valued",
+          "column": "value_is_available",
+          "op": "eq",
+          "values": [
+            "1"
+          ]
+        }
+      ]
+    }
+  ]
+}
