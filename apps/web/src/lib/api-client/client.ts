@@ -222,6 +222,7 @@ export interface Api {
       name: string;
       description: string;
       expression?: string | undefined;
+      caveat?: string | undefined;
       synonyms?: string[] | undefined;
       required_filters?: RequiredFilter[] | undefined;
     },

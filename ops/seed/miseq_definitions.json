@@ -33,13 +33,21 @@
     "the one that BINDS: a false match makes the critic enforce edible_flag = 1 on",
     "a question that was never about edibility.",
     "",
-    "waste_value_rm was added on 2026-08-28 when the source moved to a database",
     "carrying the 15 views. It was absent before because fact_waste has no money",
     "column and B-162's erp_keys substitute errs -53% to +706%; v_waste_valued",
     "supplies the chain honestly, with value_is_available as the required filter",
     "meta_data_quality's waste_valuation_resolved row names. That row also demands",
     "valued-row, valued-kg and category coverage be disclosed -- 7,147/11,747,",
-    "509.58/5,528.61 kg and 6/9 -- so all three are in the caveat. See B-168."
+    "509.58/5,528.61 kg and 6/9 -- so all three are in the caveat. See B-168.",
+    "",
+    "waste_value_rm was proposed on 2026-08-28 and withdrawn by the owner the same",
+    "day. v_waste_valued does supply a defensible chain -- value_is_available is",
+    "the filter meta_data_quality names, and the kg side reconciles -- but it",
+    "prices only 509.58 kg of 5,528.61, 9.2% by weight, and ayam (3,848 kg, ~70%",
+    "of all waste) is one of the three unpriced categories. So the largest part of",
+    "any waste-cost question is exactly what the number omits. Owner, 2026-08-29:",
+    "leave it out. Two days before a demo, a number whose caveat is longer than",
+    "its usefulness is not worth a screen. See B-168."
   ],
   "definitions": [
     {
@@ -169,42 +177,6 @@
         "how complete is the waste data"
       ],
       "required_filters": []
-    },
-    {
-      "name": "waste_value_rm",
-      "kind": "metric",
-      "description": "The ringgit value of food thrown away, from v_waste_valued. Always report kg beside it. Verified: RM6,901.93 over the 7,147 rows the view can price, covering 509.58 kg. The view reconciles to fact_waste on weight (5,528.61 kg against 5,528.50) so the two metrics describe the same waste; only the pricing is partial.",
-      "expression": "sum(v_waste_valued.value_myr) where v_waste_valued.value_is_available = 1",
-      "caveat": "Never present this as the cost of the business's waste. It prices 509.58 kg of 5,528.61 -- 9.2% of the weight -- across 7,147 of 11,747 rows and 6 of the 9 ingredient categories. The gap is not random and that is what makes it dangerous: the three unpriced categories include ayam, 3,848 kg on its own and roughly 70% of all waste, so the largest single component of the thing being asked about is exactly the part this figure leaves out. Row coverage looks reassuring at 61% and weight coverage is 9%; the weight one is the honest one. The view's own basis line says kg is fully reconciled while RM is partial and directional. Lead with kg, give this as an order-of-magnitude floor, and state all three coverage figures whenever it is quoted.",
-      "synonyms": [
-        "waste cost",
-        "cost of waste",
-        "waste value",
-        "value of waste",
-        "waste in rm",
-        "waste in ringgit",
-        "waste worth",
-        "waste money",
-        "how much is our waste worth",
-        "wastage cost",
-        "cost of wastage",
-        "waste costing",
-        "wastage costing",
-        "waste is costing",
-        "money lost to waste",
-        "waste in myr",
-        "waste spend"
-      ],
-      "required_filters": [
-        {
-          "table": "v_waste_valued",
-          "column": "value_is_available",
-          "op": "eq",
-          "values": [
-            "1"
-          ]
-        }
-      ]
     }
   ]
 }
