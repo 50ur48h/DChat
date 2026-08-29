@@ -167,6 +167,10 @@ async def test_provenance_records_where_it_came_from(
         "name": "metric_key",
         "description": "definition_text",
         "expression": "formula",
+        # Recorded even when unmapped. "this import had no caveat column" and
+        # "this import predates the field" are different facts about drift, and
+        # an absent key would make them look the same.
+        "caveat": None,
     }
 
 

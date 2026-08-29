@@ -31,6 +31,7 @@ const PROPOSAL = {
   name: "anchor_order",
   description: "A completed order over 40 pounds placed on a weekday.",
   expression: "count(orders.id)",
+  caveat: "Weekday only, so weekend demand is not represented.",
   synonyms: ["anchor orders"],
   provenance: { kind: "import", table: "public.meta_metric", snapshot_id: "s1" },
 };
@@ -41,6 +42,7 @@ const BINDING = {
   kind: "metric",
   description: "Revenue excluding cancelled and refunded orders.",
   expression: "sum(orders.total_amount)",
+  caveat: null,
   required_filters: [
     { table: "orders", column: "status", op: "not_in", values: ["cancelled", "refunded"] },
   ],
@@ -163,6 +165,7 @@ describe("changesFrom", () => {
     const changes = changesFrom(BINDING, {
       description: "Revenue excluding cancelled and refunded orders.",
       expression: "sum(orders.total_amount)",
+      caveat: "",
       synonyms: "net sales",
       filters: BINDING.required_filters,
     });
@@ -176,6 +179,7 @@ describe("changesFrom", () => {
     const changes = changesFrom(BINDING, {
       description: BINDING.description,
       expression: "   ",
+      caveat: "",
       synonyms: "net sales",
       filters: BINDING.required_filters,
     });
@@ -190,6 +194,7 @@ describe("changesFrom", () => {
     const changes = changesFrom(BINDING, {
       description: BINDING.description,
       expression: "sum(orders.total_amount)",
+      caveat: "",
       synonyms: "net sales",
       filters: [],
     });
@@ -204,6 +209,7 @@ describe("editSummary", () => {
       editSummary(BINDING, {
         description: BINDING.description,
         expression: "sum(orders.total_amount)",
+        caveat: "",
         synonyms: "net sales",
         filters: BINDING.required_filters,
       }),
@@ -217,6 +223,7 @@ describe("editSummary", () => {
     const summary = editSummary(BINDING, {
       description: BINDING.description,
       expression: "sum(orders.total_amount)",
+      caveat: "",
       synonyms: "net sales",
       filters: [],
     });
@@ -230,16 +237,18 @@ describe("editSummary", () => {
     // the screen appeared to confirm a change it had not made. A line about a
     // consequence must not be mistakable for one about an outcome.
     const drafts = [
-      { description: "Changed.", expression: "", synonyms: "", filters: [] },
+      { description: "Changed.", expression: "", caveat: "", synonyms: "", filters: [] },
       {
         description: BINDING.description,
         expression: "sum(orders.total_amount)",
+        caveat: "",
         synonyms: "net sales",
         filters: BINDING.required_filters,
       },
       {
         description: BINDING.description,
         expression: "sum(orders.total_amount)",
+        caveat: "",
         synonyms: "net sales",
         filters: [{ table: "orders", column: "status", op: "in", values: ["completed"] }],
       },
@@ -254,6 +263,7 @@ describe("editSummary", () => {
     const summary = editSummary(BINDING, {
       description: "Something else entirely.",
       expression: "sum(orders.total_amount)",
+      caveat: "",
       synonyms: "net sales",
       filters: BINDING.required_filters,
     });
@@ -271,6 +281,7 @@ describe("describeVersion", () => {
         name: "net_revenue",
         description: "Revenue excluding cancelled and refunded orders.",
         expression: null,
+        caveat: null,
         required_filters: BINDING.required_filters,
         synonyms: [],
         status: "active",
@@ -291,6 +302,7 @@ describe("describeVersion", () => {
         name: "waste_cost",
         description: "Cost of recorded waste.",
         expression: null,
+        caveat: null,
         required_filters: [],
         synonyms: [],
         status: "active",
@@ -308,6 +320,7 @@ describe("describeVersion", () => {
         name: "basket_size",
         description: "What an average order is worth.",
         expression: null,
+        caveat: null,
         required_filters: [],
         synonyms: [],
         status: "active",
@@ -331,6 +344,28 @@ describe("<Definitions />", () => {
     expect(await screen.findByText("anchor_order")).toBeInTheDocument();
     expect(screen.getByText(/completed order over 40 pounds/)).toBeInTheDocument();
     expect(screen.getByText("Imported from public.meta_metric")).toBeInTheDocument();
+  });
+
+  it("puts an imported caveat in front of the Admin who is about to bless it", async () => {
+    // The reason `caveat` exists is that it reaches a *reader*, and the first
+    // reader is whoever accepts the proposal. A caveat the review screen does
+    // not show is one an Admin approves without having seen — which is the
+    // shape of B-133, where a computed value reached a trace and no screen.
+    stubFetch({ proposals: json([PROPOSAL]) });
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
+
+    expect(await screen.findByText(/Weekday only, so weekend demand/)).toBeInTheDocument();
+  });
+
+  it("shows the caveat on a definition in force", async () => {
+    stubFetch({
+      definitions: json([{ ...BINDING, caveat: "Excludes samples, so it understates stock." }]),
+    });
+
+    render(<Definitions orgId="org-1" dataSourceId="ds-1" role="admin" />);
+
+    expect(await screen.findByText(/Excludes samples/)).toBeInTheDocument();
   });
 
   it("separates what is enforced from what is only prose", async () => {
@@ -667,6 +702,7 @@ describe("<Definitions />", () => {
           name: "net_revenue",
           description: "Revenue.",
           expression: null,
+          caveat: null,
           required_filters: [],
           synonyms: [],
           status: "active",
@@ -679,6 +715,7 @@ describe("<Definitions />", () => {
           name: "net_revenue",
           description: "Revenue excluding cancelled and refunded orders.",
           expression: null,
+          caveat: null,
           required_filters: BINDING.required_filters,
           synonyms: [],
           status: "active",

@@ -272,6 +272,11 @@ class ResearchState(BaseModel):
     #: answer's limitations can tell an enforced definition from a passage the
     #: run merely read — which is the entire distinction the layer exists for.
     applied_definitions: list[str] = Field(default_factory=list[str])
+    #: What each applied definition makes the **answer** say (revision 0033).
+    #: Carried on the state rather than re-read, for the reason `capability` is:
+    #: the composer must caveat the definitions the *planner was shown*, and a
+    #: second read could pick up an edit made while the run was in flight.
+    definition_caveats: dict[str, str] = Field(default_factory=dict[str, str])
 
     #: How many active definitions this data source had when the question was
     #: asked (**B-087**). Recorded because the interesting number is not how

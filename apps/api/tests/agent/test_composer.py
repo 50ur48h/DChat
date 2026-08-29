@@ -570,3 +570,48 @@ def test_an_answer_drawn_from_observed_rows_carries_no_provenance_caveat() -> No
     state.capability["provenance"] = {"public.fact_sale": ["real"]}
 
     assert limitations_for(state, CriticVerdict(verdict="pass")) == ()
+
+
+def test_a_definitions_caveat_reaches_the_answer() -> None:
+    """**The gap revision 0033 exists for.**
+
+    A definition had three outputs and none reached the reader: `description`
+    went to the prompt, `required_filters` to the critic, and
+    `applied_definitions` was used here *only to suppress* the prose caveat. So
+    MiseQ's own rule — *"never label SUM(value_myr) as total restaurant waste
+    cost"* — would have been told to the model and to nobody else, and a model
+    that dropped it would have been contradicted by nothing.
+
+    That is D-053's mistake facing the other way: a caveat reaching the model
+    and not the reader is the same shape as one reaching the reader and
+    enforcing nothing.
+    """
+    state = _state(_ref())
+    state.applied_definitions = ["waste cost"]
+    state.definition_caveats = {
+        "waste cost": "Report kg. RM valuation is partial; never call it total waste cost."
+    }
+
+    notes = limitations_for(state, CriticVerdict(verdict="pass"))
+
+    assert any("never call it total waste cost" in note for note in notes)
+
+
+def test_a_definition_with_nothing_to_add_adds_nothing() -> None:
+    """Most definitions are a formula and no more. A column that always wants
+    filling would make every answer sound uncertain."""
+    state = _state(_ref())
+    state.applied_definitions = ["net revenue"]
+    state.definition_caveats = {}
+
+    assert limitations_for(state, CriticVerdict(verdict="pass")) == ()
+
+
+def test_a_definition_the_run_did_not_apply_says_nothing() -> None:
+    """Narrowed the way every other caveat here is: a catalogue of definitions
+    must not caveat an answer none of them touched."""
+    state = _state(_ref())
+    state.applied_definitions = []
+    state.definition_caveats = {"waste cost": "RM valuation is partial."}
+
+    assert limitations_for(state, CriticVerdict(verdict="pass")) == ()

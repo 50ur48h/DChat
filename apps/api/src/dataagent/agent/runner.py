@@ -328,6 +328,14 @@ async def _investigate(
     if applied:
         bundle = replace(bundle, definitions_applied=applied)
         state.applied_definitions = [definition.name for definition in applied]
+        # **What the definition makes the answer say** (revision 0033). The
+        # prompt gets the description and the critic gets the filters; this is
+        # the half that reaches the reader, and without it a rule like *"never
+        # label SUM(value_myr) as total waste cost"* would be told to the model
+        # and to nobody else.
+        state.definition_caveats = {
+            definition.name: definition.caveat for definition in applied if definition.caveat
+        }
 
     # **How this organization has answered questions like this one** (arch 5.4).
     # Matched lexically and for free: no embedding, so no spend and no dependency

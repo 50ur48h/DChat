@@ -104,6 +104,7 @@ class ColumnMapping:
     description: str
     expression: str | None = None
     synonyms: str | None = None
+    caveat: str | None = None
 
     def columns(self) -> tuple[str, ...]:
         """The columns to select, deduplicated and in order.
@@ -112,7 +113,7 @@ class ColumnMapping:
         a` is a statement the validator would have to think about for no reason.
         """
         seen: dict[str, None] = {}
-        for column in (self.name, self.description, self.expression, self.synonyms):
+        for column in (self.name, self.description, self.expression, self.synonyms, self.caveat):
             if column:
                 seen.setdefault(column, None)
         return tuple(seen)
@@ -127,6 +128,7 @@ class Proposal:
     description: str
     expression: str | None
     synonyms: tuple[str, ...]
+    caveat: str | None
     provenance: dict[str, object]
 
 
@@ -202,6 +204,7 @@ async def propose_from_table(
                     "name": mapping.name,
                     "description": mapping.description,
                     "expression": mapping.expression,
+                    "caveat": mapping.caveat,
                 },
             }
             proposal = Proposal(
@@ -210,6 +213,7 @@ async def propose_from_table(
                 description=description.strip(),
                 expression=_cell(row, position, mapping.expression).strip() or None,
                 synonyms=_synonyms(_cell(row, position, mapping.synonyms)),
+                caveat=_cell(row, position, mapping.caveat).strip() or None,
                 provenance=provenance,
             )
             session.add(
@@ -223,6 +227,7 @@ async def propose_from_table(
                     expression=proposal.expression,
                     required_filters=[],
                     synonyms=list(proposal.synonyms),
+                    caveat=proposal.caveat,
                     provenance=provenance,
                     status=STATUS_PROPOSED,
                     created_by=actor_user_id,
@@ -257,6 +262,7 @@ async def proposals_for(org_id: uuid.UUID, data_source_id: uuid.UUID) -> tuple[P
             description=row.description,
             expression=row.expression,
             synonyms=tuple(str(word) for word in row.synonyms),
+            caveat=row.caveat,
             provenance=dict(row.provenance or {}),
         )
         for row in rows
@@ -308,6 +314,7 @@ async def accept(
             expression=row.expression,
             required_filters=parsed,
             synonyms=tuple(str(word) for word in row.synonyms),
+            caveat=row.caveat,
         )
         if synonyms is not None:
             words = tuple(word.strip() for word in synonyms if word.strip())
