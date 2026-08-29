@@ -41,13 +41,26 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-function stubFetch(options: { me?: unknown; chosen?: unknown; archived?: unknown[] } = {}) {
+function stubFetch(
+  options: {
+    me?: unknown;
+    chosen?: unknown;
+    archived?: unknown[];
+    showCost?: boolean;
+  } = {},
+) {
   const calls: { url: string; init: RequestInit }[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn((url: string, init: RequestInit = {}) => {
       calls.push({ url, init });
       if (url.includes("/active-data-source")) return Promise.resolve(json(options.chosen ?? CHOSEN));
+      // The settings page loads its three facts together and renders none of
+      // them if any request fails, which is how it already treats the active
+      // data source. A stub missing this route blanks the whole screen.
+      if (url.includes("/show-run-cost")) {
+        return Promise.resolve(json({ visible: options.showCost ?? true }));
+      }
       if (url.includes("/conversations")) return Promise.resolve(json(options.archived ?? []));
       if (url.endsWith("/v1/me")) return Promise.resolve(json(options.me ?? ME));
       return Promise.resolve(json({}));
@@ -163,5 +176,42 @@ describe("<Settings />", () => {
       expect(restored?.init.method).toBe("POST");
       expect(JSON.parse(String(restored?.init.body))).toEqual({ archived: false });
     });
+  });
+
+  it("turns spend off for the whole organization, and says so", async () => {
+    // **D-066, and it is a switch rather than a permission.** Off hides cost
+    // from everyone including the Admin who set it, so the label must not read
+    // as "hidden from others".
+    const calls = stubFetch({ showCost: true });
+
+    render(<Settings orgId="o1" />);
+    expect(await screen.findByText("Shown to everyone")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide cost on answers" }));
+
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (call) => call.url.includes("/show-run-cost") && call.init.method === "PUT",
+        ),
+      ).toBe(true),
+    );
+    const sent = calls.filter((call) => call.init.method === "PUT").at(-1);
+    expect(JSON.parse(String(sent?.init.body))).toEqual({ visible: false });
+  });
+
+  it("offers a Reader no way to change it (B-008)", async () => {
+    role.value = "reader";
+    stubFetch({
+      me: { ...ME, memberships: [{ org_id: "o1", org_name: "Demo", role: "reader" }] },
+      showCost: false,
+    });
+
+    render(<Settings orgId="o1" />);
+
+    expect(await screen.findByText("Hidden from everyone")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /cost on answers/ }),
+    ).not.toBeInTheDocument();
   });
 });

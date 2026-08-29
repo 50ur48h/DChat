@@ -4,6 +4,68 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-066 — spend is hidden by an organization switch, enforced by the API
+Date: 2026-08-29 · Phase: 13 · PR: WP13.25
+Context: the owner asked for a way to keep cost and token counts off the answer
+card — *"not everyone in an org should see spend, and I don't want it on screen
+during a demo"* — then narrowed it: *"I've changed my mind — I just want it off
+for now and back on later. So a simple org-level switch, not a permission. Hide
+it from everyone including me when it's off."*
+Options: (a) per-user preference; (b) a role rule showing spend to Admins only;
+(c) an org switch hiding it in the browser; (d) an org switch enforced in the
+API.
+Decision: (d). (a) needs a migration — `users` has no settings column — and
+answers a question nobody asked. (b) is the feature this most resembles and is
+explicitly *not* it: off means off for the Admin too. (c) is the one that looks
+equivalent and is not — a screen that declines to render `cost_estimate` has
+still sent it, and *"not everyone should see spend"* is not a claim a CSS rule
+can make. So `run_out` takes `show_cost` and the two routes that build a run
+pass it; when false the API sends `cost_estimate: null` and `model_usage: {}`.
+**Default visible**, on the owner's instruction, so turning it off is a
+deliberate act rather than something a new organization inherits silently.
+**A key in `organizations.settings`, not a column**, and revision 0031's
+reasoning decides that rather than contradicting it: 0031 refused JSONB for
+`active_data_source_id` because an id needs referential integrity and JSONB has
+none. A boolean references nothing, so the objection does not apply and the
+column empty since revision 0001 is the right home. No migration.
+Consequences: `orgs.service` gains `show_run_cost` / `set_show_run_cost`
+(Admin-only to change, readable by any member, audited); two routes;
+`GET|PUT /orgs/{id}/show-run-cost`. **The web needed no change to the answer
+card** — `Cost` already renders nothing when there are no calls and no total, so
+a withheld run is indistinguishable from one that recorded no usage, and a test
+now pins that. A Spend card on the settings screen turns it over.
+
+## D-067 — the cached share of the input is recorded before it is priced
+Date: 2026-08-29 · Phase: 13 · PR: WP13.25
+Context: the owner's billed figure disagreed with ours. `estimate_cost` is
+`input × input_price + output × output_price`, and OpenAI's `/responses` reports
+`input_tokens` **inclusive** of tokens served from its prompt cache, which the
+provider bills at a discount. So every cache hit makes our number larger than
+the invoice. The workload is cache-friendly: one real run made eight `sql` calls
+averaging ~7,000 input tokens behind a stable prefix, and input was **50.4%** of
+its $0.6567.
+Options: (a) model the discount now from published rates; (b) record
+`cached_tokens` and change no price; (c) leave it and reason about the gap.
+Decision: (b), on the owner's instruction — *"Record cached_tokens first, before
+touching pricing. The gap becomes an observation rather than an argument."* (a)
+would put a second guess on top of the first: the discount varies by model and
+we would be inferring it while unable to measure whether the result matched.
+The blocking fact was that **the number was never stored**, so the size of the
+overstatement could be argued and not counted.
+Consequences: revision 0034 adds `usage_ledger.cached_input_tokens`, nullable —
+null is *unknown*, which every earlier row is and every provider that does not
+report a cached share stays; a check constraint keeps it a subset of
+`input_tokens` rather than an addition. `Usage` carries it, the OpenAI adapter
+reads `input_tokens_details.cached_tokens`, the run rollup surfaces it beside
+the total, and the answer card shows it. **A test asserts that two calls
+differing only in cached share still cost the same**, so modelling the discount
+becomes a change somebody makes deliberately. `tokens_estimated` is surfaced in
+the same pass as `estimated_calls`: it was recorded per row since revision 0011
+and never shown, so a total mixing measured and estimated tokens said nothing
+about which — the silent-mixing shape. Next step is the owner's, comparing a
+day of runs against their provider's usage page (B-170); this machine cannot
+reach `api.openai.com`.
+
 ## D-065 — a definition carries a caveat, and the caveat reaches the reader
 Date: 2026-08-28 · Phase: 13 · PR: WP13.23
 Context: a definition had three outputs and none of them reached whoever reads

@@ -34,6 +34,7 @@ from pydantic import BaseModel, Field
 from dataagent.agent.scheduler import schedule_run
 from dataagent.auth.context import RequestContext
 from dataagent.auth.guards import require_member
+from dataagent.orgs import service as orgs_service
 from dataagent.runs import service
 from dataagent.runs.service import NotFoundError
 from dataagent.runs.sse import event_stream
@@ -537,16 +538,23 @@ async def get_run(
         view = await service.get_run(org_id=context.org_id, run_id=run_id, user_id=context.user_id)
     except NotFoundError as error:
         raise _not_found("run") from error
-    return run_out(view)
+    return run_out(view, show_cost=await orgs_service.show_run_cost(context.org_id))
 
 
-def run_out(view: service.RunView) -> RunOut:
+def run_out(view: service.RunView, *, show_cost: bool = True) -> RunOut:
     """One run, as the API states it.
 
     Shared by the single-run route and the thread's list (**B-106**) so the two
     cannot drift: a field added to one and not the other would make an answer
     look different depending on which request fetched it, and the thread is the
     place a reader compares two answers side by side.
+
+    **`show_cost=False` withholds spend rather than hiding it** (D-066). The
+    organization's switch is enforced here, where the bytes are chosen, and not
+    in the browser: a screen that merely declines to render `cost_estimate` has
+    still sent it, and anyone who opens the network tab reads what the switch
+    was set to conceal. The web needs no change for this — `Cost` already
+    renders nothing when there are no calls and no total.
     """
     return RunOut(
         id=view.id,
@@ -569,8 +577,8 @@ def run_out(view: service.RunView) -> RunOut:
         started_at=view.started_at,
         finished_at=view.finished_at,
         failure_reason=view.failure_reason,
-        cost_estimate=view.cost_estimate,
-        model_usage=view.model_usage,
+        cost_estimate=view.cost_estimate if show_cost else None,
+        model_usage=view.model_usage if show_cost else {},
         limitations=view.limitations,
         method=view.method,
         chart=view.chart,
@@ -602,7 +610,8 @@ async def list_conversation_runs(
         )
     except NotFoundError as error:
         raise _not_found("conversation") from error
-    return [run_out(view) for view in views]
+    show_cost = await orgs_service.show_run_cost(context.org_id)
+    return [run_out(view, show_cost=show_cost) for view in views]
 
 
 @router.get(

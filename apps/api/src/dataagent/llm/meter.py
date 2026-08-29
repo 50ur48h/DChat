@@ -130,6 +130,7 @@ async def record(
             status=STATUS_ERROR if error is not None else STATUS_OK,
             input_tokens=usage.input_tokens,
             output_tokens=usage.output_tokens,
+            cached_input_tokens=usage.cached_input_tokens,
             tokens_estimated=usage.estimated,
             cost_usd=estimate_cost(model, usage, settings),
             latency_ms=latency_ms,

@@ -222,6 +222,21 @@ class ArmedRecoveryOut(RecoveryGrantOut):
     )
 
 
+class ShowRunCostOut(BaseModel):
+    visible: bool = Field(
+        description=(
+            "Whether `cost_estimate` and `model_usage` are populated on this "
+            "organization's runs. When false the API omits them rather than the "
+            "screen declining to draw them (D-066), so the numbers are not on "
+            "the wire for a reader to find."
+        )
+    )
+
+
+class ShowRunCostIn(BaseModel):
+    visible: bool = Field(description="False hides spend from every member, Admins included.")
+
+
 @router.get(
     "/orgs/{org_id}/active-data-source",
     response_model=ActiveDataSourceOut,
@@ -271,6 +286,46 @@ async def set_active_data_source(
         ) from error
     return ActiveDataSourceOut(
         data_source_id=active.data_source_id, data_source_name=active.data_source_name
+    )
+
+
+@router.get(
+    "/orgs/{org_id}/show-run-cost",
+    response_model=ShowRunCostOut,
+    summary="Whether answers in this organization show what they cost",
+)
+async def get_show_run_cost(
+    context: Annotated[RequestContext, Depends(require_member)],
+) -> ShowRunCostOut:
+    """Readable by any member, for `active-data-source`'s reason.
+
+    Every member is subject to this switch, and the settings screen has to be
+    able to show its current state to whoever can see the screen. It discloses
+    no spend — only whether spend is shown.
+    """
+    return ShowRunCostOut(visible=await service.show_run_cost(context.org_id))
+
+
+@router.put(
+    "/orgs/{org_id}/show-run-cost",
+    response_model=ShowRunCostOut,
+    summary="Show or hide cost and token counts on every answer",
+)
+async def set_show_run_cost(
+    body: ShowRunCostIn,
+    context: Annotated[RequestContext, Depends(require_admin)],
+) -> ShowRunCostOut:
+    """Admin only to change, and audited — **but it is not a permission**.
+
+    Off hides spend from the whole organization, the Admin who turned it off
+    included (owner, 2026-08-29). A rule that showed cost to Admins and hid it
+    from Readers is a different feature and is the one this most resembles; it
+    is deliberately not what this does.
+    """
+    return ShowRunCostOut(
+        visible=await service.set_show_run_cost(
+            org_id=context.org_id, actor_user_id=context.user_id, visible=body.visible
+        )
     )
 
 

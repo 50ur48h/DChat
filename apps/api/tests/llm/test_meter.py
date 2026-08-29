@@ -117,6 +117,26 @@ def test_small_calls_do_not_round_away_to_zero() -> None:
     assert cost > 0
 
 
+def test_recording_the_cached_share_does_not_change_what_a_call_costs() -> None:
+    """**The point of revision 0034, stated as a test.**
+
+    The owner's instruction was to record the cached share *before* touching
+    pricing, so the size of the overstatement is an observation rather than an
+    argument. Two calls identical but for how much of the input was cached must
+    therefore still cost the same — this is deliberately the *current, known to
+    overstate* behaviour, and it is asserted so that modelling the discount is a
+    change somebody makes on purpose and this test is what tells them they did.
+    """
+    settings = build_settings(llm_prices=PRICES)
+
+    none_cached = meter.estimate_cost("fake-strong", Usage(1000, 500), settings)
+    mostly_cached = meter.estimate_cost(
+        "fake-strong", Usage(1000, 500, cached_input_tokens=900), settings
+    )
+
+    assert none_cached == mostly_cached == Decimal("0.025000")
+
+
 def test_a_malformed_price_is_treated_as_no_price() -> None:
     """A wrong number that looks authoritative is worse than an absent one."""
     settings = build_settings(llm_prices={"fake-strong": {"input": 1.0}})

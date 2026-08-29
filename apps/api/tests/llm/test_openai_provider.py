@@ -231,6 +231,49 @@ async def test_the_answer_and_its_usage_are_read_back() -> None:
     assert not completion.usage.estimated  # the provider counted these, we did not
 
 
+async def test_the_cached_share_of_the_input_is_read_back() -> None:
+    """**Revision 0034.** `input_tokens` is inclusive of the cached ones, so a
+    figure that priced it at the full input rate overstated every cache hit —
+    and the number needed to measure by how much was never stored. It is now."""
+    body = ok_body()
+    body["usage"] = {
+        "input_tokens": 11,
+        "input_tokens_details": {"cached_tokens": 8},
+        "output_tokens": 7,
+    }
+    completion = await provider_for(lambda _: httpx.Response(200, json=body)).complete(
+        request_for()
+    )
+
+    assert completion.usage.input_tokens == 11
+    assert completion.usage.cached_input_tokens == 8
+
+
+async def test_no_cached_detail_is_unknown_rather_than_none_cached() -> None:
+    """Two different claims, and the ledger reads this column as a measurement:
+    *the provider did not say* is not *the provider said none*. `ok_body` has no
+    details object, which is the older payload shape and every failure mode."""
+    completion = await provider_for(lambda _: httpx.Response(200, json=ok_body())).complete(
+        request_for()
+    )
+
+    assert completion.usage.cached_input_tokens is None
+
+
+async def test_a_malformed_cached_count_is_unknown_not_zero() -> None:
+    body = ok_body()
+    body["usage"] = {
+        "input_tokens": 11,
+        "input_tokens_details": {"cached_tokens": "lots"},
+        "output_tokens": 7,
+    }
+    completion = await provider_for(lambda _: httpx.Response(200, json=body)).complete(
+        request_for()
+    )
+
+    assert completion.usage.cached_input_tokens is None
+
+
 async def test_the_model_that_answered_is_recorded_not_the_one_asked_for() -> None:
     """A provider may serve a different snapshot than the alias requested. The
     ledger should say which one actually ran."""

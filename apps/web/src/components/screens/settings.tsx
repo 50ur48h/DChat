@@ -56,6 +56,11 @@ export function Settings({ orgId }: { orgId: string }) {
 
   const [me, setMe] = useState<Me | null>(null);
   const [active, setActive] = useState<ActiveDataSource | null>(null);
+  //: Null while unknown. The switch defaults to *visible* (D-066), so rendering
+  //: a control that reads "hidden" before the answer arrives would misreport
+  //: the state of the thing it exists to report.
+  const [showCost, setShowCost] = useState<boolean | null>(null);
+  const [savingCost, setSavingCost] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const isAdmin = role === "admin";
@@ -65,10 +70,15 @@ export function Settings({ orgId }: { orgId: string }) {
     let alive = true;
     void (async () => {
       try {
-        const [who, chosen] = await Promise.all([api.me(), api.activeDataSource(orgId)]);
+        const [who, chosen, spendVisible] = await Promise.all([
+          api.me(),
+          api.activeDataSource(orgId),
+          api.showRunCost(orgId),
+        ]);
         if (!alive) return;
         setMe(who);
         setActive(chosen);
+        setShowCost(spendVisible);
       } catch (cause) {
         if (alive) setError(cause instanceof Error ? cause.message : "Settings could not load.");
       }
@@ -79,6 +89,19 @@ export function Settings({ orgId }: { orgId: string }) {
   }, [api, orgId]);
 
   const membership = me?.memberships.find((entry) => entry.org_id === orgId) ?? null;
+
+  const toggleCost = useCallback(async () => {
+    if (showCost === null) return;
+    setSavingCost(true);
+    setError(null);
+    try {
+      setShowCost(await api.setShowRunCost(orgId, !showCost));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "That could not be saved.");
+    } finally {
+      setSavingCost(false);
+    }
+  }, [api, orgId, showCost]);
 
   const chooseTheme = useCallback(
     (next: "light" | "dark") => () => setTheme(next),
@@ -156,6 +179,30 @@ export function Settings({ orgId }: { orgId: string }) {
             </Link>
           )}
         </Row>
+      </Card>
+
+      {/* **D-066.** Not a permission — off hides spend from everyone, Admins
+          included — and enforced by the API rather than by this screen, so the
+          numbers are not in the response for a reader to find. */}
+      <Card
+        title="Spend"
+        subtitle="Whether every answer shows what it cost and how many tokens it used."
+      >
+        <dl className={styles.facts}>
+          <dt>On answers</dt>
+          <dd>
+            {showCost === null ? "—" : showCost ? "Shown to everyone" : "Hidden from everyone"}
+          </dd>
+        </dl>
+        {isAdmin ? (
+          <Row>
+            <Button onClick={() => void toggleCost()} disabled={showCost === null || savingCost}>
+              {savingCost ? "Saving…" : showCost ? "Hide cost on answers" : "Show cost on answers"}
+            </Button>
+          </Row>
+        ) : (
+          <p className={styles.muted}>An Admin can change this.</p>
+        )}
       </Card>
 
       <Card title="Appearance" subtitle="Light is the default. Your choice is kept in this browser.">

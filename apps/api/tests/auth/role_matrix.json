@@ -129,6 +129,11 @@
     "contributor": "allow",
     "reader": "allow"
   },
+  "GET /v1/orgs/{org_id}/show-run-cost": {
+    "admin": "allow",
+    "contributor": "allow",
+    "reader": "allow"
+  },
   "PATCH /v1/orgs/{org_id}/conversations/{conversation_id}": {
     "admin": "allow",
     "contributor": "allow",
@@ -245,6 +250,11 @@
     "reader": "deny(403)"
   },
   "PUT /v1/orgs/{org_id}/active-data-source": {
+    "admin": "allow",
+    "contributor": "deny(403)",
+    "reader": "deny(403)"
+  },
+  "PUT /v1/orgs/{org_id}/show-run-cost": {
     "admin": "allow",
     "contributor": "deny(403)",
     "reader": "deny(403)"

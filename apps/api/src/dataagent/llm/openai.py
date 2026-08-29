@@ -248,8 +248,13 @@ def _completion(payload: dict[str, Any], request: LLMRequest) -> Completion:
         model=str(payload.get("model") or request.model),
         provider="openai",
         usage=Usage(
+            # `input_tokens` is inclusive of the cached ones; the details object
+            # says how many of them there were. Read separately rather than
+            # subtracted: the ledger stores what was sent and what was cached,
+            # and nothing here decides what that is worth.
             input_tokens=int(usage.get("input_tokens", 0)),
             output_tokens=int(usage.get("output_tokens", 0)),
+            cached_input_tokens=_cached_input(usage),
             estimated=False,
         ),
         # Stamped by the front door, which is the only layer that sees the
@@ -257,6 +262,23 @@ def _completion(payload: dict[str, Any], request: LLMRequest) -> Completion:
         latency_ms=0,
         finish_reason=_finish_reason(payload),
     )
+
+
+def _cached_input(usage: dict[str, Any]) -> int | None:
+    """How many input tokens the provider served from its prompt cache.
+
+    None rather than 0 when the details object is absent or malformed, because
+    the two are different claims: *the provider did not tell us* and *the
+    provider told us none were cached*. Only the second is a measurement, and
+    the ledger's column is read as a measurement.
+    """
+    details = usage.get("input_tokens_details")
+    if not isinstance(details, dict):
+        return None
+    cached: object = cast(dict[str, Any], details).get("cached_tokens")
+    if not isinstance(cached, int | float) or isinstance(cached, bool):
+        return None
+    return max(0, int(cached))
 
 
 def _output(payload: dict[str, Any]) -> tuple[str, str | None]:

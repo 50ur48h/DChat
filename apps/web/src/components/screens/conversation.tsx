@@ -684,11 +684,23 @@ function Cost({ run }: { run: Run }) {
         ? "less than $0.0001"
         : `$${total.toFixed(total < 0.01 ? 4 : 2)}`;
 
+  const estimated = usage.estimated_calls ?? 0;
+  const cached = usage.cached_input_tokens;
+
   const detail = [
     `${calls} model call${calls === 1 ? "" : "s"}`,
     usage.input_tokens || usage.output_tokens
       ? `${((usage.input_tokens ?? 0) + (usage.output_tokens ?? 0)).toLocaleString()} tokens`
       : null,
+    // **Shown because the total does not discount it** (revision 0034). The
+    // provider bills cached input at less than the rate this figure used, so a
+    // reader comparing it against an invoice should be able to see how much of
+    // the input was cached rather than having to wonder.
+    cached ? `${cached.toLocaleString()} cached` : null,
+    // The silent-mixing guard. Estimated tokens are priced as if measured, and
+    // a total that does not say which is which is the shape this project keeps
+    // filing — so when any of it is guesswork, the line says so.
+    estimated > 0 ? `${estimated} estimated` : null,
     unpriced > 0 ? `${unpriced} not priced` : null,
   ]
     .filter(Boolean)

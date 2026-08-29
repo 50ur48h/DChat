@@ -176,6 +176,8 @@ export interface Api {
    * refuses anyone else, whatever the browser believes.
    */
   activeDataSource(orgId: string): Promise<ActiveDataSource>;
+  showRunCost(orgId: string): Promise<boolean>;
+  setShowRunCost(orgId: string, visible: boolean): Promise<boolean>;
   setActiveDataSource(orgId: string, dataSourceId: string | null): Promise<ActiveDataSource>;
   registerDataSource(orgId: string, source: NewDataSource): Promise<DataSource>;
   rotateCredentials(
@@ -418,6 +420,29 @@ export function createApi(getToken: () => Promise<string | null>): Api {
         isActiveDataSource,
         "active data source",
       );
+    },
+    async showRunCost(orgId) {
+      const payload = await call(`/v1/orgs/${orgId}/show-run-cost`);
+      const visible = (payload as { visible?: unknown } | null)?.visible;
+      if (typeof visible !== "boolean") {
+        // Narrowed like every other response here: a switch that silently read
+        // as `undefined` would look exactly like "off", which is the one wrong
+        // answer that hides something and explains nothing.
+        throw new Error("The API returned something that is not a show-run-cost setting.");
+      }
+      return visible;
+    },
+    async setShowRunCost(orgId, visible) {
+      const payload = await call(`/v1/orgs/${orgId}/show-run-cost`, {
+        method: "PUT",
+        body: { visible },
+      });
+      const saved = (payload as { visible?: unknown } | null)?.visible;
+      if (typeof saved !== "boolean") {
+        throw new Error("The API returned something that is not a show-run-cost setting.");
+      }
+      // What the API says it stored, not what we asked it to store.
+      return saved;
     },
     // A PUT, mirroring the API: null is a real value here, meaning "no choice",
     // and a PATCH of a partial body could not tell that from a field left out.
