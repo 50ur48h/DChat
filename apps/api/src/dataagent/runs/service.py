@@ -48,7 +48,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import cast
+from typing import Final, cast
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -214,6 +214,39 @@ class FindingView:
     cited: bool = False
 
 
+#: The budget dimensions a waiting person is shown. **Steps, time and queries —
+#: never tokens or model calls.** Those two are spend, and an organization can
+#: switch spend off (**D-066**); a progress strip that reported token counts
+#: would hand back through one door what the other was closed to prevent. They
+#: are also the two a reader cannot act on: nobody waiting for an answer is
+#: helped by knowing it has used 80,268 tokens.
+PROGRESS_DIMENSIONS: Final = ("iterations", "queries", "wall_seconds")
+
+
+def _progress_of(budget: dict[str, object] | None) -> dict[str, object]:
+    """How far through its allowance a run is, as counters and ceilings.
+
+    Reshaped rather than passed through: `agent_runs.budget` is the loop's own
+    accounting object, and putting it on the wire whole would make every field
+    it ever grows a public one.
+    """
+    if not budget:
+        return {}
+    limits = budget.get("limits")
+    ceilings = cast(dict[str, object], limits) if isinstance(limits, dict) else {}
+    used: dict[str, object] = {}
+    allowed: dict[str, object] = {}
+    for name in PROGRESS_DIMENSIONS:
+        # `elapsed_seconds` is what the loop calls the wall clock it has spent,
+        # against a ceiling it calls `wall_seconds`.
+        key = "elapsed_seconds" if name == "wall_seconds" else name
+        if key in budget:
+            used[name] = budget[key]
+        if name in ceilings:
+            allowed[name] = ceilings[name]
+    return {"used": used, "limits": allowed} if used or allowed else {}
+
+
 @dataclass(frozen=True, slots=True)
 class RunView:
     id: uuid.UUID
@@ -229,6 +262,15 @@ class RunView:
     failure_reason: str | None = None
     cost_estimate: Decimal | None = None
     model_usage: dict[str, object] = field(default_factory=dict[str, object])
+    #: How far through its allowance this run is — the counters and the ceilings
+    #: together, as `agent_runs.budget` already stores them (**B-177**).
+    #:
+    #: **On the wire so a waiting person can be told where they are**, which is
+    #: the whole of it: a compound question now runs to five and a half minutes,
+    #: and five minutes with no sense of progress is worse than four with one.
+    #: Counters only — never a prediction. What finishes a run is a model
+    #: deciding it has enough, and nothing here knows when that will be.
+    progress: dict[str, object] = field(default_factory=dict[str, object])
     #: What this answer does not establish. Rendered beside the answer, never
     #: instead of it, and empty is both the common case and a good one.
     limitations: list[str] = field(default_factory=list[str])
@@ -783,6 +825,7 @@ async def _run_view(session: AsyncSession, run: AgentRun) -> RunView:
         finished_at=run.finished_at,
         failure_reason=run.failure_reason,
         cost_estimate=run.cost_estimate,
+        progress=_progress_of(run.budget),
         model_usage=dict(run.model_usage),
         limitations=[str(note) for note in run.limitations],
         method=run.method or "",

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ConversationThread } from "./conversation";
+import { ConversationThread, nearlyOut, progressLine } from "./conversation";
 
 const session = {
   mode: "dev" as const,
@@ -857,6 +857,51 @@ describe("an answer keeps its evidence when the next question is asked (B-106)",
  * screen could show what a run cost. These assert the half a person reads, and
  * particularly the case where an honest absence beats a tidy number.
  */
+describe("how far through its allowance a run is", () => {
+  const withProgress = (used: object, limits: object) =>
+    ({ ...ANSWERED, progress: { used, limits } }) as unknown as Parameters<typeof progressLine>[0];
+
+  it("counts steps and time, and predicts nothing", () => {
+    // **B-177.** A bar claims to know when a run finishes. What finishes a run
+    // is a model deciding it has enough, and nothing here can know that.
+    const run = withProgress(
+      { iterations: 6, wall_seconds: 210 },
+      { iterations: 12, wall_seconds: 330 },
+    );
+
+    expect(progressLine(run)).toBe("step 6 of 12 · 3:30 of 5:30");
+  });
+
+  it("says nothing at all before the run has done anything", () => {
+    // "step 0 of 12" while the catalog is still being searched measures the
+    // wrong thing, and an empty strip is honest.
+    expect(progressLine(ANSWERED as unknown as Parameters<typeof progressLine>[0])).toBeNull();
+  });
+
+  it("warns when a ceiling is close, before the answer arrives", () => {
+    // Saying it early is the feature: a reader who knows the search was cut
+    // short reads the caveats differently.
+    const close = withProgress(
+      { iterations: 11, wall_seconds: 200 },
+      { iterations: 12, wall_seconds: 330 },
+    );
+    const early = withProgress(
+      { iterations: 2, wall_seconds: 40 },
+      { iterations: 12, wall_seconds: 330 },
+    );
+
+    expect(nearlyOut(close)).toBe(true);
+    expect(nearlyOut(early)).toBe(false);
+  });
+
+  it("is not confused by a run that reports one dimension and not the other", () => {
+    const partial = withProgress({ iterations: 3 }, { iterations: 12 });
+
+    expect(progressLine(partial)).toBe("step 3 of 12");
+    expect(nearlyOut(partial)).toBe(false);
+  });
+});
+
 describe("how an answer is rendered", () => {
   it("shows headings, lists and tables as structure rather than as characters", async () => {
     // **B-172.** This rendered into a bare `<p>` with `white-space: pre-wrap`,

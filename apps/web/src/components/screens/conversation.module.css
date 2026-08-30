@@ -605,3 +605,18 @@
 .costMeta {
   color: var(--ink-subtle);
 }
+
+/* How far through its allowance a run is (B-177). Quiet by default — it is
+   orientation, not news — and warmer once a ceiling is close, because at that
+   point it is telling the reader something about the answer they are about
+   to get. */
+.progress {
+  margin: 0.35rem 0 0;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-muted, #6b6b6b);
+}
+.progressClose {
+  composes: progress;
+  color: var(--warn-ink, #8a5a12);
+}

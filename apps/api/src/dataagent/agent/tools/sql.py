@@ -137,13 +137,29 @@ async def _run_sql(context: ToolContext, params: BaseModel) -> BaseModel:
             code="no_data_source",
         )
 
+    # **B-176.** The run's own connection where it has one, so the second query
+    # of a run does not pay again for a platform read, a Key Vault round trip
+    # and a TLS handshake. `matches` is belt and braces: a conversation names
+    # one database, and handing one organization's connection to another's
+    # question is the worst thing here could do.
+    #
+    # Bound before the `try`, because the handler below reaches for it and a
+    # reader should not have to prove that the assignment cannot raise.
+    lease = context.lease
+
     try:
+        borrowed = (
+            await lease.connector()
+            if lease is not None and lease.matches(context.org_id, context.data_source_id)
+            else None
+        )
         execution = await dal_run(
             org_id=context.org_id,
             data_source_id=context.data_source_id,
             sql=args.sql,
             actor_user_id=context.actor_user_id,
             run_id=context.run_id,
+            connector=borrowed,
         )
     except PolicyViolation as violation:
         # The refusal the whole design is for. Repairable: the message names the
@@ -163,6 +179,13 @@ async def _run_sql(context: ToolContext, params: BaseModel) -> BaseModel:
         # exist`, whose own HINT was *"You might need to add explicit type
         # casts"*: the fix was in the error message and the loop was told not to
         # try. The connector decides, because the evidence is dialect-specific.
+        # **A statement fault leaves the connection usable; anything else may
+        # not** (B-176). The lease is dropped for the second kind, so the run
+        # opens a fresh connection on its next step rather than spending the
+        # steps it has left on a dead socket. A syntax error is not a reason to
+        # throw away a working connection.
+        if lease is not None and not error.statement_fault:
+            await lease.forget()
         raise ToolError(
             str(error), code="engine_error", repairable=error.statement_fault
         ) from error

@@ -194,6 +194,16 @@ class RunOut(BaseModel):
         default=None, description="Null means unpriced, never free."
     )
     model_usage: dict[str, object] = Field(default_factory=dict[str, object])
+    progress: dict[str, object] = Field(
+        default_factory=dict[str, object],
+        description=(
+            "How far through its allowance this run is: `used` and `limits` over "
+            "steps, queries and seconds. **Counters, never a prediction** — what "
+            "ends a run is a model deciding it has enough, and nothing here "
+            "knows when that will be. Spend dimensions are deliberately absent, "
+            "because an organization can switch spend off (D-066)."
+        ),
+    )
     limitations: list[str] = Field(
         default_factory=list[str],
         description=(
@@ -577,6 +587,9 @@ def run_out(view: service.RunView, *, show_cost: bool = True) -> RunOut:
         started_at=view.started_at,
         finished_at=view.finished_at,
         failure_reason=view.failure_reason,
+        # Not gated on `show_cost`: progress is steps and seconds, and the two
+        # dimensions that are spend never reach it.
+        progress=view.progress,
         cost_estimate=view.cost_estimate if show_cost else None,
         model_usage=view.model_usage if show_cost else {},
         limitations=view.limitations,

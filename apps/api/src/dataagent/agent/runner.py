@@ -93,6 +93,7 @@ from dataagent.agent.tools.registry import ToolRegistry, default_registry
 from dataagent.catalog.browse import active_catalog
 from dataagent.catalog.cards import offers_measures
 from dataagent.config import Settings
+from dataagent.dal.lease import ConnectionLease
 from dataagent.dal.policy import SourcePolicy
 from dataagent.db.models import QueryExecution, ResultArtifact
 from dataagent.knowledge import embeddings
@@ -190,6 +191,11 @@ async def execute_run(
         state=ResearchState(run_id=run_id, org_id=org_id),
         budget=BudgetState(budget=budget if budget is not None else Budget()),
     )
+    # **One connection for the whole run** (**B-176**). Measured at 3.4 seconds
+    # per query in platform read, Key Vault round trip and TLS handshake — 23.5
+    # seconds of the run that then ran out of steps. The source is resolved
+    # before this point, so there is always one to lease.
+    lease = ConnectionLease(org_id, data_source_id)
     context = ToolContext(
         org_id=org_id,
         run_id=run_id,
@@ -197,6 +203,7 @@ async def execute_run(
         actor_user_id=actor_user_id,
         data_source_id=data_source_id,
         as_of=as_of,
+        lease=lease,
         # Resolved once for the run rather than per tool call, and from the
         # settings this run was given rather than from the process — the same
         # reason `execute_run` takes settings at all. None is an ordinary answer
@@ -233,6 +240,11 @@ async def execute_run(
         await _record_failure(events, working, str(error), category="internal_error", run_id=run_id)
         return _failed(run_id, working)
     finally:
+        # **Closed before the run is finished, and in `finally`** (B-176). A
+        # connection to a customer's database held open by a run nobody is
+        # watching is worse than the handshake it saves, and the failure paths
+        # above are exactly when a run stops without reaching its own end.
+        await lease.aclose()
         # In `finally`, because a run that never ends is the one failure with no
         # symptom until somebody notices a page spinning.
         await _finish(org_id=org_id, run_id=run_id, status=ending, working=working, outcome=outcome)
