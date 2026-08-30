@@ -90,6 +90,12 @@ class ExecutionRef(BaseModel):
     #: than one (**B-093**).
     tables: list[str] = Field(default_factory=list[str])
     row_count: int | None = None
+    #: How many of `row_count` the model was actually shown. Fewer means the
+    #: rest did not fit in the prompt, which is **our** limit and not the
+    #: database's — and the difference belongs in the answer's limitations
+    #: rather than in its prose, where a reader met it as a paragraph about
+    #: row counts in the middle of an answer about waste (**B-173**).
+    rows_shown: int | None = None
     summary: str = ""
     ok: bool = True
     #: Why this query never returned, in the connector's own sanitized words,

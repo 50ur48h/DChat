@@ -27,6 +27,7 @@ evidence.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Final, cast
 
@@ -219,6 +220,7 @@ def limitations_for(
     verdict: CriticVerdict | None,
     *,
     caveat: str = "",
+    cited: Sequence[str] = (),
 ) -> tuple[str, ...]:
     """What this answer does not establish, in the order a reader needs it.
 
@@ -274,6 +276,37 @@ def limitations_for(
         sentence = state.definition_caveats.get(name, "").strip()
         if sentence:
             notes.append(f"{name}: {sentence}")
+
+    # **Rows the model never saw** (**B-173**). A query returned more rows than
+    # fit in the prompt, so the answer rests on a prefix of its own evidence.
+    #
+    # This is a limitation of ours and the reader is entitled to it — but it was
+    # arriving *in the prose*, because the prose was the only place it could go.
+    # The owner met it as a paragraph about row counts in the middle of an
+    # answer about food waste: "the final deduplicated query returned 10 rows
+    # but only 9 rows were provided here". True, and not what they asked.
+    #
+    # Counted over the executions the answer cites, not every execution the run
+    # made: a truncated query the answer does not rest on is not a limit on the
+    # answer.
+    short = [
+        execution
+        for execution in state.executions
+        if execution.execution_id in set(cited)
+        and execution.ok
+        and execution.row_count is not None
+        and execution.rows_shown is not None
+        and execution.rows_shown < execution.row_count
+    ]
+    if short:
+        worst = max(short, key=lambda e: (e.row_count or 0) - (e.rows_shown or 0))
+        many = f"{len(short)} of the queries behind this answer" if len(short) > 1 else "A query"
+        notes.append(
+            f"{many} returned more rows than could be shown to the model — "
+            f"{worst.row_count} rows found, {worst.rows_shown} read. That is a limit of "
+            "this platform, not of your data, so anything ranked or totalled here may "
+            "be missing entries. Asking a narrower question returns the rest."
+        )
 
     # **Which rows this answer is made of** (D-053, D-058, B-157). Ahead of the
     # period note because it is the more fundamental doubt: *when* a figure is
@@ -482,7 +515,7 @@ def assemble(
         confidence=_confidence(draft, verdict),
         citations=citations,
         method=method_note(state),
-        limitations=limitations_for(state, verdict, caveat=caveat),
+        limitations=limitations_for(state, verdict, caveat=caveat, cited=citations),
     )
 
 

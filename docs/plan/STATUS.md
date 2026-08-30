@@ -28,7 +28,29 @@ Current position: **Phase 13 — the chat product. WP13.1a (#121), WP13.1b
                   *"Dev is current"* below for why three revisions in one hop
                   were safe, and for the warning that section used to carry and
                   had wrong.
-Next step:        **WP13.28 — answers a person can actually read (B-172).**
+Next step:        **WP13.29 — the plumbing stops showing through the answer
+                  (B-173), and the budget is measured (B-175).** A truncated
+                  query was explaining itself *in the prose*, because prose was
+                  the only place it could: `ExecutionRef` carried `row_count`
+                  and never how many of those rows the model was **shown**, so
+                  the platform could not state the limit and the prompt asked
+                  the model to. `rows_shown` closes it and the sentence moves to
+                  `limitations`, where the other things-this-answer-cannot-
+                  establish already live.
+                  **The budget measurement settles the question rather than
+                  guessing at it** (B-175): model latency is **70-99% of every
+                  run's wall clock**, while all 147 query executions together
+                  took **19.8 seconds**. `sql` averages **8,855ms** on ~6,320
+                  input tokens; the run that ran out made 17 calls in 234s and
+                  used 11 of its 24-call allowance, so time binds long before
+                  calls. Nothing changed — the owner asked for the measurement
+                  first, and the two levers it points at (raise the 240s ceiling,
+                  or shrink the `sql` prompt) are different trades.
+                  **B-174 is filed and half-built**: one product carried two
+                  prices in one answer, from queries with different filters,
+                  with nothing saying so. The prompt now asks the model to name
+                  what differs; detecting it in the platform is the unbuilt half.
+                  Then **WP13.28 — answers a person can actually read (B-172).**
                   The owner read a real answer on screen and could not use it:
                   nine ranked products and seven waste figures delivered as one
                   paragraph, in warehouse language. **The cause was not the
