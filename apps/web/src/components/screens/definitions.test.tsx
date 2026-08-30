@@ -207,9 +207,12 @@ describe("badgeLabel", () => {
   it("reads an absent field as fine rather than as hollow", () => {
     // An older API does not send it. Defaulting the other way would label every
     // definition in the product as hollow on the strength of a missing key.
-    const { excluding_nothing: _omitted, ...older } = { ...BINDING, excluding_nothing: [] };
+    // Built by omission rather than by destructuring the key away, so the test
+    // reads as "an API that never sent this" instead of as an unused variable.
+    const older = { ...BINDING };
 
-    expect(badgeLabel(older as typeof BINDING)).toBe("enforced");
+    expect("excluding_nothing" in older).toBe(false);
+    expect(badgeLabel(older)).toBe("enforced");
   });
 });
 

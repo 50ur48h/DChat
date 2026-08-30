@@ -28,7 +28,21 @@ Current position: **Phase 13 — the chat product. WP13.1a (#121), WP13.1b
                   *"Dev is current"* below for why three revisions in one hop
                   were safe, and for the warning that section used to carry and
                   had wrong.
-Next step:        **WP13.27 — a badge that does not overstate itself
+Next step:        **WP13.28 — answers a person can actually read (B-172).**
+                  The owner read a real answer on screen and could not use it:
+                  nine ranked products and seven waste figures delivered as one
+                  paragraph, in warehouse language. **The cause was not the
+                  model.** The answer rendered into a bare `<p>` with
+                  `white-space: pre-wrap` and no markdown library existed in the
+                  project, so structure was impossible and the only sane
+                  instruction was *plain words* — which the model read correctly
+                  as plain prose. Both halves ship together, because either
+                  alone makes it worse: the rule without the renderer puts `##`
+                  on the screen, and the renderer without the rule formats prose
+                  that has no structure. `react-markdown` + `remark-gfm`,
+                  deliberately **without `rehype-raw`** — the answer is written
+                  by a model that has just read customer rows.
+                  Then **WP13.27 — a badge that does not overstate itself
                   (B-171 done), and v6.7 on Azure.** A definition whose
                   required filters cannot separate one row from another still
                   badged `enforced`, and that badge is a claim: prose says the

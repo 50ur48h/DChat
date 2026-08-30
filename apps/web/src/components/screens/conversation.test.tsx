@@ -857,6 +857,71 @@ describe("an answer keeps its evidence when the next question is asked (B-106)",
  * screen could show what a run cost. These assert the half a person reads, and
  * particularly the case where an honest absence beats a tidy number.
  */
+describe("how an answer is rendered", () => {
+  it("shows headings, lists and tables as structure rather than as characters", async () => {
+    // **B-172.** This rendered into a bare `<p>` with `white-space: pre-wrap`,
+    // so a heading arrived as a literal `##` and a ranked list as a column of
+    // asterisks. The only sane instruction against that renderer was "plain
+    // words", which is why nine ranked products came back as one paragraph.
+    const markdown = [
+      "## Products with high sales",
+      "",
+      "* **Sup Buntut** - RM737.68",
+      "* **Peha** - RM368.97",
+      "",
+      "| Product | Waste RM |",
+      "| --- | --- |",
+      "| Peha | 64.59 |",
+    ].join("\n");
+    // The card renders the *message* where one exists — the run's own answer is
+    // the fallback for the window before the message lands (B-044). Overriding
+    // only the run would have tested the fallback and left the live path alone.
+    routeFetch({
+      run: { ...ANSWERED, answer: markdown },
+      messages: [MESSAGES[0], { ...MESSAGES[1], content: markdown }],
+    });
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    const answer = await screen.findByTestId("answer-text");
+    expect(answer.querySelector("h2")?.textContent).toBe("Products with high sales");
+    expect(answer.querySelectorAll("li")).toHaveLength(2);
+    expect(answer.querySelector("strong")?.textContent).toBe("Sup Buntut");
+    // The table needs remark-gfm; without it this is four lines of pipes.
+    expect(answer.querySelector("table")).not.toBeNull();
+    expect(answer.querySelector("th")?.textContent).toBe("Product");
+    // And the markup must not leak through as text.
+    expect(answer.textContent).not.toContain("##");
+    expect(answer.textContent).not.toContain("| --- |");
+  });
+
+  it("escapes HTML in an answer rather than rendering it", async () => {
+    // The answer is written by a model that has just read customer rows. If raw
+    // HTML reached the DOM the answer would be a delivery mechanism, so
+    // `rehype-raw` is deliberately not installed — this is the test that says
+    // so out loud, and it goes red the day somebody adds it for convenience.
+    const hostile = 'Sales rose. <img src=x onerror="alert(1)"> <script>alert(2)</script> Done.';
+    routeFetch({
+      run: { ...ANSWERED, answer: hostile },
+      messages: [MESSAGES[0], { ...MESSAGES[1], content: hostile }],
+    });
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    const answer = await screen.findByTestId("answer-text");
+    expect(answer.querySelector("img")).toBeNull();
+    expect(answer.querySelector("script")).toBeNull();
+    expect(answer.textContent).toContain("Sales rose.");
+  });
+
+  it("still renders an answer that carries no markdown at all", async () => {
+    // Most answers are a sentence. Turning the renderer on must not require
+    // every answer to be a document.
+    routeFetch({ run: ANSWERED });
+    render(<ConversationThread orgId="o1" conversationId="c1" />);
+
+    expect(await screen.findByText(/6,214 orders were placed in July 2026/)).toBeInTheDocument();
+  });
+});
+
 describe("what the run cost", () => {
   const priced = { ...ANSWERED, cost_estimate: "0.0195", model_usage: { calls: 3, input_tokens: 1700, output_tokens: 170, unpriced_calls: 0, by_model: [] } };
 
