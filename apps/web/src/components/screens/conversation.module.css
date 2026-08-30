@@ -233,16 +233,32 @@
   border: 1px solid var(--rule, rgba(0, 0, 0, 0.12));
   padding: 0.4em 0.7em;
   text-align: left;
-  white-space: nowrap;
+  vertical-align: top;
 }
 .answerText th {
   font-weight: 600;
   background: var(--surface-muted, rgba(0, 0, 0, 0.04));
 }
-/* Numbers read better right-aligned, and every number here is money or a count. */
-.answerText td:not(:first-child) {
+/* **Numbers right, words left, decided per cell** (B-179).
+   This used to right-align every column but the first, on the assumption that
+   "every number here is money or a count". The assumption was wrong the first
+   time a table had a `Period` column and a `Why it matters` column: prose
+   ragged against the right edge, which is how the owner met it. CSS cannot see
+   a cell's content, so the renderer decides and sets the class. */
+.answerText td.numeric,
+.answerText th.numeric {
   text-align: right;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.answerText td:not(.numeric),
+.answerText th:not(.numeric) {
+  text-align: left;
+  /* Prose in a table cell should wrap rather than push the table wider — a
+     horizontal scrollbar over a `Why it matters` column is the table telling
+     the reader to go and find the rest of the sentence. */
+  white-space: normal;
+  min-width: 12ch;
 }
 .answerText blockquote {
   margin: 0 0 0.85em;

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ConversationThread, nearlyOut, progressLine } from "./conversation";
+import { ConversationThread, isNumeric, nearlyOut, progressLine } from "./conversation";
 
 const session = {
   mode: "dev" as const,
@@ -857,6 +857,40 @@ describe("an answer keeps its evidence when the next question is asked (B-106)",
  * screen could show what a run cost. These assert the half a person reads, and
  * particularly the case where an honest absence beats a tidy number.
  */
+describe("how a table cell is aligned", () => {
+  it("right-aligns numbers and money, and nothing else", () => {
+    // **B-179.** The first version right-aligned every column but the first, on
+    // the assumption that "every number here is money or a count". A `Period`
+    // column and a `Why it matters` column arrived ragged against the right
+    // edge, which is how the owner met it.
+    for (const numeric of ["310817.09", "RM 310,817", "1,973 kg".replace(" kg", ""), "42", "-12.75", "87%", "RM 20,469.38"]) {
+      expect(isNumeric(numeric)).toBe(true);
+    }
+  });
+
+  it("leaves anything it cannot be sure about on the left", () => {
+    // A wrongly right-aligned word is the fault this replaces, so doubt goes
+    // left. "2025-12" is a period, not a number.
+    for (const words of [
+      "Ayam Penyet+Nasi+Sup",
+      "2025-12",
+      "Annual undated view",
+      "This is the gap between Outlet A and Outlet D",
+      "",
+      "  ",
+      "1,973 kg",
+    ]) {
+      expect(isNumeric(words)).toBe(false);
+    }
+  });
+
+  it("reads a number out of nested markup", () => {
+    // Money is bolded by the answer rule, so the cell holds an element rather
+    // than a string and a naive check would call every bold figure prose.
+    expect(isNumeric(["RM 310,817"])).toBe(true);
+  });
+});
+
 describe("how far through its allowance a run is", () => {
   const withProgress = (used: object, limits: object) =>
     ({ ...ANSWERED, progress: { used, limits } }) as unknown as Parameters<typeof progressLine>[0];

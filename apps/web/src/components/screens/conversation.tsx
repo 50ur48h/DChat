@@ -743,9 +743,75 @@ function AnswerCard({
 function AnswerText({ words }: { words: string }) {
   return (
     <div className={styles.answerText} data-testid="answer-text">
-      <Markdown remarkPlugins={[remarkGfm]}>{words}</Markdown>
+      <Markdown remarkPlugins={[remarkGfm]} components={{ td: DataCell, th: HeaderCell }}>
+        {words}
+      </Markdown>
     </div>
   );
+}
+
+/**
+ * One table cell, aligned by what is in it (**B-179**).
+ *
+ * The first version right-aligned every column but the first, on the comment
+ * *"every number here is money or a count"*. That was an assumption, and it was
+ * wrong the first time a table carried a `Period` column and a `Why it matters`
+ * column: prose ragged against the right edge, with a horizontal scrollbar
+ * pushing the explanation out of view. CSS cannot see a cell's content, so the
+ * decision is made here and the class carries it.
+ *
+ * **The model's own alignment wins where it gave one.** `remark-gfm` turns
+ * `|---:|` into an inline `text-align`, and a blanket rule fights it.
+ */
+function cellProps({
+  children,
+  style,
+  ...rest
+}: React.ComponentPropsWithoutRef<"td"> & { node?: unknown }) {
+  delete (rest as { node?: unknown }).node;
+  // The model's own alignment wins where it gave one: `remark-gfm` turns
+  // `|---:|` into an inline `text-align`, and a class would fight it.
+  const aligned = style?.textAlign !== undefined;
+  return {
+    ...rest,
+    style,
+    className: !aligned && isNumeric(children) ? styles.numeric : undefined,
+    children,
+  };
+}
+
+/** A data cell. Separate from the header only so each renders its own tag —
+    one component for both turned every `th` into a `td` and quietly cost the
+    table its header. */
+function DataCell(props: React.ComponentPropsWithoutRef<"td"> & { node?: unknown }) {
+  return <td {...cellProps(props)} />;
+}
+
+function HeaderCell(props: React.ComponentPropsWithoutRef<"th"> & { node?: unknown }) {
+  return <th {...cellProps(props as React.ComponentPropsWithoutRef<"td">)} />;
+}
+
+/**
+ * Whether a cell holds a number rather than words.
+ *
+ * Deliberately strict: a currency mark, digits, separators and a percent sign.
+ * "2025-12" is a period and not a number, and "Ayam Penyet" obviously is not —
+ * anything it cannot be sure about stays left, because a wrongly right-aligned
+ * word is the fault this replaces.
+ */
+export function isNumeric(children: React.ReactNode): boolean {
+  const text = flatten(children).trim();
+  if (text.length === 0) return false;
+  return /^[-+(]?\s*(RM|MYR|\$|€|£)?\s*[\d,]+(\.\d+)?\s*%?\s*\)?$/i.test(text);
+}
+
+function flatten(node: React.ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(flatten).join("");
+  if (node && typeof node === "object" && "props" in node) {
+    return flatten((node as { props: { children?: React.ReactNode } }).props.children);
+  }
+  return "";
 }
 
 function Cost({ run }: { run: Run }) {

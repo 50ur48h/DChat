@@ -216,6 +216,13 @@ async def test_the_composer_is_told_to_write_something_a_person_can_read(
     # Simple is not vague: the rule must not read as licence to drop numbers.
     assert "keep every number, every name and every limit" in composing
 
+    # **B-179 and B-180**, in the same prompt and for the same reader: money
+    # written the way money is written, and an action that is something to do
+    # rather than a measurement with a verb in front of it.
+    assert "RM 310,817" in composing
+    assert "something a person could start this week" in composing
+    assert "wearing a recommendation" in composing
+
     planning = " ".join(fake_llm.prompts(role="sql")) + " ".join(fake_llm.prompts(role="plan"))
     assert "Write the answer as Markdown" not in planning, (
         "the formatting rule belongs to the composer; a planner told to use "

@@ -28,7 +28,29 @@ Current position: **Phase 13 — the chat product. WP13.1a (#121), WP13.1b
                   *"Dev is current"* below for why three revisions in one hop
                   were safe, and for the warning that section used to carry and
                   had wrong.
-Next step:        **WP13.30 — the loop gets time to think, and says how it is
+Next step:        **WP13.31 — a table of money that reads like money
+                  (B-179), and an action list that is actions (B-180).**
+                  The owner read an RM-ranked focus table and met three faults
+                  at once. **One was mine**: WP13.28's answer CSS right-aligned
+                  every column but the first, on the comment *"every number here
+                  is money or a count"* — an assumption, false the first time a
+                  table carried `Period` and `Why it matters`. A renderer now
+                  decides per cell and the model's own alignment wins where it
+                  gave one.
+                  **One was a float**: `310817.08999999997` reached the answer
+                  because `encodable` passed floats through untouched, printing
+                  a `double precision` sum's representation error to seventeen
+                  digits. Trimmed to 12 significant digits at B-103's one shared
+                  seam — magnitude kept, so `1.2e-7` survives and only the
+                  binary tail goes.
+                  **One was the advice**: *"Improve Outlet D sales — RM 20,469"*
+                  is a measurement with a verb in front of it. The prompt now
+                  requires an action to name which dish, which outlet, which
+                  shift, and to say what to *look at* where the data gives no
+                  cause. B-180 keeps the harder half open: instruction can ask
+                  for specificity, it cannot supply evidence the run never
+                  fetched.
+                  Then **WP13.30 — the loop gets time to think, and says how it is
                   spending it (D-068, B-176, B-177).** Three changes in the
                   owner's order, cheapest first.
                   **The binding limit was `iterations`, not time**, and both of
