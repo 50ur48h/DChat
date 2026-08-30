@@ -737,9 +737,31 @@ async def test_the_run_state_is_checkpointed_as_it_goes(
 
     assert state["phase"] == "finished"
     assert [e["execution_id"] for e in state["executions"]] == list(outcome.execution_ids)
+    # **B-173, on the live path.** `rows_shown` is what lets the platform state
+    # a truncation in `limitations` instead of leaving the model to narrate it
+    # in the prose. A field the loop never fills is the defect this repository
+    # files most, and the composer tests hand it in directly — only this one
+    # proves the loop writes it.
+    assert state["executions"][0]["rows_shown"] is not None
+    assert state["executions"][0]["rows_shown"] <= state["executions"][0]["row_count"]
     assert state["plan"][0]["sql"].startswith("SELECT")
     # Rows are never in the checkpoint — only a summary and the reference (4.4).
-    assert "rows" not in json.dumps(state["executions"])
+    #
+    # Asserted on the *keys* rather than on the serialized text. The substring
+    # form was the original, and it failed the moment an execution gained a
+    # `rows_shown` count — flagging the word while the property it guards, that
+    # no customer value is in the checkpoint, was never in question. A count of
+    # rows is not a row.
+    executions = cast(list[dict[str, object]], state["executions"])
+    assert all("rows" not in execution for execution in executions)
+    for execution in executions:
+        for value in execution.values():
+            if not isinstance(value, list):
+                continue
+            nested = cast(list[object], value)
+            assert not any(isinstance(item, list) for item in nested), (
+                f"a checkpointed execution is carrying something row-shaped: {execution}"
+            )
 
     # And the budget is in its own column, not inside the state (D-023): a limit
     # that travels inside the thing it limits is one bad deserialization away

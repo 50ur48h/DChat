@@ -615,3 +615,58 @@ def test_a_definition_the_run_did_not_apply_says_nothing() -> None:
     state.definition_caveats = {"waste cost": "RM valuation is partial."}
 
     assert limitations_for(state, CriticVerdict(verdict="pass")) == ()
+
+
+# ---------------------------------------------------------------------------
+# Rows the model never saw (B-173)
+# ---------------------------------------------------------------------------
+
+
+def test_a_truncated_query_becomes_a_limitation_not_a_paragraph() -> None:
+    """**B-173.** The owner read this in the middle of an answer about food
+    waste: *"the final deduplicated query returned 10 rows but only 9 rows were
+    provided here"*. True, theirs to know, and not what they asked.
+
+    It was in the prose because prose was the only place it could go — the
+    platform knew `row_count` and never recorded how many of those rows the
+    model was shown. `rows_shown` closes that, and the sentence moves to where
+    the other things-this-answer-cannot-establish already live.
+    """
+    short = ExecutionRef(execution_id="e1", row_count=24, rows_shown=7, summary="a row")
+
+    notes = limitations_for(_state(short), CriticVerdict(verdict="pass"), cited=["e1"])
+
+    assert any("24 rows found, 7 read" in note for note in notes)
+    assert any("limit of this platform, not of your data" in note for note in notes)
+
+
+def test_a_query_the_answer_does_not_cite_does_not_caveat_it() -> None:
+    """Narrowed to the cited executions, like the join and provenance notes
+    above it. A truncated query the answer does not rest on is not a limit on
+    the answer, and a caveat about nothing is how a reader learns to skip
+    caveats."""
+    short = ExecutionRef(execution_id="e9", row_count=24, rows_shown=7, summary="a row")
+
+    notes = limitations_for(_state(short), CriticVerdict(verdict="pass"), cited=["e1"])
+
+    assert not any("rows found" in note for note in notes)
+
+
+def test_a_query_that_fitted_entirely_says_nothing() -> None:
+    """The common case. Most queries return fewer rows than the cap."""
+    whole = ExecutionRef(execution_id="e1", row_count=3, rows_shown=3, summary="a row")
+
+    notes = limitations_for(_state(whole), CriticVerdict(verdict="pass"), cited=["e1"])
+
+    assert not any("rows found" in note for note in notes)
+
+
+def test_an_execution_predating_rows_shown_is_not_guessed_at() -> None:
+    """`rows_shown` is null on every execution written before this revision.
+    Null is unknown, and reporting unknown as truncated would caveat older runs
+    on the strength of a measurement nobody took."""
+    older = ExecutionRef(execution_id="e1", row_count=24, rows_shown=None, summary="a row")
+
+    notes = limitations_for(_state(older), CriticVerdict(verdict="pass"), cited=["e1"])
+
+    assert not any("rows found" in note for note in notes)

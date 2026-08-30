@@ -412,6 +412,7 @@ async def research(
                     purpose=plan.purpose,
                     sql_hash=digest,
                     row_count=result.data.row_count,
+                    rows_shown=len(result.data.rows),
                     summary=summary,
                     ok=True,
                     tables=list(result.data.tables),

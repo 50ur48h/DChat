@@ -999,12 +999,31 @@ READABLE_ANSWER_RULE = (
 PARTIAL_RESULT_RULE = (
     "\n\nA result marked `truncated` reached you in part: `row_count` is how many "
     "rows the query returned, and the rows you were given are the ones that fit "
-    "in this prompt. That is a limit of ours and not of the data, so say whose it "
-    "is — name both numbers, answer with everything the rows you have do "
-    "establish, and say what a narrower question would settle. Do not describe a "
-    "partial result as though it held nothing: you have those rows and the reader "
-    "is entitled to what they show. Do not refuse a question the data answered "
-    "merely because you were shown part of the answer."
+    "in this prompt. That is a limit of ours and not of the data. Answer with "
+    "everything the rows you have do establish. Do not describe a partial result "
+    "as though it held nothing: you have those rows and the reader is entitled to "
+    "what they show. Do not refuse a question the data answered merely because "
+    "you were shown part of the answer.\n"
+    # **B-173.** This used to end "name both numbers", and the model did — in
+    # the prose, because prose was the only place it could. The owner met "the
+    # final deduplicated query returned 10 rows but only 9 rows were provided
+    # here" in the middle of an answer about food waste. True, theirs to know,
+    # and not what they asked. The platform now writes that sentence into
+    # `limitations` from `rows_shown`, which is a number it has and the model
+    # only paraphrases, so the instruction here inverts: keep it out.
+    "Do not explain the truncation itself in your answer. The platform states "
+    "which query was cut short, and by how much, in its own limitations section. "
+    "A paragraph about row counts inside an answer about the question is our "
+    "plumbing showing through."
+    # **B-174.** The same product appeared twice at two prices in one answer —
+    # Sup Buntut at RM737.68 and again at RM768.22 — because two queries filtered
+    # differently and nothing said so. Each number was right; together they read
+    # as the product being priced two ways.
+    "\n\nIf the same thing carries different numbers in different results, do not "
+    "print both as though they were the same measure. Say what makes them "
+    "different — the filter, the period, the table — or use one and say which. A "
+    "reader who sees one name with two numbers and no explanation stops trusting "
+    "both."
 )
 
 
