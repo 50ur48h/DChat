@@ -752,12 +752,16 @@ async def test_the_run_state_is_checkpointed_as_it_goes(
     # `rows_shown` count — flagging the word while the property it guards, that
     # no customer value is in the checkpoint, was never in question. A count of
     # rows is not a row.
-    assert all("rows" not in execution for execution in state["executions"])
-    assert all(
-        not isinstance(value, list) or not any(isinstance(item, list) for item in value)
-        for execution in state["executions"]
-        for value in execution.values()
-    ), "a checkpointed execution is carrying something row-shaped"
+    executions = cast(list[dict[str, object]], state["executions"])
+    assert all("rows" not in execution for execution in executions)
+    for execution in executions:
+        for value in execution.values():
+            if not isinstance(value, list):
+                continue
+            nested = cast(list[object], value)
+            assert not any(isinstance(item, list) for item in nested), (
+                f"a checkpointed execution is carrying something row-shaped: {execution}"
+            )
 
     # And the budget is in its own column, not inside the state (D-023): a limit
     # that travels inside the thing it limits is one bad deserialization away
