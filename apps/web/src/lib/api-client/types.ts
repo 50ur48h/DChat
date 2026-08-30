@@ -503,6 +503,22 @@ export interface Run {
    * whether the run was free or merely unmeasured.
    */
   model_usage?: RunUsage;
+  /**
+   * How far through its allowance this run is (**B-177**).
+   *
+   * **Counters, never a prediction.** What ends a run is a model deciding it
+   * has enough, and nothing here knows when that will be — so this says "step 6
+   * of 12, 3:30 of 5:30 allowed" and never draws a bar implying a finish time
+   * it cannot know.
+   *
+   * Spend dimensions are deliberately absent: an organization can switch cost
+   * off (D-066), and a progress strip reporting tokens would hand back through
+   * one door what the other was closed to prevent.
+   */
+  progress?: {
+    used?: { iterations?: number; queries?: number; wall_seconds?: number };
+    limits?: { iterations?: number; queries?: number; wall_seconds?: number };
+  };
   findings: Finding[];
   /**
    * What this answer does not establish, in plain words — a ceiling that stopped

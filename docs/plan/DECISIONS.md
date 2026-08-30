@@ -35,6 +35,37 @@ card** — `Cost` already renders nothing when there are no calls and no total, 
 a withheld run is indistinguishable from one that recorded no usage, and a test
 now pins that. A Spend card on the settings screen turns it over.
 
+## D-068 — the loop gets more steps, and the warning that hid why
+Date: 2026-08-30 · Phase: 13 · PR: WP13.30
+Context: a three-part question — revenue, waste, and a ranked action list —
+stopped halfway. **The binding limit was `iterations`, not time.** The run
+finished at `iterations 8/8` with **30 of its 240 seconds unspent**, and the
+`budget_exhausted` event says so plainly: `{"reason": "iteration ceiling"}`.
+**Both of us read it as a timeout**, because the trace showed *"Getting close to
+a limit — wall_seconds"*: the 75% warning fires per dimension, and at 210/240
+the wall crossed 75% while nothing said the iteration ceiling was at 100%. **A
+warning that fires on a dimension which is not the one about to bind is
+misleading by design** — it is true, prominent, and points away from the cause.
+Options: (a) raise `wall_seconds`, the answer to the question we thought we had;
+(b) shrink the `sql` prompt to buy speed; (c) raise `iterations` and everything
+that scales with it.
+Decision: (c), plus a connection lease first (B-176) because it buys time
+without spending anything. (a) alone would not have helped this run at all. (b)
+was refused by the owner on grounds worth recording: *"shrinking the prompt
+trades context for speed, which is how we got the wrong-table answers in the
+first place."* **Every dimension moves together** — iterations 8→12, queries
+10→14, llm_calls 24→32, tokens 150k→225k, wall 240→330 — because raising
+`iterations` alone moves the failure to the call ceiling, which is D-024's
+mistake exactly and D-028 corrected it once already. Twelve iterations is 24
+calls before a single compose.
+Consequences: a compound question may now take five and a half minutes, so
+**B-177 ships in the same change**: the run reports `used` and `limits` over
+steps, queries and seconds. **Counters, never a prediction** — what ends a run
+is a model deciding it has enough. Spend dimensions are excluded, because an
+organization can switch cost off (D-066) and a progress strip reporting tokens
+would hand back through one door what the other closed. The misleading warning
+is recorded here and **not fixed**; B-178 carries it.
+
 ## D-067 — the cached share of the input is recorded before it is priced
 Date: 2026-08-29 · Phase: 13 · PR: WP13.25
 Context: the owner's billed figure disagreed with ours. `estimate_cost` is

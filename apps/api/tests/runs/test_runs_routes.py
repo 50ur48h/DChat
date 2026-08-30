@@ -10,6 +10,7 @@ able to read somebody else's conversation by knowing its id.
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -760,6 +761,47 @@ async def test_removing_the_chosen_source_leaves_the_organization_choosing_none(
 # ---------------------------------------------------------------------------
 
 
+async def _spent(org_id: str, run_id: str) -> None:
+    """Give a run the accounting the loop would have written.
+
+    These tests never run the loop, so `agent_runs.budget` is empty and
+    `progress` is correctly `{}` — which proves nothing about the reshaping this
+    is here to check. Written as the loop writes it, so the assertions are about
+    the shape that reaches the browser.
+    """
+    from sqlalchemy import text as sql_text
+
+    from dataagent.tenancy.session import org_session
+
+    async with org_session(uuid.UUID(org_id)) as session:
+        await session.execute(
+            sql_text("UPDATE agent_runs SET budget = :budget WHERE id = :run"),
+            {
+                "run": uuid.UUID(run_id),
+                "budget": json.dumps(
+                    {
+                        "limits": {
+                            "tokens": 225_000,
+                            "queries": 14,
+                            "llm_calls": 32,
+                            "iterations": 12,
+                            "wall_seconds": 330.0,
+                        },
+                        "tokens": 80_268,
+                        "queries": 8,
+                        "llm_calls": 17,
+                        "iterations": 6,
+                        "elapsed_seconds": 210.5,
+                    }
+                ),
+            },
+        )
+
+
+#: A run in one of these states is finished, and moving it again raises.
+TERMINAL_FOR_TESTS = frozenset({"completed", "failed", "interrupted", "budget_exhausted"})
+
+
 async def _charged_run(api: Api, org_id: str) -> str:
     """A run with one priced model call against it, through the real meter."""
     from dataagent.llm.base import Usage
@@ -785,8 +827,19 @@ async def _charged_run(api: Api, org_id: str) -> str:
         usage=Usage(input_tokens=1000, output_tokens=100),
         latency_ms=5,
     )
-    await service.transition(org_id=uuid.UUID(org_id), run_id=uuid.UUID(run_id), status="running")
-    await service.transition(org_id=uuid.UUID(org_id), run_id=uuid.UUID(run_id), status="completed")
+    # Only if the scheduler has not already taken it there. Two tests calling
+    # this raced the background run to `completed` and failed on the transition
+    # rather than on anything they were about — a helper that assumes it is the
+    # only thing moving a run is a flake waiting for a slower machine.
+    view = await service.get_run(org_id=uuid.UUID(org_id), run_id=uuid.UUID(run_id))
+    if view.status not in TERMINAL_FOR_TESTS:
+        if view.status == "queued":
+            await service.transition(
+                org_id=uuid.UUID(org_id), run_id=uuid.UUID(run_id), status="running"
+            )
+        await service.transition(
+            org_id=uuid.UUID(org_id), run_id=uuid.UUID(run_id), status="completed"
+        )
     return run_id
 
 
@@ -843,6 +896,44 @@ async def test_the_thread_listing_hides_spend_too(api: Api) -> None:
     )
     assert status == 200
     assert [row["model_usage"] for row in listed] == [{}]
+
+
+async def test_a_run_says_how_far_through_its_allowance_it_is(api: Api) -> None:
+    """**B-177, on the wire.** A compound question now runs to five and a half
+    minutes, and five minutes with no sense of progress is worse than four with
+    one. The counters were already stored on every run and reached no screen.
+
+    Counters and ceilings — never a prediction. What ends a run is a model
+    deciding it has enough, and nothing here knows when that will be.
+    """
+    org_id = await _org(api)
+    run_id = await _charged_run(api, org_id)
+    await _spent(org_id, run_id)
+
+    status, run = await api.call("GET", f"/v1/orgs/{org_id}/runs/{run_id}", "alice")
+
+    assert status == 200
+    progress = run["progress"]
+    assert set(progress["limits"]) == {"iterations", "queries", "wall_seconds"}
+    # **Spend is deliberately absent** (D-066). An organization can switch cost
+    # off, and a progress strip reporting token counts would hand back through
+    # one door what the other was closed to prevent.
+    assert "tokens" not in str(progress)
+    assert "llm_calls" not in str(progress)
+
+
+async def test_progress_survives_spend_being_switched_off(api: Api) -> None:
+    """Turning cost off must not blind a waiting person to where their question
+    is. They are different questions and only one of them is about money."""
+    org_id = await _org(api)
+    run_id = await _charged_run(api, org_id)
+    await _spent(org_id, run_id)
+    await api.call("PUT", f"/v1/orgs/{org_id}/show-run-cost", "alice", {"visible": False})
+
+    _, run = await api.call("GET", f"/v1/orgs/{org_id}/runs/{run_id}", "alice")
+
+    assert run["cost_estimate"] is None
+    assert run["progress"]["limits"]["iterations"] > 0
 
 
 async def test_a_reader_cannot_turn_spend_back_on(api: Api) -> None:

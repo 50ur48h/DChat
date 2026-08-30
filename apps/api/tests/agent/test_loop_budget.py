@@ -28,14 +28,19 @@ def test_the_defaults_are_the_numbers_the_architecture_names() -> None:
     `llm_calls` moved from 20 to 24 in WP9.1 (**D-028**) — the move D-024 said
     would be needed the day a stage was added to the loop. This test is what made
     it deliberate rather than incidental, which is what it is for.
+
+    **Every figure moved in WP13.30** (**D-068**), on a measurement: a three-part
+    question stopped at `iterations 8/8` with 30 of its 240 seconds unspent. All
+    five move together on purpose — raising `iterations` alone would have shifted
+    the failure to the call ceiling, which is D-024's mistake exactly.
     """
     budget = Budget()
 
-    assert (budget.iterations, budget.queries, budget.llm_calls) == (8, 10, 24)
-    assert budget.tokens == 150_000
-    assert budget.wall_seconds == 240.0
-    assert (DEFAULT_ITERATIONS, DEFAULT_QUERIES, DEFAULT_LLM_CALLS) == (8, 10, 24)
-    assert (DEFAULT_TOKENS, DEFAULT_WALL_SECONDS) == (150_000, 240.0)
+    assert (budget.iterations, budget.queries, budget.llm_calls) == (12, 14, 32)
+    assert budget.tokens == 225_000
+    assert budget.wall_seconds == 330.0
+    assert (DEFAULT_ITERATIONS, DEFAULT_QUERIES, DEFAULT_LLM_CALLS) == (12, 14, 32)
+    assert (DEFAULT_TOKENS, DEFAULT_WALL_SECONDS) == (225_000, 330.0)
 
 
 def test_the_call_ceiling_fits_the_run_that_spends_the_most() -> None:
@@ -153,10 +158,10 @@ def test_time_is_reported_before_any_other_ceiling() -> None:
     """Deliberate ordering: wall clock is the one the person waiting feels, so
     when several are reached at once that is the one worth naming."""
     state = BudgetState(budget=Budget())
-    for _ in range(8):
+    for _ in range(DEFAULT_ITERATIONS):
         state.spend_iteration()
 
-    found = state.exhausted(now=state.started_at + 241)
+    found = state.exhausted(now=state.started_at + DEFAULT_WALL_SECONDS + 1)
 
     assert found is not None
     assert found.dimension == "wall_seconds"

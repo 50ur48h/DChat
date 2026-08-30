@@ -326,6 +326,35 @@ def encodable(value: object) -> object:
     chart computed on them, so only the chart broke, but three copies of a
     decision is three places for the next one to diverge.
     """
-    if value is None or isinstance(value, str | int | float | bool):
+    if value is None or isinstance(value, str | int | bool):
         return value
+    if isinstance(value, float):
+        return _readable_float(value)
     return str(value)
+
+
+#: Significant digits kept when a float is written down (**B-179**).
+#:
+#: A `double precision` sum in Postgres carries its own representation error,
+#: and Python then prints every digit of it: the owner met a monthly sales total
+#: as **310817.08999999997**, which is seventeen digits of which the last five
+#: are the binary artifact and not the money. A double holds about 15-17
+#: significant digits, so trimming to 12 removes the noise and cannot touch a
+#: figure anybody has.
+SIGNIFICANT_DIGITS = 12
+
+
+def _readable_float(value: float) -> float:
+    """The same number without its representation error.
+
+    **Not rounding to a number of decimal places**, which would flatten a tiny
+    value to zero — a rate of `1.2e-7` is a real thing for a column to hold.
+    Significant digits keep the magnitude and drop only the tail.
+
+    Infinities and NaN pass through: they are not noise, they are what the
+    database returned, and quietly turning one into a number would be worse than
+    showing it.
+    """
+    if value != value or value in (float("inf"), float("-inf")):
+        return value
+    return float(f"{value:.{SIGNIFICANT_DIGITS}g}")

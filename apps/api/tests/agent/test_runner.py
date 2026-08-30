@@ -34,6 +34,7 @@ import pytest
 from sqlalchemy import URL, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from dataagent.agent.budget import DEFAULT_ITERATIONS
 from dataagent.agent.critic import CriticOut
 from dataagent.agent.loop import ReflectFinding, Reflection
 from dataagent.agent.planner import Plan
@@ -215,6 +216,13 @@ async def test_the_composer_is_told_to_write_something_a_person_can_read(
     assert "Use everyday words and short sentences" in composing
     # Simple is not vague: the rule must not read as licence to drop numbers.
     assert "keep every number, every name and every limit" in composing
+
+    # **B-179 and B-180**, in the same prompt and for the same reader: money
+    # written the way money is written, and an action that is something to do
+    # rather than a measurement with a verb in front of it.
+    assert "RM 310,817" in composing
+    assert "something a person could start this week" in composing
+    assert "wearing a recommendation" in composing
 
     planning = " ".join(fake_llm.prompts(role="sql")) + " ".join(fake_llm.prompts(role="plan"))
     assert "Write the answer as Markdown" not in planning, (
@@ -783,7 +791,12 @@ async def test_the_run_state_is_checkpointed_as_it_goes(
         await engine.dispose()
     assert spent["iterations"] == 1
     assert spent["queries"] == 1
-    assert spent["limits"]["iterations"] == 8, "the allowance this run was given"
+    # Read from the default rather than written as a literal (D-068). The
+    # figure moved from 8 to 12 and this assertion is about the allowance being
+    # *recorded on the run*, not about what the number happens to be — that is
+    # `test_the_defaults_are_the_numbers_the_architecture_names`, which is where
+    # a change to it should have to be made deliberately.
+    assert spent["limits"]["iterations"] == DEFAULT_ITERATIONS, "the allowance this run was given"
 
 
 # ---------------------------------------------------------------------------

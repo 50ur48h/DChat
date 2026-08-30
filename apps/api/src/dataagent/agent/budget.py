@@ -41,26 +41,50 @@ __all__ = [
 ]
 
 #: Architecture 4.4's defaults, named so the numbers are greppable from the doc.
-DEFAULT_ITERATIONS = 8
-DEFAULT_QUERIES = 10
+#:
+#: **Raised from 8 to 12 in WP13.30** (**D-068**), on a measurement rather than
+#: a feeling. A three-part question — revenue, waste, and a ranked action list —
+#: stopped at `iterations 8/8` with **30 seconds of its 240 still unspent**. Not
+#: time, and not the loop being wasteful: the loop's own work across the whole
+#: run was 0.5 seconds, and 72% of the wall clock was model latency.
+#:
+#: 12 is what that question needed, from the shape of what it did: one step per
+#: part, plus the steps it spent discovering that its results were truncated.
+DEFAULT_ITERATIONS = 12
+DEFAULT_QUERIES = 14
 #: Raised from 20 to 24 in WP9.1 (**D-028**), which is the move D-024 said would
 #: be needed the day a stage was added: *"if a stage is ever added to the loop …
 #: the iteration ceiling and the call ceiling stop fitting and one of them has to
 #: move."* The critic is that stage. The arithmetic, worst case:
 #:
-#:   8 iterations x 2 calls (plan + reflect)   16
-#:   compose, twice, because of the re-entry    2
-#:   critic,  twice, for the same reason        2
-#:   intake, when it is built (4.4 names it)    1
-#:                                             ---
-#:                                              21   against a ceiling of 24
+#:   12 iterations x 2 calls (plan + reflect)  24
+#:   compose, twice, because of the re-entry     2
+#:   critic,  twice, for the same reason         2
+#:   intake, when it is built (4.4 names it)     1
+#:                                              ---
+#:                                               29   against a ceiling of 32
 #:
 #: The three spare are the same headroom D-024 argued for and for the same
 #: reason: a run must be stopped by the ceiling that describes what it did — its
 #: iterations — and not by an accounting limit it hit first.
-DEFAULT_LLM_CALLS = 24
-DEFAULT_TOKENS = 150_000
-DEFAULT_WALL_SECONDS = 240.0
+#:
+#: **Raised with `iterations` in WP13.30, and it had to be** (D-068). Twelve
+#: iterations is 24 calls before a single compose, so leaving this at 24 would
+#: have moved the failure from the iteration ceiling to the call ceiling and
+#: fixed nothing — the exact mistake D-024 named and D-028 corrected once
+#: already. Every dimension that scales with iterations moves with it.
+DEFAULT_LLM_CALLS = 32
+#: Scaled with the rest. The run that ran out spent 80,268 tokens over 17 calls;
+#: 29 calls at that rate is about 137,000, which 150,000 clears by too little to
+#: be a ceiling rather than a coin toss.
+DEFAULT_TOKENS = 225_000
+#: **Raised from 240 to 330 in the same change**, and for a reason worth stating
+#: plainly: the run above was at 210 seconds when its steps ran out, so 12 steps
+#: at the observed ~26 seconds each needs about 320. Raising `iterations` alone
+#: would have moved the failure from one ceiling to the other and looked like no
+#: fix at all — which is exactly what the 75% wall warning made it look like the
+#: first time (D-068).
+DEFAULT_WALL_SECONDS = 330.0
 
 #: How far an organization may raise a ceiling. Lowering is unrestricted — a
 #: tenant that wants cheaper answers should get them — but raising is bounded,

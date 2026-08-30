@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ConversationThread } from "./conversation";
+import { ConversationThread, isNumeric, nearlyOut, progressLine } from "./conversation";
 
 const session = {
   mode: "dev" as const,
@@ -857,6 +857,85 @@ describe("an answer keeps its evidence when the next question is asked (B-106)",
  * screen could show what a run cost. These assert the half a person reads, and
  * particularly the case where an honest absence beats a tidy number.
  */
+describe("how a table cell is aligned", () => {
+  it("right-aligns numbers and money, and nothing else", () => {
+    // **B-179.** The first version right-aligned every column but the first, on
+    // the assumption that "every number here is money or a count". A `Period`
+    // column and a `Why it matters` column arrived ragged against the right
+    // edge, which is how the owner met it.
+    for (const numeric of ["310817.09", "RM 310,817", "1,973 kg".replace(" kg", ""), "42", "-12.75", "87%", "RM 20,469.38"]) {
+      expect(isNumeric(numeric)).toBe(true);
+    }
+  });
+
+  it("leaves anything it cannot be sure about on the left", () => {
+    // A wrongly right-aligned word is the fault this replaces, so doubt goes
+    // left. "2025-12" is a period, not a number.
+    for (const words of [
+      "Ayam Penyet+Nasi+Sup",
+      "2025-12",
+      "Annual undated view",
+      "This is the gap between Outlet A and Outlet D",
+      "",
+      "  ",
+      "1,973 kg",
+    ]) {
+      expect(isNumeric(words)).toBe(false);
+    }
+  });
+
+  it("reads a number out of nested markup", () => {
+    // Money is bolded by the answer rule, so the cell holds an element rather
+    // than a string and a naive check would call every bold figure prose.
+    expect(isNumeric(["RM 310,817"])).toBe(true);
+  });
+});
+
+describe("how far through its allowance a run is", () => {
+  const withProgress = (used: object, limits: object) =>
+    ({ ...ANSWERED, progress: { used, limits } }) as unknown as Parameters<typeof progressLine>[0];
+
+  it("counts steps and time, and predicts nothing", () => {
+    // **B-177.** A bar claims to know when a run finishes. What finishes a run
+    // is a model deciding it has enough, and nothing here can know that.
+    const run = withProgress(
+      { iterations: 6, wall_seconds: 210 },
+      { iterations: 12, wall_seconds: 330 },
+    );
+
+    expect(progressLine(run)).toBe("step 6 of 12 · 3:30 of 5:30");
+  });
+
+  it("says nothing at all before the run has done anything", () => {
+    // "step 0 of 12" while the catalog is still being searched measures the
+    // wrong thing, and an empty strip is honest.
+    expect(progressLine(ANSWERED as unknown as Parameters<typeof progressLine>[0])).toBeNull();
+  });
+
+  it("warns when a ceiling is close, before the answer arrives", () => {
+    // Saying it early is the feature: a reader who knows the search was cut
+    // short reads the caveats differently.
+    const close = withProgress(
+      { iterations: 11, wall_seconds: 200 },
+      { iterations: 12, wall_seconds: 330 },
+    );
+    const early = withProgress(
+      { iterations: 2, wall_seconds: 40 },
+      { iterations: 12, wall_seconds: 330 },
+    );
+
+    expect(nearlyOut(close)).toBe(true);
+    expect(nearlyOut(early)).toBe(false);
+  });
+
+  it("is not confused by a run that reports one dimension and not the other", () => {
+    const partial = withProgress({ iterations: 3 }, { iterations: 12 });
+
+    expect(progressLine(partial)).toBe("step 3 of 12");
+    expect(nearlyOut(partial)).toBe(false);
+  });
+});
+
 describe("how an answer is rendered", () => {
   it("shows headings, lists and tables as structure rather than as characters", async () => {
     // **B-172.** This rendered into a bare `<p>` with `white-space: pre-wrap`,

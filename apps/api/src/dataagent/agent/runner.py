@@ -93,6 +93,7 @@ from dataagent.agent.tools.registry import ToolRegistry, default_registry
 from dataagent.catalog.browse import active_catalog
 from dataagent.catalog.cards import offers_measures
 from dataagent.config import Settings
+from dataagent.dal.lease import ConnectionLease
 from dataagent.dal.policy import SourcePolicy
 from dataagent.db.models import QueryExecution, ResultArtifact
 from dataagent.knowledge import embeddings
@@ -190,6 +191,11 @@ async def execute_run(
         state=ResearchState(run_id=run_id, org_id=org_id),
         budget=BudgetState(budget=budget if budget is not None else Budget()),
     )
+    # **One connection for the whole run** (**B-176**). Measured at 3.4 seconds
+    # per query in platform read, Key Vault round trip and TLS handshake — 23.5
+    # seconds of the run that then ran out of steps. The source is resolved
+    # before this point, so there is always one to lease.
+    lease = ConnectionLease(org_id, data_source_id)
     context = ToolContext(
         org_id=org_id,
         run_id=run_id,
@@ -197,6 +203,7 @@ async def execute_run(
         actor_user_id=actor_user_id,
         data_source_id=data_source_id,
         as_of=as_of,
+        lease=lease,
         # Resolved once for the run rather than per tool call, and from the
         # settings this run was given rather than from the process — the same
         # reason `execute_run` takes settings at all. None is an ordinary answer
@@ -233,6 +240,11 @@ async def execute_run(
         await _record_failure(events, working, str(error), category="internal_error", run_id=run_id)
         return _failed(run_id, working)
     finally:
+        # **Closed before the run is finished, and in `finally`** (B-176). A
+        # connection to a customer's database held open by a run nobody is
+        # watching is worse than the handshake it saves, and the failure paths
+        # above are exactly when a run stops without reaching its own end.
+        await lease.aclose()
         # In `finally`, because a run that never ends is the one failure with no
         # symptom until somebody notices a page spinning.
         await _finish(org_id=org_id, run_id=run_id, status=ending, working=working, outcome=outcome)
@@ -992,7 +1004,35 @@ READABLE_ANSWER_RULE = (
     "'left over' to 'deduplicated'. If a plain word will do, use it. A reader "
     "should not need a second reading to learn what to do next.\n"
     "Being simple is not being vague: keep every number, every name and every "
-    "limit exactly as the evidence gives them."
+    "limit exactly as the evidence gives them.\n\n"
+    # **B-179.** The owner met `310817.08999999997` in a table of monthly sales.
+    # `encodable` now trims the representation error before the model sees it,
+    # so this is about the other half: a number a person reads should be written
+    # the way money is written.
+    "Write money as **RM 310,817** — the currency, thousands separated, and "
+    "rounded to whole ringgit unless the figure is under RM 100. Write weights "
+    "as **1,973 kg**. Never print more decimal places than the number deserves; "
+    "a total to eleven decimals is noise wearing the clothes of precision. Do "
+    "not invent precision the evidence does not have either — if a figure is "
+    "modelled, round it and say so rather than quoting it to the cent.\n\n"
+    # **B-180.** The same answer ranked "Improve Outlet D sales — RM 20,469"
+    # as an action. It is a measurement with an imperative in front of it: the
+    # reader already knew sales were low, and what they asked for was what to do
+    # on Monday.
+    "When the question asks what to do — actions, priorities, a focus list — "
+    "every row must be something a person could start this week, not a number "
+    "with a verb attached. 'Improve Outlet D sales' is a restatement of the "
+    "figure beside it. 'Outlet D sells RM 20,469 a month against Outlet A's "
+    "RM 62,000 on the same menu; its three worst-selling dishes are X, Y and Z, "
+    "so start by checking whether they are being offered at all' is an action. "
+    "Say **which** dish, **which** outlet, **which** day or shift, and what the "
+    "evidence suggests is behind it. Where the data cannot tell you the cause, "
+    "say what to look at rather than inventing one — 'check the prep schedule "
+    "for Tuesday' is honest, 'staff are over-prepping' is a guess wearing a "
+    "recommendation's clothes.\n"
+    "Rank by the money at stake and say what that money is: the sales it "
+    "protects, or the waste it removes. An action whose size nobody can see is "
+    "one nobody can schedule against the rest of their week."
 )
 
 

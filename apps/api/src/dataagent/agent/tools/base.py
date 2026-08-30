@@ -29,6 +29,7 @@ from typing import Protocol
 from pydantic import BaseModel
 
 from dataagent.config import Settings
+from dataagent.dal.lease import ConnectionLease
 from dataagent.knowledge.embeddings import Embedder
 
 __all__ = [
@@ -110,6 +111,13 @@ class ToolContext:
     #: embedding call exactly as it counts a chat call, and a run cannot spend
     #: past its ceiling by spending somewhere the ceiling was not looking.
     embedder: Embedder | None = None
+    #: One connection to the customer database, reused across this run's
+    #: queries (**B-176**). None means every query builds and closes its own,
+    #: which is what every query did before it was measured: 3.4 seconds each
+    #: in platform read, Key Vault round trip and TLS handshake. Carried rather
+    #: than cached on this frozen context, so what the context holds is still
+    #: fixed for the life of the run.
+    lease: ConnectionLease | None = None
     #: The configuration this run was given, or None for the process default.
     #: Here for the same reason `loop.research` and `plan_query` take it: a run
     #: started by the eval harness must be bounded by the harness's ceiling

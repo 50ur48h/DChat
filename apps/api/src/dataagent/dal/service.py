@@ -27,7 +27,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import replace
 
-from dataagent.connectors.base import ConnectorError
+from dataagent.connectors.base import Connector, ConnectorError
 from dataagent.dal import audit_hook
 from dataagent.dal.artifacts import ArtifactStore, artifact_store
 from dataagent.dal.errors import PolicyViolation
@@ -45,6 +45,7 @@ async def run(
     run_id: uuid.UUID | None = None,
     max_rows: int | None = None,
     store: ArtifactStore | None = None,
+    connector: Connector | None = None,
 ) -> Execution:
     """Validate, execute, mask, record. Raises ``PolicyViolation`` or
     ``ConnectorError`` — and has written a row before it does either.
@@ -53,7 +54,14 @@ async def run(
 
     try:
         execution = await execute(
-            org_id=org_id, data_source_id=data_source_id, sql=sql, max_rows=max_rows
+            org_id=org_id,
+            data_source_id=data_source_id,
+            sql=sql,
+            max_rows=max_rows,
+            # Supplied by the run's lease where there is one (**B-176**).
+            # `executor` closes only what it opened, so a supplied connector
+            # outlives the query and is closed with the run.
+            connector=connector,
         )
     except PolicyViolation as violation:
         await audit_hook.record_refusal(

@@ -476,6 +476,52 @@ function Findings({
   );
 }
 
+/**
+ * How long a run has been going, against what it is allowed (**B-177**).
+ *
+ * **Counters, not a bar.** A progress bar claims to know when something
+ * finishes; what finishes a run is a model deciding it has enough, and nothing
+ * here can know that. So this says "step 6 of 12 · 3:30 of 5:30" and lets the
+ * reader draw their own conclusion — which is also why the last few seconds
+ * reading "12 of 12" is a feature: a run about to be cut short says so before
+ * the answer arrives, rather than after.
+ *
+ * Empty until the run has done something. A strip reading "step 0 of 12" while
+ * the catalog is still being searched measures the wrong thing.
+ */
+export function progressLine(run: Run): string | null {
+  const used = run.progress?.used;
+  const limits = run.progress?.limits;
+  if (!used || !limits) return null;
+
+  const parts: string[] = [];
+  if (typeof used.iterations === "number" && typeof limits.iterations === "number") {
+    parts.push(`step ${used.iterations} of ${limits.iterations}`);
+  }
+  if (typeof used.wall_seconds === "number" && typeof limits.wall_seconds === "number") {
+    parts.push(`${clock(used.wall_seconds)} of ${clock(limits.wall_seconds)}`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+/** Seconds as m:ss. Minutes, because a run is minutes and 330 is not readable. */
+function clock(seconds: number): string {
+  const whole = Math.max(0, Math.round(seconds));
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+}
+
+/** Whether this run is close enough to a ceiling to say so. */
+export function nearlyOut(run: Run): boolean {
+  const used = run.progress?.used;
+  const limits = run.progress?.limits;
+  if (!used || !limits) return false;
+  const share = (a?: number, b?: number) => (typeof a === "number" && b ? a / b : 0);
+  return (
+    share(used.iterations, limits.iterations) >= 0.75 ||
+    share(used.wall_seconds, limits.wall_seconds) >= 0.75
+  );
+}
+
 function RunProgress({ orgId, run }: { orgId: string; run: Run }) {
   return (
     <Card tone="sunken">
@@ -487,6 +533,16 @@ function RunProgress({ orgId, run }: { orgId: string; run: Run }) {
       <p className={styles.note}>
         The answer arrives here on its own — you can leave the page and come back to it.
       </p>
+      {/* **B-177.** Five and a half minutes with no sense of where you are is
+          worse than four with one. Saying it is close to its limit *before* the
+          answer arrives is the point, not a leak: a reader who knows the search
+          was cut short reads the caveats differently. */}
+      {progressLine(run) && (
+        <p className={nearlyOut(run) ? styles.progressClose : styles.progress}>
+          {progressLine(run)}
+          {nearlyOut(run) && " — close to its limit, so the answer may be partial"}
+        </p>
+      )}
       {/* The working state (D-047). It streams, so a step appears when it
           happens, and it replays from the durable rows, so a refresh mid-run
           loses nothing. */}
@@ -687,9 +743,75 @@ function AnswerCard({
 function AnswerText({ words }: { words: string }) {
   return (
     <div className={styles.answerText} data-testid="answer-text">
-      <Markdown remarkPlugins={[remarkGfm]}>{words}</Markdown>
+      <Markdown remarkPlugins={[remarkGfm]} components={{ td: DataCell, th: HeaderCell }}>
+        {words}
+      </Markdown>
     </div>
   );
+}
+
+/**
+ * One table cell, aligned by what is in it (**B-179**).
+ *
+ * The first version right-aligned every column but the first, on the comment
+ * *"every number here is money or a count"*. That was an assumption, and it was
+ * wrong the first time a table carried a `Period` column and a `Why it matters`
+ * column: prose ragged against the right edge, with a horizontal scrollbar
+ * pushing the explanation out of view. CSS cannot see a cell's content, so the
+ * decision is made here and the class carries it.
+ *
+ * **The model's own alignment wins where it gave one.** `remark-gfm` turns
+ * `|---:|` into an inline `text-align`, and a blanket rule fights it.
+ */
+function cellProps({
+  children,
+  style,
+  ...rest
+}: React.ComponentPropsWithoutRef<"td"> & { node?: unknown }) {
+  delete (rest as { node?: unknown }).node;
+  // The model's own alignment wins where it gave one: `remark-gfm` turns
+  // `|---:|` into an inline `text-align`, and a class would fight it.
+  const aligned = style?.textAlign !== undefined;
+  return {
+    ...rest,
+    style,
+    className: !aligned && isNumeric(children) ? styles.numeric : undefined,
+    children,
+  };
+}
+
+/** A data cell. Separate from the header only so each renders its own tag —
+    one component for both turned every `th` into a `td` and quietly cost the
+    table its header. */
+function DataCell(props: React.ComponentPropsWithoutRef<"td"> & { node?: unknown }) {
+  return <td {...cellProps(props)} />;
+}
+
+function HeaderCell(props: React.ComponentPropsWithoutRef<"th"> & { node?: unknown }) {
+  return <th {...cellProps(props as React.ComponentPropsWithoutRef<"td">)} />;
+}
+
+/**
+ * Whether a cell holds a number rather than words.
+ *
+ * Deliberately strict: a currency mark, digits, separators and a percent sign.
+ * "2025-12" is a period and not a number, and "Ayam Penyet" obviously is not —
+ * anything it cannot be sure about stays left, because a wrongly right-aligned
+ * word is the fault this replaces.
+ */
+export function isNumeric(children: React.ReactNode): boolean {
+  const text = flatten(children).trim();
+  if (text.length === 0) return false;
+  return /^[-+(]?\s*(RM|MYR|\$|€|£)?\s*[\d,]+(\.\d+)?\s*%?\s*\)?$/i.test(text);
+}
+
+function flatten(node: React.ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(flatten).join("");
+  if (node && typeof node === "object" && "props" in node) {
+    return flatten((node as { props: { children?: React.ReactNode } }).props.children);
+  }
+  return "";
 }
 
 function Cost({ run }: { run: Run }) {
