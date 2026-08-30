@@ -100,8 +100,11 @@ async def test_a_forgotten_connection_is_replaced_not_reused(
     second = await lease.connector()
 
     assert second is not first
-    assert first.closed == 1
     assert len(built) == 2
+    # Read from the record of what was built, not from the lease's return: that
+    # is typed as the `Connector` protocol, which has no close counter and
+    # should not grow one for a test's convenience.
+    assert built[0].closed == 1
 
 
 async def test_a_connection_that_fails_to_close_does_not_fail_the_run(
