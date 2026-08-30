@@ -1,249 +1,318 @@
 # data-agent
 
-An AI-native data analysis platform. You connect your own databases (PostgreSQL,
-SQL Server); the platform discovers and profiles the schema; a bounded agent
-answers business questions in plain language, shows the queries that produced
-each number, and says so honestly when the schema cannot answer.
+**Ask your business database a question in plain English. Get an answer you can
+check.**
 
-The differentiator is not chat and not text-to-SQL. It is **iterative
-investigation under deterministic safety controls**: the model proposes,
-deterministic code disposes — validating SQL against an AST allowlist, grounding
-every identifier in the discovered catalog, scoping every row to a tenant,
-masking sensitive columns, and enforcing budgets with counters rather than
-prompts.
+You connect a database you already have. The platform reads its structure, works
+out what is in it, and then answers questions about it — in sentences, with a
+chart where one helps, and with the exact query behind every number one click
+away.
 
-> **Core principle:** the LLM is never the security boundary. The deterministic
-> Data Access Layer is. Every hard rule has a deterministic enforcer —
-> see [docs/architecture.md](docs/architecture.md) Part 7.
+It is built on one rule: **the AI is never allowed to be the thing that keeps
+your data safe.** Ordinary code does that. The AI only suggests; code checks
+every suggestion before anything touches your database.
 
-## Status
+---
 
-**Under construction, and runnable.** The repository is built phase by phase
-against a written plan; the quickstart below works end to end today — you can
-register a database, let it read the schema, ask a question and open the query
-behind the answer. Deployment to Azure is Phase 12 and is not done, so there is
-nothing hosted to visit: local is the only way to see it. Current position is
-always in [docs/plan/STATUS.md](docs/plan/STATUS.md).
+## The problem this solves
 
-## What is here
+Most businesses have the answer to their questions sitting in a database, and no
+practical way to ask.
 
-| Path | What it is |
+- **Asking a person is slow.** Every question becomes a ticket, and the ticket
+  takes days.
+- **Dashboards answer yesterday's question.** They show what someone thought to
+  build. The question you have today is usually not on there.
+- **A chatbot bolted onto a database is worse than nothing.** It sounds
+  confident, invents columns that do not exist, and gives you a number with no
+  way to tell whether it is right.
+
+The third one is the real danger. A wrong number that looks right gets used.
+
+---
+
+## What makes this different
+
+**Every number can be traced.** Each answer names the queries that produced it.
+You can open any of them and read the actual SQL, and see the rows it returned.
+
+**It says when it cannot answer.** If your database has no table for what you
+asked, it tells you that instead of guessing. An honest "I cannot answer this"
+is treated as a successful outcome, not a failure.
+
+**It says what an answer does not prove.** Below each answer is a short list of
+limitations — a period the data does not cover, a join that was measured rather
+than declared, a figure that is modelled rather than measured. **The platform
+writes those, not the AI**, so the AI cannot smooth them away.
+
+**It cannot change your data.** The platform connects with a read-only login and
+refuses to use one it has not proved is read-only.
+
+**It knows your words.** "Net revenue" means something specific in your business.
+You can write that down once, and every answer that uses the term then follows
+your definition — including the warnings you attach to it.
+
+---
+
+## How it works, end to end
+
+Three separate things happen: you **set it up** once, someone **asks** a
+question, and the platform **works** on it.
+
+```mermaid
+flowchart TD
+    subgraph SETUP["① Set-up — done once, by an administrator"]
+        A1[Connect a database<br/>read-only login] --> A2{Prove it<br/>cannot write}
+        A2 -- "no" --> A3[Refused.<br/>Nothing is read.]
+        A2 -- "yes" --> A4[Read the structure:<br/>tables, columns, how they link]
+        A4 --> A5[Look at the contents:<br/>ranges, how many distinct values,<br/>what looks personal]
+        A5 --> A6[Write a short description<br/>of every table]
+        A6 --> A7[Optional: define<br/>your own business terms]
+    end
+
+    subgraph ASK["② Someone asks a question"]
+        B1[Types a question<br/>in plain English] --> B2[Find the tables<br/>most likely to help]
+        B2 --> B3[Check those tables<br/>can actually be linked]
+        B3 --> B4[Check the data covers<br/>the period asked about]
+        B4 --> B5[Attach your own<br/>definitions, if any match]
+    end
+
+    subgraph WORK["③ The platform works on it — repeats until done or out of budget"]
+        C1[AI proposes<br/>one query] --> C2{Safety check:<br/>read-only? real tables?<br/>allowed columns?}
+        C2 -- "no" --> C3[Rejected.<br/>The AI is told why<br/>and tries again.]
+        C3 --> C1
+        C2 -- "yes" --> C4[Run it on your database<br/>read-only, row limit, timeout]
+        C4 --> C5[Hide sensitive values<br/>before anyone sees them]
+        C5 --> C6{AI: is that<br/>enough to answer?}
+        C6 -- "not yet" --> C1
+        C6 -- "yes" --> C7[A reviewer checks the draft<br/>against the evidence]
+    end
+
+    subgraph OUT["④ What you get"]
+        D1[The answer, in plain words]
+        D2[A chart, when one helps]
+        D3[What this does not prove]
+        D4[Every query, openable]
+    end
+
+    A7 --> B1
+    B5 --> C1
+    C7 --> D1 --> D2 --> D3 --> D4
+```
+
+### What that means, step by step
+
+**① Set-up.** An administrator connects a database using a login that can only
+read. The platform tests that login and **refuses to go further if it can write
+anything** — a catalogue is only worth building on credentials that cannot change
+the data.
+
+It then reads the structure and takes a careful look at the contents: how many
+distinct values each column holds, what range they fall in, what a typical value
+looks like, and whether anything looks like personal information. Columns that
+look sensitive are hidden by default until an administrator decides otherwise.
+
+Finally it writes a short description of each table — this is what lets a
+question about "sales last month" find the right table without anyone having
+typed the word "sales" into the schema.
+
+**② Someone asks.** The platform first works out which tables are likely to
+help, using both the words in the question and their meaning, so "takings"
+finds a table about revenue. Then it checks three things before any AI is asked
+to write a query:
+
+- Can those tables actually be joined? If two tables cannot be linked, an answer
+  combining them would be fiction.
+- Does the data cover the period asked about? If you ask about last month and the
+  data stops a year ago, that is worth knowing before, not after.
+- Do any of your own definitions apply to this question?
+
+**③ The platform works.** This is a loop, not a single shot. The AI proposes one
+query at a time. Every proposal goes through a safety check written in ordinary
+code — is it read-only, does every table and column actually exist, is a row
+limit attached. **A rejected query is not a failure**: the AI is told exactly what
+was wrong and tries again, which is how most mistakes get corrected without
+anyone noticing.
+
+Queries that pass run against your database read-only, with a row cap and a time
+limit. Sensitive values are hidden before anything is shown to the AI or to you.
+
+The AI then looks at what came back and decides whether it has enough. If not, it
+asks another question of the data. That is the difference between this and
+text-to-SQL: it can look, think, and look again.
+
+Before the answer is written, a separate reviewer step checks the draft against
+the evidence — that every number cited is real, and that any filter your
+definitions require was actually applied.
+
+**④ What you get.** An answer in plain words. A chart when one helps. A list of
+what the answer does not establish. And every query, openable.
+
+---
+
+## What stops it going wrong
+
+```mermaid
+flowchart LR
+    AI["🤖 The AI<br/><i>suggests</i>"] --> GATE
+
+    subgraph GATE["Safety checks — ordinary code, never the AI"]
+        G1[Is this read-only?]
+        G2[Do these tables<br/>and columns exist?]
+        G3[Is a row limit<br/>attached?]
+        G4[Is this the right<br/>customer's data?]
+        G5[Which columns must<br/>be hidden?]
+        G6[Has this run used up<br/>its allowance?]
+    end
+
+    GATE --> DB[("🗄️ Your database<br/><i>read-only connection</i>")]
+    DB --> MASK[Hide sensitive values]
+    MASK --> LEDGER[Write down what ran,<br/>what it cost, what it returned]
+    LEDGER --> USER["👤 You"]
+```
+
+The AI suggests. Code decides. Every one of those checks is ordinary code with
+a test behind it, and **none of them can be argued with by a cleverly worded
+question**, because none of them asks the AI anything.
+
+| Concern | What actually prevents it |
 |---|---|
-| [docs/architecture.md](docs/architecture.md) | **What** we build. The binding design: agent core, DAL, tenancy, connectors, Azure shape. |
-| [docs/plan/implementation-plan.md](docs/plan/implementation-plan.md) | **How** we work. 13 phases, work packages, PR flow, CI, gates. |
-| [docs/plan/STATUS.md](docs/plan/STATUS.md) | **Where** we are. Single source of truth for progress. |
-| [docs/plan/BACKLOG.md](docs/plan/BACKLOG.md) | Deferred work, append-only IDs (`B-###`). |
-| [docs/plan/DECISIONS.md](docs/plan/DECISIONS.md) | Deviations from the architecture, with reasons. |
-| [CLAUDE.md](CLAUDE.md) | Working agreement, loaded automatically by Claude Code. |
+| "Could it change or delete our data?" | The login it uses can only read, and the platform proves that before reading anything. Every query is checked to be read-only as well. |
+| "Could it see another customer's data?" | Every table in the platform's own database is scoped per organisation by the database itself, not by application code that could forget. |
+| "Could it leak personal data?" | Columns that look sensitive are hidden by default. Hiding happens before the AI sees the rows, not after. |
+| "Could a clever question talk it into something?" | The safety checks do not consult the AI. A question cannot argue with code that never asks its opinion. |
+| "Could it run up a huge bill?" | Every run has a fixed allowance — steps, queries, time, and model usage — counted by the platform, not promised by a prompt. |
+| "Could it quietly give us a wrong number?" | Every number names the query behind it, and you can read that query. |
 
-Code lands under `apps/api` (FastAPI + agent runtime + DAL + connectors),
-`apps/web` (Next.js), `ops/` (compose, seed data, evals) and `infra/` (Bicep) as
-the phases deliver them.
+---
 
-## Quickstart
+## How it is put together
 
-Getting from nothing to an answer takes about ten minutes, most of which is
-Docker pulling images. **You need an OpenAI API key** — see the step below.
+```mermaid
+flowchart TB
+    subgraph BROWSER["What people use"]
+        WEB["Web app<br/><small>ask, read, open the evidence</small>"]
+    end
 
-### 1. Start the stack
+    subgraph PLATFORM["The platform"]
+        API["Service<br/><small>accounts, permissions, conversations</small>"]
+        AGENT["The investigator<br/><small>plans, looks, reflects, repeats</small>"]
+        DAL["The gatekeeper<br/><small>the only way to reach a database</small>"]
+        CAT["The catalogue<br/><small>what your tables are and hold</small>"]
+        SEM["Your definitions<br/><small>what your words mean here</small>"]
+    end
 
-```bash
-make up          # .env from .env.example, then platform Postgres + demo DB + api + web
-make db.setup    # migrate, and give the API's unprivileged role its login
-make seed        # build the pizza demo dataset (~72k orders, about 5 seconds)
-make secrets.key # print a LOCAL_SECRETS_KEY line for .env
+    subgraph STORE["The platform's own records"]
+        PG[("Conversations, answers,<br/>queries that ran,<br/>what each one cost")]
+        VAULT[("Your database passwords<br/><small>encrypted, never shown again</small>")]
+    end
+
+    subgraph YOURS["Yours"]
+        CUST[("Your databases<br/><small>PostgreSQL · SQL Server</small>")]
+    end
+
+    subgraph MODEL["Outside"]
+        LLM["Language model"]
+    end
+
+    WEB <--> API
+    API --> AGENT
+    AGENT --> CAT
+    AGENT --> SEM
+    AGENT -->|"asks for a query"| LLM
+    AGENT -->|"every read, without exception"| DAL
+    DAL --> CUST
+    DAL --> PG
+    API --> PG
+    DAL --> VAULT
 ```
 
-`make secrets.key` prints one line. Paste it into `.env`, replacing the empty
-`LOCAL_SECRETS_KEY=`, then **recreate** the api so it reads the new value:
+**The gatekeeper is the point.** There is exactly one path from anything in this
+system to a database of yours, and it is the layer marked above. Every read goes
+through it — including the platform's own housekeeping. That is what makes the
+safety checks meaningful: there is no second route that skips them.
 
-```bash
-docker compose -f ops/docker-compose.yml --env-file .env up -d api
-```
+**Your passwords are never shown again.** A database credential is encrypted the
+moment it is given and stored apart from everything else. It is never returned by
+any screen, never written to a log, and never included in an error message.
 
-`docker compose restart api` is **not** enough and fails in a way that looks
-unrelated: restarting reuses the container's existing environment, so the key
-never arrives, and the first thing you do afterwards — registering a database —
-returns a 500 with `LOCAL_SECRETS_KEY is not set`.
+**The AI is kept outside.** It is sent a description of your tables and the rows
+a query returned. It is never given a password, never given a connection to your
+database, and never asked a question whose answer decides whether something is
+allowed.
 
-### 2. Give it a model — this is required
+---
 
-**The agent cannot answer anything without one, and there is no offline mode.**
-That is deliberate: the product *is* the agent, and a demo that answered from a
-canned script would teach you the opposite of what it exists to show. A build
-that answers without a model exists for CI only, and refuses to start outside it.
+## What you see with an answer
 
-Get a key from <https://platform.openai.com/api-keys>, then uncomment and fill
-this line in `.env`:
+Every answer carries four things, and the last three are the reason to trust the
+first.
 
-```
-OPENAI_API_KEY=sk-...
-```
-
-and recreate the api with the same `up -d api` as above — `restart` will not
-pick it up. Nothing else needs changing: `.env.example` already names the models
-and their prices.
-
-**What it costs.** Very little. Questions in this demo run to roughly ten
-thousand tokens each at the tiers `.env.example` configures — a twenty-question
-evaluation run spent 223,000 tokens in total. A few questions while you look
-around costs a fraction of a US cent. It is not free, which is why nothing here
-spends it without you asking.
-
-### 3. Sign in
-
-Open <http://localhost:3000>. A fresh `.env` sets `AUTH_MODE=dev`, so the sign-in
-screen asks for a name rather than redirecting you to a corporate identity
-provider — type anything (`alice` is prefilled) and continue. The dev issuer
-mints tokens this API accepts and **refuses to start in a production build**, so
-it cannot follow you anywhere.
-
-Create an organization when asked. You are its Admin.
-
-### 4. Register the demo database
-
-**Or skip steps 4 and 5 entirely:**
-
-```bash
-make demo.setup
-```
-
-That builds an organization called `Demo` with the seed databases registered,
-tested, discovered and profiled — everything the next two steps do by hand. It
-runs inside the api container, because that is where the API reaches those
-databases, and it ends by checking that every registered source is reachable from
-there. Ask an Admin of `Demo` to invite your account, or do steps 4 and 5 by hand
-to learn what it did.
-
-Do **not** use `make evals.setup` for this. It builds the eval harness's
-organization at the host's address (`localhost:6543`), which the API cannot
-reach — see backlog **B-115**, which is what that mistake cost.
-
-The manual route, which is worth walking once:
-
-The organization you just created is listed under **Your organizations** with a
-**Members** button — that button is the way in. From there choose **Data
-sources**, and fill in the **Register a database** form at the bottom:
-
-| Field | Value |
+| | |
 |---|---|
-| Name | `Pizza demo` |
-| Engine | PostgreSQL |
-| Host | `seed-pizza-pg` |
-| Port | `5432` |
-| Database | `pizza` |
-| Username | `pizza_readonly` |
-| Password | the `SEED_PIZZA_READONLY_PASSWORD` from your `.env` |
+| **The answer** | In plain words, for someone who is not an analyst. |
+| **How it was reached** | One line: how many queries, over how many steps, against which tables. |
+| **What it does not prove** | Written by the platform, not the AI. A period not covered, a link that was measured rather than declared, a number that is modelled rather than counted. |
+| **The evidence** | Every query, openable, with the rows it returned. |
 
-Leave **Encryption** blank, and press **Register**.
+While a question is being worked on you can see how far it has got — which step
+it is on, and how much of its allowance is left. If it is close to running out,
+it says so **before** the answer arrives, so you know to read the answer as
+partial.
 
-**The host is `seed-pizza-pg`, not `localhost`.** The API reaches the database
-across the Docker network, where that is its name; `localhost:6543` in the table
-below is how *you* reach it from your own machine, which is a different journey.
+---
 
-The credentials are read-only by construction — `make seed` creates that role
-with `SELECT` and nothing else — and registering tests them and says whether the
-connection was encrypted.
+## Teaching it your business
 
-### 5. Let it read the schema
+The platform can read a database's structure. It cannot read your mind, and the
+same word means different things at different companies.
 
-First choose **Test connection**. This is not optional politeness: it is what
-proves the credentials cannot write, and until it has passed **Refresh catalog**
-refuses with *"this data source has not been proven read-only"*. A catalog is
-only worth building on credentials that cannot change the database.
+A **definition** fixes that. You write down, once:
 
-Then **Refresh catalog**, then **Profile columns**. The
-first reads the tables and columns; the second samples them, so the agent knows
-what a column actually contains and which values look sensitive. Until both have
-run the agent has no catalog and will correctly refuse to guess rather than
-inventing a schema.
+- what a term means in your business,
+- the words people actually use for it,
+- optionally, a rule every query for that term must follow,
+- and **any warning that must appear whenever it is used**.
 
-### 6. Ask something
+That last one matters more than it sounds. If your waste figures are estimates
+rather than measurements, every answer that uses them says so — because the
+warning travels with the definition rather than living in someone's head.
 
-Press **Back** to the organization, then **Ask**. Pick `Pizza demo` in the
-**Database** list, press **Start**, open the new conversation, and ask:
+The platform is also honest about its own enforcement. If a definition has a rule
+attached but that rule currently excludes nothing — because the data changed
+underneath it — the screen says **"enforced, but currently excluding nothing"**
+rather than claiming a guarantee it is not delivering.
 
-> show me the revenue trend by month
+---
 
-You should get a sentence, a chart, a line saying how the answer was reached, and
-a control that opens the SQL behind it. Every number is traceable to a query you
-can read.
+## What it does not do
 
-Good follow-ups, because they show what the product is actually for:
+Worth saying plainly.
 
-- *"how many orders were placed in July 2026?"* — a plain count.
-- *"what were our best-selling items?"* — the demo has **no** `order_items`
-  table, so this is genuinely unanswerable. A good refusal names what is
-  missing rather than inventing a number.
-- *"why did revenue fall recently?"* — the data hides a ~12% decline that comes
-  almost entirely from one store's delivery orders.
+- **It does not write to your database.** There is no version of this that does.
+- **It does not work without an AI model.** There is no offline mode. The product
+  *is* the investigation.
+- **It is not a replacement for an analyst** on questions that need judgement
+  about what the numbers mean for your business.
+- **It cannot answer what the data cannot support.** If the table you would need
+  does not exist, no amount of asking differently will produce it — and it will
+  tell you so rather than making a number up.
+- **It does not guarantee the AI's wording.** The numbers are checked; the prose
+  around them is the model's, guided by instructions.
 
-### Stopping and starting
+---
 
-`make down` stops everything and keeps the data; `make down.hard` throws the
-volumes away. `make logs` follows all services, `make ps` shows status.
+## What it works with
 
-`LOCAL_SECRETS_KEY` is only needed once you register a data source: the API
-encrypts customer database credentials with it and keeps the ciphertext in
-`ops/.secrets/` — never in the platform database, and never in a response. The
-key is generated, never chosen, and production refuses this backend outright in
-favour of Key Vault ([DECISIONS](docs/plan/DECISIONS.md) D-001).
+**Databases:** PostgreSQL and SQL Server.
 
-Connections to a customer's database are encrypted unless its address is on this
-machine. The demo databases run in the compose network and serve no certificate,
-so compose names them in `TLS_LOCAL_HOSTS` and they connect with `prefer`;
-anything else gets `TLS_MODE`, which cannot be set to a mode that allows
-plaintext. Each data source reports the mode it uses, and a connection test says
-whether the server actually encrypted it (D-011).
+**Signing in:** your existing company login. Each organisation's data is kept
+apart by the database itself, and people can be given Admin, Contributor or
+Reader access — a Reader can ask questions and read their own answers, and
+cannot change what anything means.
 
-| Service | Where | What it is |
-|---|---|---|
-| web | http://localhost:3000 | Next.js app |
-| api | http://localhost:8000/healthz | FastAPI service |
-| platform-pg | localhost:5432 | the platform's own database (pgvector, row-level security) |
-| seed-pizza-pg | localhost:6543 | stands in for a *customer's* database |
-| mssql | localhost:1433 | a second customer database, on demand — see below |
+---
 
-`seed-pizza-pg` holds a generated 18-month pizza-chain dataset. It is a fixture
-with deliberate properties — no `order_items` table, so item-level questions are
-genuinely unanswerable, and a ~12% revenue decline in the final eight weeks that
-comes entirely from one store's delivery orders. Both exist to exercise the
-agent's honesty and its research loop later on; `ops/seed/seed_pizza.py`
-documents them and checks them on every run.
-
-The SQL Server container stays out of `make up` because its image is ~1.5 GB and
-it idles on about 2 GB of memory:
-
-```bash
-make up.mssql    # start it (the pull takes a while the first time)
-make seed.mssql  # the same schema in T-SQL, with a smaller dataset
-```
-
-It exists so a second dialect is exercised end to end rather than assumed to
-work — the same tables, the same missing join, and its own read-only login. The
-agent's questions and the evals are asked of the PostgreSQL dataset.
-
-### Prerequisites
-
-Docker + Compose, Python 3.12 via [uv](https://docs.astral.sh/uv/)
-(`uv python install 3.12` provisions it — no system Python needed), Node 22 via
-[pnpm](https://pnpm.io/), and GNU **make**, which is how every command in this
-repo is invoked. macOS and Linux have it; on Windows:
-
-```powershell
-winget install ezwinports.make    # then restart the shell
-```
-
-`make help` lists the current targets.
-
-## Contributing
-
-Everything goes through a pull request into a protected `main`; one work package
-per branch per PR; `docs/plan/STATUS.md` is updated in the same PR as the work.
-The rules that matter are in [CLAUDE.md](CLAUDE.md) and, in full, in
-[implementation-plan.md](docs/plan/implementation-plan.md) §1.
-
-## License
-
-None yet — see backlog item **B-001**. Until a license is chosen, the default
-applies: all rights reserved.
+<sub>Installing and running it: [docs/setup.md](docs/setup.md) · Technical
+design: [docs/architecture.md](docs/architecture.md) · No license yet, so all
+rights reserved.</sub>
