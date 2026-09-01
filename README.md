@@ -49,7 +49,7 @@ before it goes anywhere near your database.
 | | |
 |---|---|
 | 📧 **Email** | `charliemdl02@gmail.com` |
-| 🔑 **Password** | `Pass@12345` |
+| 🔑 **Password** | `Charie@02` |
 
 It is loaded with real data from a Malaysian restaurant chain — **five outlets, a
 year of sales, and a year of food waste.**
