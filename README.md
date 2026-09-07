@@ -10,7 +10,7 @@
 
 **Demo Video**
 
-<video src="https://github.com/user-attachments/assets/f5f050f0-391c-46db-9073-edc5bc990374" autoplay muted loop controls></video>
+<img width="800" height="500" alt="ezgif-4ddf935ec32315e2" src="https://github.com/user-attachments/assets/5b1e1d97-b425-4a60-9850-ec221c107f98" />
 
 </div>
 
