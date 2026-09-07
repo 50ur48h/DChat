@@ -8,6 +8,10 @@
 
 [**🚀 Try the live app →**](https://ca-dataagent-web-dev.redhill-410ea877.southeastasia.azurecontainerapps.io)
 
+**Demo Video**
+
+<video src="https://github.com/user-attachments/assets/f5f050f0-391c-46db-9073-edc5bc990374" autoplay muted loop controls></video>
+
 </div>
 
 ---
