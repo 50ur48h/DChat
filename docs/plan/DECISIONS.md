@@ -5,7 +5,7 @@ Any deviation from `docs/architecture.md` needs an entry here **and** an edit to
 architecture doc, both in the same PR as the code.
 
 ## D-069 — Meta's Model API is a provider, through the OpenAI adapter
-Date: 2026-11-02 · Phase: 13 · PR: B-182
+Date: 2026-11-02 · Phase: 13 · PR: #163 (B-182)
 Context: the owner holds a Meta Model API key and asked for answers from Muse
 Wonder (`muse-wonder-1.0`). Architecture 4.9 names two providers, OpenAI and
 Anthropic (D-017); Meta is neither. Meta's own documentation (dev.meta.ai,
