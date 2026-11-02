@@ -146,6 +146,12 @@ services:
       LLM_REFUSE_UNPRICED_WHEN_CAPPED: ${LLM_REFUSE_UNPRICED_WHEN_CAPPED:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Meta Model API, for LLM_PROVIDERS=meta (D-069). Chat only: Meta has no
+      # embedding model, so the EMBEDDINGS_* block below still reads OpenAI's key.
+      META_API_KEY: ${META_API_KEY:-}
+      # Passed for B-086's reason: an effort tuned on the host and not here would
+      # be measured by the smoke script and ignored by every question in the browser.
+      META_REASONING_EFFORT: ${META_REASONING_EFFORT:-}
       # The embedding model, for exactly the reason the block above exists
       # (B-086). Retrieval happens *inside the API process*, so a model named
       # only in the developer's shell reaches the eval harness and never the

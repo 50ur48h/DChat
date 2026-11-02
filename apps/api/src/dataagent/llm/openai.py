@@ -1,4 +1,4 @@
-"""The OpenAI provider (DECISIONS D-017).
+"""The OpenAI provider (DECISIONS D-017), and the Responses protocol it speaks.
 
 Deliberately thin, as ``llm/base.py`` requires: send, receive, report usage,
 sanitize failures, and set ``retryable`` correctly. Retries are ``llm/retry.py``,
@@ -6,6 +6,9 @@ fallback is ``llm/fallback.py``, parsing is ``llm/structured.py``, metering is
 ``llm/service.py``. Everything this module decides for itself is a place the
 second provider could come to disagree with it, so it decides as little as
 possible.
+
+**Meta's Model API serves the same protocol**, so ``llm/meta.py`` is this class
+with another endpoint, key and name rather than a second adapter (D-069).
 
 Three mappings are all that is provider-specific here:
 
@@ -62,7 +65,7 @@ HTTP_SERVER_ERROR = 500
 
 
 class OpenAIProvider:
-    """One HTTP client for the OpenAI Responses API.
+    """One HTTP client for a Responses API endpoint — OpenAI's unless told otherwise.
 
     The client is built once and reused: a new connection per call would be a
     TLS handshake per call, which is why ``registry`` caches provider instances.
@@ -75,9 +78,18 @@ class OpenAIProvider:
         base_url: str = BASE_URL,
         client: httpx.AsyncClient | None = None,
         settings: Settings | None = None,
+        name: str = "openai",
+        reasoning_effort: str | None = None,
     ) -> None:
         resolved = settings if settings is not None else get_settings()
         key = api_key if api_key is not None else _key_from(resolved)
+        # Not always `openai`: Meta's Model API serves this same protocol
+        # (`llm/meta.py`, D-069), and what a Completion reports must be the
+        # account that was billed rather than the shape of the request.
+        self._name = name
+        # None sends no `reasoning` field at all, which is what every OpenAI call
+        # has always sent; only a provider that needs one passes it.
+        self._reasoning_effort = reasoning_effort
         self._client = client if client is not None else httpx.AsyncClient(base_url=base_url)
         self._headers = {
             "Authorization": f"Bearer {key}",
@@ -86,7 +98,7 @@ class OpenAIProvider:
 
     def capabilities(self) -> ProviderCaps:
         return ProviderCaps(
-            name="openai",
+            name=self._name,
             # Native JSON-schema constrained decoding. `llm/structured.py`
             # validates the result regardless — "supports JSON schema" means
             # different things on different APIs, and the type of
@@ -99,7 +111,7 @@ class OpenAIProvider:
         )
 
     async def complete(self, request: LLMRequest) -> Completion:
-        payload = _body(request)
+        payload = _body(request, reasoning_effort=self._reasoning_effort)
         try:
             response = await self._client.post(
                 RESPONSES,
@@ -120,7 +132,7 @@ class OpenAIProvider:
         if response.status_code != HTTP_OK:
             raise _failure(response)
 
-        return _completion(response.json(), request)
+        return _completion(response.json(), request, provider=self._name)
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -136,8 +148,13 @@ def _key_from(settings: Settings) -> str:
     return settings.openai_api_key.get_secret_value()
 
 
-def _body(request: LLMRequest) -> dict[str, Any]:
-    """Our request, as this API spells it."""
+def _body(request: LLMRequest, *, reasoning_effort: str | None = None) -> dict[str, Any]:
+    """Our request, as this API spells it.
+
+    ``reasoning`` is sent only when a provider was given an effort. On this
+    protocol reasoning tokens count against ``max_output_tokens``, so an effort
+    the caller never chose can spend the whole cap before any answer is written.
+    """
     instructions = request.text_of("system")
     body: dict[str, Any] = {
         "model": request.model,
@@ -150,6 +167,8 @@ def _body(request: LLMRequest) -> dict[str, Any]:
     }
     if instructions:
         body["instructions"] = instructions
+    if reasoning_effort is not None:
+        body["reasoning"] = {"effort": reasoning_effort}
     if request.schema is not None:
         schema = request.schema.model_json_schema()
         body["text"] = {
@@ -229,7 +248,7 @@ def _error_detail(response: httpx.Response) -> str:
     return " ".join(parts)
 
 
-def _completion(payload: dict[str, Any], request: LLMRequest) -> Completion:
+def _completion(payload: dict[str, Any], request: LLMRequest, *, provider: str) -> Completion:
     """The response object, as our ``Completion``."""
     text, refusal = _output(payload)
     if refusal is not None:
@@ -246,7 +265,7 @@ def _completion(payload: dict[str, Any], request: LLMRequest) -> Completion:
         # What actually served the request, which can differ from what was
         # asked for — the ledger should record the former.
         model=str(payload.get("model") or request.model),
-        provider="openai",
+        provider=provider,
         usage=Usage(
             # `input_tokens` is inclusive of the cached ones; the details object
             # says how many of them there were. Read separately rather than

@@ -18,6 +18,9 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["local", "ci", "dev", "prod"]
 SecretsBackend = Literal["local", "keyvault"]
+#: How hard a Muse model reasons before it answers (dev.meta.ai/docs/reasoning).
+#: ``none`` is absent on purpose: Muse Wonder and Muse Spark refuse it with a 400.
+MetaReasoningEffort = Literal["minimal", "low", "medium", "high", "xhigh", "max"]
 #: Where whole query results live. Separate from SecretsBackend on purpose:
 #: the two have different stakes, and a single "use Azure" switch would make
 #: losing an artifact and leaking a credential the same decision.
@@ -389,6 +392,22 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = Field(
         default=None,
         description="Key for the Anthropic provider — the second provider in the chain.",
+    )
+    meta_api_key: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Key for the `meta` provider: Meta Model API, serving Muse models such as "
+            "`muse-wonder-1.0`. From dev.meta.ai (D-069)."
+        ),
+    )
+    meta_reasoning_effort: MetaReasoningEffort = Field(
+        default="minimal",
+        description=(
+            "Reasoning effort sent with every `meta` call. Reasoning tokens count "
+            "against each call's output cap, and with none sent Muse Wonder spent "
+            "the whole cap reasoning and answered nothing (D-069). Raise it only "
+            "together with those caps."
+        ),
     )
 
     # -- Phase 10: embeddings -------------------------------------------------

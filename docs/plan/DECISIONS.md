@@ -4,6 +4,41 @@ Format (plan §1.6): context → options → decision → consequences, 5–15 l
 Any deviation from `docs/architecture.md` needs an entry here **and** an edit to the
 architecture doc, both in the same PR as the code.
 
+## D-069 — Meta's Model API is a provider, through the OpenAI adapter
+Date: 2026-11-02 · Phase: 13 · PR: #163 (B-182)
+Context: the owner holds a Meta Model API key and asked for answers from Muse
+Wonder (`muse-wonder-1.0`). Architecture 4.9 names two providers, OpenAI and
+Anthropic (D-017); Meta is neither. Meta's own documentation (dev.meta.ai,
+*protocols/responses* and *structured-output*) says the Model API serves
+OpenAI's **Responses** protocol at `https://api.meta.ai/v1`: the same
+`instructions` and `input`, the same `text.format` JSON schema with the same
+strict subset, the same `output_text` items and `usage` counts.
+Options: (a) a base-URL setting that points the `openai` provider at Meta; (b) a
+`meta` provider that is `OpenAIProvider` with Meta's endpoint, key and name; (c)
+a new adapter on Meta's Chat Completions or Messages protocol.
+Decision: (b). (a) is one variable and two wrong records: every Meta call lands
+in `usage_ledger` as `openai`, and the embeddings path, which reads
+`OPENAI_API_KEY` for that provider name, would carry Meta's key to OpenAI. (c) is
+a second adapter to keep honest for nothing while Responses is served.
+`META_API_KEY` is its own variable and is never borrowed: a test configures both
+keys and asserts which one travels.
+Consequences: `LLM_PROVIDERS=meta` with `muse-wonder-1.0` in `LLM_MODELS` needs no
+other change. The model id was checked with `GET /v1/models` on the owner's key;
+the prices ($4 / $20 per million, Standard mode) are from Meta's pricing page.
+**One Meta-specific field had to be added, and only a live call could show it.**
+Reasoning tokens count against `max_output_tokens`, and with no effort sent Muse
+Wonder spent 798 of the critic's 800-token cap and 1,022 of the default 1,024
+reasoning, then returned no text. So `meta` always sends `reasoning.effort`,
+`META_REASONING_EFFORT`, default `minimal` (249 and 167 tokens on the same
+calls); `openai` still sends none. Proven end to end on the owner's key: *"How
+many orders were placed in July 2026?"* answered **3,718**, the seed's truth,
+in four Wonder calls costing $0.032.
+**This does not close B-029, and the Phase 6 gate stays unticked**: Meta agrees
+with OpenAI about system prompts, structured output and usage reporting, which
+are the disagreements a second provider is there to survive. Meta has no
+embedding model, so `EMBEDDINGS_*` still needs an OpenAI key. Local only: the
+deployment templates pass no `META_API_KEY` (B-182).
+
 ## D-066 — spend is hidden by an organization switch, enforced by the API
 Date: 2026-08-29 · Phase: 13 · PR: WP13.25
 Context: the owner asked for a way to keep cost and token counts off the answer

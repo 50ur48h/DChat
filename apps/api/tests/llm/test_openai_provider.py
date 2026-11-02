@@ -160,6 +160,21 @@ async def test_a_schema_is_sent_as_a_native_constrained_format() -> None:
     assert "steps" in fmt["schema"]["properties"]
 
 
+async def test_no_reasoning_effort_is_sent_unless_a_provider_asks_for_one() -> None:
+    """The adapter learned to send `reasoning` for Meta (D-069). OpenAI's calls
+    must stay exactly what they were: an effort nobody chose would move both
+    the latency and the bill of every run."""
+    seen: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(json.loads(request.content))
+        return httpx.Response(200, json=ok_body())
+
+    await provider_for(handler).complete(request_for(schema=Plan))
+
+    assert "reasoning" not in seen
+
+
 async def test_strict_is_claimed_only_when_the_schema_can_carry_it() -> None:
     """Rewriting a schema to satisfy strict mode would make an optional field
     mandatory — a change to the caller's contract, decided in the provider,
