@@ -37,6 +37,9 @@ under "Unreleased", only for changes a user would notice.
   knowing its address.
 
 ### Added
+- Answers can come from Meta's Muse Wonder as well as OpenAI. Set
+  `LLM_PROVIDERS=meta` and a `META_API_KEY` from dev.meta.ai; Meta's spend is
+  recorded under its own name, and Meta's key is never sent anywhere else.
 - If everyone who can administer your organization loses access to their
   account, there is now a way back in. An admin can arm a recovery grant ahead
   of time and keep the token somewhere safe; whoever holds it can make

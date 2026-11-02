@@ -284,7 +284,22 @@ Blocked on user: **no.** The direction was set on 2026-08-25 (the UI rebuild;
                  harness is not yet worth believing. Keep the cap tight whenever
                  it does run — the local live run spent **223k tokens** for
                  twenty questions.
-Last updated: 2026-08-28 by Claude Code (**A definition can now say what an
+Last updated: 2026-11-02 by Copilot (**Answers can come from Meta's Muse
+              Wonder** — B-182, D-069, at the owner's request. Meta's Model API
+              serves OpenAI's Responses protocol, so `meta` is the OpenAI adapter
+              with Meta's endpoint, key and name; `LLM_PROVIDERS=meta` is the
+              switch. **The one field Meta needed was found by a live call, not by
+              reading**: with no reasoning effort sent, Wonder spent the whole
+              per-call output cap reasoning and returned nothing, so `meta` sends
+              `META_REASONING_EFFORT`, default `minimal`. End to end on the
+              owner's key, *"How many orders were placed in July 2026?"* answered
+              **3,718** (the seed's truth) in four Wonder calls for $0.032. **The
+              test that proves it is reached starts at configuration** and ends at
+              a `usage_ledger` row naming `meta`; removing the registry line turns
+              it red, which was checked by removing it. **It does not close
+              B-029.** Raised B-183 (neither provider is told `store: false`) and
+              B-184 (`agent_smoke.py` crashes printing a field D-044 renamed).
+              Previously, 2026-08-28 by Claude Code: **A definition can now say what an
               answer using it must admit, and the sentence reaches the reader.**
               A definition had three outputs and none of them did: `description`
               and `expression` are prose for the prompt, `required_filters` is
@@ -4781,7 +4796,10 @@ unexplained.
       same suite (**B-029**, P1). What one provider cannot demonstrate is the
       only thing two providers are for: that the `LLMProvider` shape survives
       contact with an API that disagrees with the first about system prompts,
-      structured output and usage reporting
+      structured output and usage reporting.
+      **`meta` (B-182, D-069) does not change this box**: Meta's Model API serves
+      OpenAI's own protocol, so it agrees with the first provider about exactly
+      the three things this criterion exists to test
 
 ## Phase 7 — Single-shot Q&A (M7)
 - [x] WP7.1 Conversations/runs/events schema + routes + run status

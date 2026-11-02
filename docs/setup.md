@@ -5,7 +5,8 @@ the [README](../README.md) instead — this file assumes you are going to instal
 something.
 
 Getting from nothing to an answer takes about ten minutes, most of which is
-Docker pulling images. **You need an OpenAI API key.**
+Docker pulling images. **You need an OpenAI API key** — or a Meta Model API key,
+to answer with Muse Wonder instead (step 2).
 
 ## Before you start
 
@@ -58,6 +59,22 @@ OPENAI_API_KEY=sk-...
 and recreate the api with the same `up -d api` as above — `restart` will not
 pick it up. Nothing else needs changing: `.env.example` already names the models
 and their prices.
+
+**Or answer with Meta's Muse Wonder.** Create a key at <https://dev.meta.ai>
+(Muse Wonder needs billing set up), then set these four lines in `.env` and
+recreate the api the same way:
+
+```
+META_API_KEY=...
+LLM_PROVIDERS=meta
+LLM_MODELS={"meta":{"small":"muse-wonder-1.0","mid":"muse-wonder-1.0","strong":"muse-wonder-1.0"}}
+LLM_PRICES={"muse-wonder-1.0":{"input":4.00,"output":20.00},"text-embedding-3-small":{"input":0.02,"output":0.00}}
+```
+
+Meta has no embedding model, so searches still use `OPENAI_API_KEY` when one is
+set and fall back to matching words when it is not, and each search records which
+it did (D-031). The July 2026 question below cost about three US cents on Wonder
+(DECISIONS D-069).
 
 **What it costs.** Very little. Questions in this demo run to roughly ten
 thousand tokens each at the tiers `.env.example` configures — a twenty-question

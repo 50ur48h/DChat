@@ -87,9 +87,19 @@ def _openai() -> LLMProvider:
     return OpenAIProvider()
 
 
+def _meta() -> LLMProvider:
+    # The same Responses client with Meta's endpoint and key (D-069). Imported
+    # here for the reason `_openai` gives.
+    from dataagent.llm.meta import MetaProvider
+
+    return MetaProvider()
+
+
 #: Providers this build ships. ``anthropic`` is the second provider the
 #: architecture calls for and is **not here yet** — see **B-029**; the chain
-#: machinery it will slot into is built and tested regardless.
+#: machinery it will slot into is built and tested regardless. ``meta`` is not
+#: the architecture's second provider and does not close B-029: it speaks
+#: OpenAI's protocol, so it adds an account rather than proving the abstraction.
 #: A table of *factories* rather than instances, so that importing the registry
 #: does not open an HTTP client, and so a provider whose key is absent fails when
 #: something tries to use it rather than at import time.
@@ -101,6 +111,7 @@ def _scripted() -> LLMProvider:
 
 _BUILTIN_FACTORIES: dict[str, Callable[[], LLMProvider]] = {
     "openai": _openai,
+    "meta": _meta,
     # **A stub, shipped deliberately** (WP11.2b). The phase gate wants a browser
     # driving the real product in CI, and the model is the only part of that
     # chain that cannot run there for free and deterministically. It is named

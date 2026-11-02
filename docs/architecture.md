@@ -150,7 +150,7 @@ flowchart TB
     API --> PDB[(Platform Postgres with pgvector)]
     DAL --> KV[Azure Key Vault]
     KN --> BLOB[Azure Blob Storage]
-    AG --> LLMP[LLM providers - OpenAI and Anthropic]
+    AG --> LLMP[LLM providers - OpenAI and Anthropic, plus Meta]
     API --> MON[App Insights and Log Analytics]
 ```
 
@@ -361,6 +361,8 @@ V1 ships **two** providers (OpenAI + Anthropic) to prove the abstraction is real
 Two things the table above is precise about, and the build depends on both (DECISIONS **D-018**). A role maps to a **tier**, never to a model: tiers map to concrete model ids per provider, and both maps are configuration. Model ids themselves are deployment configuration with **no defaults in code** — a provider's catalogue changes every few months, and a stale default either 404s or silently bills for the wrong tier. The six role names here are the states of the research loop in 4.4, and they are the names used in code, in `LLM_ROLE_MAP` and in the `usage_ledger` CHECK constraint.
 
 The two providers are **OpenAI's own API and Anthropic's**, not Azure OpenAI (DECISIONS **D-017**, owner's call). Azure OpenAI is reconsidered when the rest of Azure is stood up in Phase 12; because a provider is one module behind this protocol and its models are configuration, that change costs a file and an environment variable. What it buys back is data residency, which is the first question to re-ask before a real customer's data flows.
+
+A third account is available beside them: **Meta's Model API** (`meta`, DECISIONS **D-069**), for the Muse models such as `muse-wonder-1.0`. Meta serves OpenAI's Responses protocol, so `meta` is the OpenAI adapter with Meta's endpoint, key and name, plus the one field Meta needs: a reasoning effort (`META_REASONING_EFFORT`), because Muse reasoning counts against each call's output cap. It records its own spend in `usage_ledger` under its own name, and it **does not stand in for Anthropic**: an API that agrees with OpenAI about every part of the request proves nothing about the abstraction.
 
 ---
 
@@ -1081,7 +1083,7 @@ Ordering logic: **skeleton → identity → data path with security → single-s
 - **Deployables:** two — `web` (Next.js) and `api` (FastAPI containing agent, DAL, connectors, catalog, knowledge).
 - **Azure services:** Container Apps, Postgres Flexible (+pgvector), Key Vault, Blob, ACR, App Insights/Log Analytics (capped), Entra External ID. Nothing else. Models come from OpenAI's and Anthropic's own APIs; Azure OpenAI is deferred to Phase 12 (D-017).
 - **Databases:** one platform Postgres (shared schema, org_id + RLS). Customer DBs are theirs, reached read-only.
-- **LLM abstraction:** one `LLMProvider` protocol, role→tier→model registry, OpenAI + Anthropic, static fallback, full metering.
+- **LLM abstraction:** one `LLMProvider` protocol, role→tier→model registry, OpenAI + Anthropic (and Meta's Model API through the OpenAI adapter, D-069), static fallback, full metering.
 - **Agent:** hand-rolled bounded state machine (Intake→Context→Plan→Execute/Observe/Reflect→Validate→Compose), findings-cite-executions evidence model, deterministic capability check, hybrid critic, durable event log + SSE.
 - **Connectors:** in-process package behind a strict interface + capability descriptor; PostgreSQL and SQL Server; `ValidatedQuery` type gate.
 - **RAG:** Blob originals → chunked → pgvector + tsvector, org-scoped; semantic definitions and verified queries as separate, structured, catalog-validated grounding.
